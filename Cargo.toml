@@ -1,0 +1,11 @@
+[package]
+name = "lightflow"
+version = "0.1.0"
+edition = "2024"
+description = "Lightweight AI pipelines built by agents and directed by humans."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/lightjunction/LightFlow"
+keywords = ["ai", "pipeline", "workflow", "backend", "openapi"]
+categories = ["web-programming", "development-tools"]
+
+[dependencies]
