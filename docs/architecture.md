@@ -2,6 +2,14 @@
 
 LightFlow is a backend-only AI workflow system. Its core design treats pipeline structure as source code, not serialized canvas state.
 
+## Product Thesis
+
+ComfyUI is optimized for human-visible experimentation. That is valuable during feedback: a person can inspect an image, move a slider, change a parameter, and quickly decide whether the result is better.
+
+The bottleneck is the workflow construction phase. Large visual graphs often encode logic that maps cleanly to code: branching, data conversion, typed function calls, model loading, reusable subroutines, and validation. Agents are better suited to that construction work than to visual taste judgment.
+
+LightFlow separates those responsibilities. Agents author and repair workflows as Rust files. Humans direct goals and keep the immediate feedback loop where visual judgment matters most.
+
 ## Concept Model
 
 Node:
