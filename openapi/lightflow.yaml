@@ -2,8 +2,484 @@ openapi: 3.1.0
 info:
   title: LightFlow API
   version: 0.1.0
-  description: Backend API contract placeholder for LightFlow.
+  description: Backend API contract for Linux-hosted LightFlow workflow runs.
 servers:
   - url: http://localhost:8080
-paths: {}
-components: {}
+paths:
+  /workflows:
+    get:
+      summary: List workflow assets
+      operationId: listWorkflows
+      responses:
+        "200":
+          description: Workflow assets discovered from Rust files.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetList"
+  /nodes:
+    get:
+      summary: List node assets
+      operationId: listNodes
+      responses:
+        "200":
+          description: Node assets discovered from Rust files.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetList"
+  /compositions:
+    get:
+      summary: List composition assets
+      operationId: listCompositions
+      responses:
+        "200":
+          description: Composition assets discovered from Rust files.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetList"
+  /models:
+    get:
+      summary: List model assets
+      operationId: listModels
+      responses:
+        "200":
+          description: Model assets discovered from Rust files.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetList"
+  /runs:
+    post:
+      summary: Plan a workflow run
+      description: Creates a LightFlow run record under the XDG state directory. Workflow execution uses CortexFS paths under /ctx.
+      operationId: createRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRunRequest"
+      responses:
+        "202":
+          description: Run accepted and planned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunManifest"
+        "400":
+          description: Invalid run request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /runs/{run_id}:
+    get:
+      summary: Read a workflow run record
+      operationId: getRun
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Run record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunManifest"
+        "404":
+          description: Run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /runs/{run_id}/steps/{step_id}/submit:
+    post:
+      summary: Submit a run step request through CortexFS
+      description: Commits an explicit JSON request body to the CortexFS inbox, or renders one from stored run inputs when the workflow step declares a request template and no body is supplied.
+      operationId: submitRunStep
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: step_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Step request committed to CortexFS inbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunManifest"
+  /runs/{run_id}/refresh:
+    post:
+      summary: Refresh run state from CortexFS outboxes
+      operationId: refreshRun
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated run manifest.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunManifest"
+  /runs/{run_id}/events:
+    get:
+      summary: Read run events as JSONL
+      operationId: getRunEvents
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Append-only event stream.
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+  /runs/{run_id}/trace:
+    get:
+      summary: Read run trace as JSONL
+      operationId: getRunTrace
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Append-only technical trace stream.
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+components:
+  schemas:
+    AssetList:
+      type: object
+      additionalProperties: false
+      required:
+        - assets
+      properties:
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetRecord"
+    AssetRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - meta
+        - source_path
+        - builtin
+      properties:
+        meta:
+          $ref: "#/components/schemas/AssetMeta"
+        source_path:
+          type: string
+        builtin:
+          type: boolean
+    AssetMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - kind
+        - description
+        - stability
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        kind:
+          type: string
+          enum:
+            - model
+            - node
+            - composition
+            - workflow
+        description:
+          type: string
+        stability:
+          type: string
+          enum:
+            - draft
+            - experimental
+            - stable
+    CreateRunRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - workflow_asset_id
+      properties:
+        run_id:
+          type: string
+          description: Optional caller-provided run id. Must be one path segment.
+        workflow_asset_id:
+          type: string
+          description: Self-contained workflow asset id under lightflow/workflows or src/builtins/workflows.
+        inputs:
+          type: object
+          description: Workflow-specific input object.
+          additionalProperties: true
+    RunManifest:
+      type: object
+      additionalProperties: false
+      required:
+        - run_id
+        - workflow_asset_id
+        - steps
+      properties:
+        run_id:
+          type: string
+        workflow_asset_id:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunStepRecord"
+    RunStepRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - step_id
+        - node_or_composition_id
+        - cortex
+        - status
+        - output_artifacts
+      properties:
+        step_id:
+          type: string
+          description: LightFlow step id used as the CortexFS request id.
+        node_or_composition_id:
+          type: string
+        cortex:
+          $ref: "#/components/schemas/CortexExchange"
+        status:
+          type: string
+          enum:
+            - planned
+            - submitted
+            - succeeded
+            - failed
+        submitted_request_path:
+          type:
+            - string
+            - "null"
+        response_path:
+          type:
+            - string
+            - "null"
+        error_path:
+          type:
+            - string
+            - "null"
+        provider_id:
+          type:
+            - string
+            - "null"
+        model_id:
+          type:
+            - string
+            - "null"
+        route_decision:
+          type:
+            - string
+            - "null"
+        fingerprint:
+          type:
+            - string
+            - "null"
+        audit_correlation:
+          type:
+            - string
+            - "null"
+        output_artifacts:
+          type: array
+          items:
+            type: string
+    CortexExchange:
+      type: object
+      additionalProperties: false
+      required:
+        - target
+        - request_id
+        - inbox_dir
+        - outbox_dir
+        - staged_request
+        - commit_request
+        - response
+        - error
+        - fingerprint
+        - route_metadata
+      properties:
+        target:
+          $ref: "#/components/schemas/CortexTarget"
+        request_id:
+          type: string
+        inbox_dir:
+          type: string
+        outbox_dir:
+          type: string
+        staged_request:
+          type: string
+          description: Temporary file path written before atomic rename.
+        commit_request:
+          type: string
+          description: Final *.req.json path whose rename triggers CortexFS execution.
+        response:
+          type: string
+        error:
+          type: string
+        fingerprint:
+          type: string
+        route_metadata:
+          type:
+            - string
+            - "null"
+    CortexSubmitted:
+      type: object
+      additionalProperties: false
+      required:
+        - request_path
+        - response
+        - error
+        - fingerprint
+        - route_metadata
+      properties:
+        request_path:
+          type: string
+        response:
+          type: string
+        error:
+          type: string
+        fingerprint:
+          type: string
+        route_metadata:
+          type:
+            - string
+            - "null"
+    CortexOutcome:
+      oneOf:
+        - $ref: "#/components/schemas/CortexResponseOutcome"
+        - $ref: "#/components/schemas/CortexErrorOutcome"
+    CortexResponseOutcome:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - body
+        - fingerprint
+        - route_metadata
+      properties:
+        status:
+          const: response
+        body:
+          type: string
+        fingerprint:
+          type:
+            - string
+            - "null"
+        route_metadata:
+          type:
+            - string
+            - "null"
+    CortexErrorOutcome:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - body
+        - fingerprint
+        - route_metadata
+      properties:
+        status:
+          const: error
+        body:
+          type: string
+        fingerprint:
+          type:
+            - string
+            - "null"
+        route_metadata:
+          type:
+            - string
+            - "null"
+    CortexTarget:
+      oneOf:
+        - $ref: "#/components/schemas/CortexApiTarget"
+        - $ref: "#/components/schemas/CortexToolTarget"
+        - $ref: "#/components/schemas/CortexThreadTarget"
+    CortexApiTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - format
+      properties:
+        kind:
+          const: api
+        format:
+          type: string
+          enum:
+            - openai.chat
+            - openai.responses
+            - anthropic.messages
+            - google.generate_content
+    CortexToolTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - tool_id
+      properties:
+        kind:
+          const: tool
+        tool_id:
+          type: string
+    CortexThreadTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - thread_id
+      properties:
+        kind:
+          const: thread
+        thread_id:
+          type: string
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          type: string

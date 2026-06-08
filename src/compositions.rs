@@ -1,3 +1,11 @@
-//! Composition modules.
+//! Engine support for composition assets.
 //!
-//! A composition is represented by a single Rust file.
+//! Project composition assets live under `lightflow/compositions/*.rs`.
+
+use crate::asset::{AssetError, AssetKind, AssetRecord, discover_assets};
+use std::path::Path;
+
+/// Discover project and built-in composition assets.
+pub fn discover(root: &Path) -> Result<Vec<AssetRecord>, AssetError> {
+    discover_assets(root, AssetKind::Composition)
+}

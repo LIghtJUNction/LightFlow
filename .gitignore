@@ -1,1 +1,4 @@
 /target
+
+# Optional project-local override only; default runtime paths follow XDG.
+.lightflow/
