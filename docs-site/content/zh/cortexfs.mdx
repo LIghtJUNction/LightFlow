@@ -1,0 +1,108 @@
+---
+title: CortexFS 集成
+description: LightFlow 如何通过 /ctx 与 CortexFS 协作。
+---
+
+# CortexFS 集成
+
+CortexFS 是 LightFlow 的 Linux execution substrate。LightFlow 不把它当成可选 backend，而是把 `/ctx` 作为本地执行面的默认约定。
+
+## 责任边界
+
+LightFlow 负责：
+
+- 扫描和验证 asset
+- 解析 workflow
+- 规划 run
+- 写 XDG run state
+- 暴露 CLI 和 OpenAPI 控制面
+- 记录 CortexFS correlation path
+
+CortexFS 负责：
+
+- provider 和 model 视图
+- API format execution
+- tool 和 MCP invocation
+- thread state
+- policy enforcement
+- route decision
+- audit stream
+- fingerprint 和 outbox materialization
+
+## 默认 mount point
+
+默认 mount point：
+
+```text
+/ctx
+```
+
+当前 Linux 用户 home：
+
+```bash
+export CTX_HOME="/ctx/home/$(id -u)"
+```
+
+测试或 sandbox 可以通过环境变量覆盖：
+
+```bash
+export LIGHTFLOW_CTX_MOUNT=/tmp/fake-ctx
+export LIGHTFLOW_CTX_UID=1000
+```
+
+## API exchange
+
+一个 `openai.chat` step 会规划这些路径：
+
+```text
+/ctx/home/<uid>/api/openai.chat/inbox/<step_id>.tmp
+/ctx/home/<uid>/api/openai.chat/inbox/<step_id>.req.json
+/ctx/home/<uid>/api/openai.chat/outbox/<step_id>.resp.json
+/ctx/home/<uid>/api/openai.chat/outbox/<step_id>.error
+/ctx/home/<uid>/api/openai.chat/outbox/<step_id>.fingerprint
+/ctx/home/<uid>/api/openai.chat/outbox/<step_id>.route.json
+```
+
+LightFlow 写入 `*.tmp`，同步文件，然后 rename 到 `*.req.json`。CortexFS 监听最终 request 文件，并在 outbox 里产生结果。
+
+## Tool exchange
+
+Tool step 使用：
+
+```text
+/ctx/tool/<tool_id>/invoke/inbox/<step_id>.req.json
+/ctx/tool/<tool_id>/invoke/outbox/<step_id>.resp.json
+```
+
+Tool step 不声明 API route metadata，因为它不是 provider routing 表面。
+
+## Thread exchange
+
+Thread step 使用当前用户 home 下的 thread inbox：
+
+```text
+/ctx/home/<uid>/thread/<thread_id>/inbox/<step_id>.req.json
+```
+
+LightFlow 只记录 workflow step 和文件路径，thread state 由 CortexFS 管理。
+
+## Model resolution
+
+LightFlow workflow 使用 model alias：
+
+```text
+llm.planner
+image.base
+embedding.text
+```
+
+可用模型、provider、route 的真实状态来自 CortexFS，例如：
+
+```text
+/ctx/home/<uid>/model/
+/ctx/home/<uid>/route/<format>/
+/ctx/provider/<provider_id>/model/
+/ctx/model/
+```
+
+如果某个概念已经属于 CortexFS，LightFlow 应该集成它，而不是创建平行实现。

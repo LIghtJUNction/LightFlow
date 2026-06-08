@@ -1,0 +1,110 @@
+---
+title: 数据布局
+description: LightFlow 仓库数据、运行数据、缓存和提交策略。
+---
+
+# 数据布局
+
+LightFlow 把代码、项目资产、运行状态、缓存和外部大文件严格分开。这个分离是为了让 agent 修改 workflow 时不会碰到 engine source，也不会把本地运行输出误提交到 Git。
+
+## 仓库内数据
+
+```text
+src/                     # LightFlow engine source
+src/builtins/            # engine 自带的 built-in asset
+lightflow/               # 项目资产
+lightflow/models/        # model alias 和 resolver hints
+lightflow/nodes/         # node asset
+lightflow/compositions/  # composition asset
+lightflow/workflows/     # workflow asset
+lightflow/presets/       # named parameter sets
+lightflow/policies/      # routing/sandbox/resource/approval policy data
+lightflow/runs/          # committed schemas/examples only
+openapi/                 # API contract
+cortexfs/                # CortexFS submodule
+docs-site/               # Nextra 文档站
+```
+
+`src/` 和 `lightflow/` 的分离非常重要。`src/` 是引擎实现，`lightflow/` 是项目 workflow。一个 agent 在构建业务 pipeline 时，默认应该改 `lightflow/`，而不是改 `src/`。
+
+## XDG 运行数据
+
+真实运行状态使用 XDG Base Directory：
+
+```text
+$XDG_CONFIG_HOME/lightflow/
+$XDG_STATE_HOME/lightflow/
+$XDG_CACHE_HOME/lightflow/
+$XDG_RUNTIME_DIR/lightflow/
+```
+
+默认 fallback：
+
+```text
+~/.config/lightflow/
+~/.local/state/lightflow/
+~/.cache/lightflow/
+$XDG_RUNTIME_DIR/lightflow/
+```
+
+如果 `$XDG_RUNTIME_DIR` 不存在，可以使用私有临时目录，但应保持 `0700` 权限。
+
+## Run 目录
+
+一次 run 的状态位于：
+
+```text
+$XDG_STATE_HOME/lightflow/runs/<run_id>/
+```
+
+内容包括：
+
+```text
+manifest.json
+request.json
+resolved_workflow.json
+events.jsonl
+trace.jsonl
+outputs/
+```
+
+`manifest.json` 是稳定摘要，`request.json` 是原始请求，`resolved_workflow.json` 是创建 run 时解析出的 workflow definition。这样即使之后 workflow asset 被修改，已有 run 仍然能解释当时执行的结构。
+
+## Model 权重
+
+`lightflow/models/*.rs` 只描述 alias、capability、provider hints、artifact expectations、license notes。真实权重不应该提交到仓库。
+
+推荐位置：
+
+- Hugging Face cache
+- 用户配置的 model directory
+- provider-managed store
+- CortexFS 暴露的 user-visible model view
+
+Workflow 应依赖 alias，例如 `llm.planner`，而不是依赖 `/home/user/models/foo.bin`。
+
+## 可提交内容
+
+应该提交：
+
+- Rust engine source
+- self-contained Rust asset files
+- OpenAPI contract
+- small fixtures
+- documentation
+- docs-site source and lockfile
+
+不应该提交：
+
+- `docs-site/node_modules/`
+- `docs-site/.next/`
+- `docs-site/out/`
+- model weights
+- real run outputs
+- local secrets
+- generated cache
+- runtime sockets and locks
+
+## 为什么不用 repo-local `.lightflow/`
+
+默认不使用仓库内 `.lightflow/`，因为真实 run state 通常是本机状态，不属于项目源代码。仓库内 `.lightflow/` 只适合明确的测试或 sandbox override。

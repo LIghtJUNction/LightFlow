@@ -1,0 +1,130 @@
+---
+title: Workflow DSL
+description: 当前 workflow builder chain 的语义、限制和演进方向。
+---
+
+# Workflow DSL
+
+当前 LightFlow 的 workflow DSL 是一个受限的 Rust builder chain。它的目标不是让 Rust 代码任意执行，而是让 backend 可以静态提取 workflow definition。
+
+## 基本形状
+
+```rust
+pub fn define() -> WorkflowDef {
+    workflow(META.id)
+        .input_schema("schemas/text_plan.input.json")
+        .output_schema("schemas/text_plan.output.json")
+        .required_model("llm.planner")
+        .api_step("draft", "node.llm_prompt", "openai.chat")
+        .openai_chat_input("llm.planner", "prompt")
+}
+```
+
+当前 parser 支持：
+
+- `workflow(...)`
+- `.input_schema(...)`
+- `.output_schema(...)`
+- `.required_model(...)`
+- `.api_step(...)`
+- `.tool_step(...)`
+- `.thread_step(...)`
+- `.openai_chat_input(...)`
+
+参数必须是字符串字面量，或 `META.id`。这让 `src/asset.rs` 可以用 `syn` 解析 AST，而不是执行 asset 代码。
+
+## API step
+
+```rust
+.api_step("draft", "node.llm_prompt", "openai.chat")
+```
+
+含义：
+
+- `draft` 是 workflow step id，也是 CortexFS request id。
+- `node.llm_prompt` 是被这个 step 使用的 node 或 composition。
+- `openai.chat` 是 CortexFS API format。
+
+规划后会生成：
+
+```text
+/ctx/home/<uid>/api/openai.chat/inbox/draft.req.json
+/ctx/home/<uid>/api/openai.chat/outbox/draft.resp.json
+```
+
+## Tool step
+
+```rust
+.tool_step("read_context", "node.read_context", "filesystem.read")
+```
+
+Tool step 映射到 CortexFS tool invoke surface：
+
+```text
+/ctx/tool/filesystem.read/invoke/inbox/read_context.req.json
+```
+
+## Thread step
+
+```rust
+.thread_step("append_turn", "node.thread_message", "design-review")
+```
+
+Thread step 映射到用户 thread inbox：
+
+```text
+/ctx/home/<uid>/thread/design-review/inbox/append_turn.req.json
+```
+
+## Request template
+
+`openai_chat_input` 是当前唯一内置 request template：
+
+```rust
+.openai_chat_input("llm.planner", "prompt")
+```
+
+它要求：
+
+- step target 是 `openai.chat`
+- `llm.planner` 已出现在 `required_models`
+- run inputs 中存在 string field `prompt`
+
+submit step 时如果没有提供 explicit body，LightFlow 会渲染：
+
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "..."
+    }
+  ]
+}
+```
+
+## 当前限制
+
+当前 DSL 还不表达：
+
+- step 输入输出引用
+- DAG dependency
+- 条件分支
+- retry policy
+- resource hints
+- streaming output
+- artifact naming
+- schema validation
+- model alias 到 route context 的完整映射
+
+这些限制是有意保守。先把静态可读、可预览、可提交的核心路径做稳定，再扩展表达力。
+
+## 演进原则
+
+扩展 DSL 时应保持：
+
+- agent 能看懂一个 asset 文件。
+- backend 不需要执行任意 Rust 代码才能获得 definition。
+- API response 能表达 workflow public contract。
+- preview 能发现尽可能多的错误。
+- 复杂能力优先显式建模，不藏在 magic runtime 里。

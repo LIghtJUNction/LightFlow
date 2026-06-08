@@ -1,0 +1,73 @@
+---
+title: Workflow DSL
+description: Current workflow builder chain semantics, limits, and future direction.
+---
+
+# Workflow DSL
+
+The current workflow DSL is a deliberately limited Rust builder chain. It favors static extraction over arbitrary runtime behavior.
+
+## Supported Calls
+
+- `workflow(...)`
+- `.input_schema(...)`
+- `.output_schema(...)`
+- `.required_model(...)`
+- `.api_step(...)`
+- `.tool_step(...)`
+- `.thread_step(...)`
+- `.openai_chat_input(...)`
+
+Arguments must be string literals or `META.id`.
+
+## API Step
+
+```rust
+.api_step("draft", "node.llm_prompt", "openai.chat")
+```
+
+This maps to:
+
+```text
+/ctx/home/<uid>/api/openai.chat/inbox/draft.req.json
+/ctx/home/<uid>/api/openai.chat/outbox/draft.resp.json
+```
+
+## Tool Step
+
+```rust
+.tool_step("read_context", "node.read_context", "filesystem.read")
+```
+
+This maps to CortexFS tool invocation paths.
+
+## Thread Step
+
+```rust
+.thread_step("append_turn", "node.thread_message", "design-review")
+```
+
+This maps to a user-visible CortexFS thread inbox.
+
+## Request Template
+
+```rust
+.openai_chat_input("llm.planner", "prompt")
+```
+
+If the caller does not provide an explicit submit body, LightFlow renders an OpenAI chat request from `inputs.prompt`.
+
+## Current Limits
+
+The DSL does not yet express:
+
+- step output references
+- DAG dependencies
+- branches
+- retries and timeouts
+- streaming outputs
+- artifact naming
+- complete schema validation
+- complete route context mapping for model aliases
+
+These limits keep preview deterministic while the core backend contract stabilizes.

@@ -2,3 +2,8 @@
 
 # Optional project-local override only; default runtime paths follow XDG.
 .lightflow/
+
+# Nextra documentation site dependencies and build outputs.
+docs-site/node_modules/
+docs-site/.next/
+docs-site/out/

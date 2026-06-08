@@ -1,0 +1,64 @@
+---
+title: LightFlow Overview
+description: Product position, design goals, and system boundaries for LightFlow.
+---
+
+# LightFlow Overview
+
+LightFlow is a backend-first AI workflow system. It treats pipelines as reviewable Rust assets that agents and engineers can edit, instead of making a visual canvas the source of truth.
+
+<img src="../architecture-overview.svg" alt="LightFlow architecture overview" />
+
+## Reading Path
+
+If you are new to the project, read in this order:
+
+1. [Core Concepts](/en/concepts/) for the vocabulary.
+2. [Architecture](/en/architecture/) for the module boundaries.
+3. [Asset Model](/en/assets/) and [Workflow DSL](/en/workflow-dsl/) for authoring rules.
+4. [Runs and State](/en/runs/) and [Execution Lifecycle](/en/lifecycle/) for the runtime path.
+5. [CortexFS Integration](/en/cortexfs/) for the execution substrate boundary.
+6. [Roadmap](/en/roadmap/) for the next engineering priorities.
+
+## Product Thesis
+
+ComfyUI is excellent at human feedback loops: inspect output, move a slider, change a seed, update a prompt, and judge whether the result improved. LightFlow keeps that human judgment loop, but moves workflow construction into code.
+
+Workflow construction is often software engineering:
+
+- reading provider and model documentation
+- resolving models and capabilities
+- validating input and output shapes
+- building reusable modules
+- exposing stable API contracts
+- recording runs in an inspectable format
+
+LightFlow lets agents perform that engineering work while humans direct goals, constraints, and review.
+
+## Architecture Goals
+
+The first goal is not a full scheduler. The first goal is a small, verifiable backend foundation:
+
+- discover project and built-in Rust assets
+- preview workflow runs without writing state
+- create XDG-backed run manifests
+- submit step requests through CortexFS atomic file semantics
+- refresh manifest state from CortexFS outboxes
+- expose a framework-independent API service usable by CLI and future HTTP adapters
+
+## Repository Zones
+
+- `src/` is engine code.
+- `lightflow/` is versioned project asset code.
+- `cortexfs/` is the Linux execution substrate submodule.
+- `openapi/` is the external control-plane contract.
+- `docs-site/` is this Bun + Nextra documentation site.
+
+## Design Principles
+
+- Workflows are code assets, not serialized canvas state.
+- Metadata and definition live in one `.rs` file.
+- Project assets stay separate from engine source.
+- LightFlow owns workflow authorship and run structure.
+- CortexFS owns provider, model, tool, MCP, thread, policy, and audit surfaces.
+- Runtime state follows XDG directories and stays out of Git.

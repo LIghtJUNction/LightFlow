@@ -1,0 +1,36 @@
+---
+title: FAQ
+description: LightFlow 的常见设计问题。
+---
+
+# FAQ
+
+## 为什么不用可视化画布？
+
+LightFlow 不反对可视化反馈。它只是不把 workflow authorship 的核心模型建成画布。复杂 pipeline 通常包含控制流、类型、复用、验证和 API contract，这些更适合代码和 review。
+
+未来可以有 UI，但 UI 应该调用 backend/OpenAPI，而不是成为 source of truth。
+
+## 为什么 asset 是 Rust 文件？
+
+目标用户包括 agent 和工程师。Rust 文件能承载类型、函数、metadata、review diff 和 crate 级工具链。当前 parser 只读取受限 AST，因此 asset 仍然可以被静态发现。
+
+## 为什么 metadata 不放 JSON？
+
+Sidecar JSON 会制造同步问题。LightFlow 让一个 asset 文件拥有 metadata 和 definition，方便复制、删除、review 和 agent 修改。
+
+## CortexFS 是可选的吗？
+
+不是。Linux runtime path 要求 CortexFS。LightFlow 不直接实现 provider、model、tool、thread、policy、audit，而是通过 `/ctx` 集成。
+
+## 可以在非 Linux 上用吗？
+
+非 Linux client 可以通过 HTTP/OpenAPI 访问 Linux-hosted LightFlow server。非 Linux 本地 runtime 不是当前设计目标。
+
+## 为什么真实 run 不放仓库？
+
+Run output、trace、cache、socket、lock、secret 都是本机状态。它们应该走 XDG state/cache/runtime，而不是污染项目资产。
+
+## 为什么现在没有 scheduler？
+
+当前优先级是把可发现、可预览、可创建、可提交、可刷新的核心路径做稳定。Scheduler 应该建立在这条路径上，而不是替代它。

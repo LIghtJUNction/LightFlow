@@ -1,0 +1,61 @@
+---
+title: GitHub Pages Deployment
+description: Deploy the Bun + Nextra documentation site to GitHub Pages.
+---
+
+# GitHub Pages Deployment
+
+The docs site lives in:
+
+```text
+docs-site/
+```
+
+It uses Bun, Nextra, Next static export, and GitHub Actions.
+
+## Local Build
+
+```bash
+cd docs-site
+bun install
+bun run build
+```
+
+Static output:
+
+```text
+docs-site/out/
+```
+
+## Project Pages Base Path
+
+Project Pages usually serve at:
+
+```text
+https://<owner>.github.io/<repo>/
+```
+
+When `GITHUB_ACTIONS=true`, `next.config.mjs` sets `basePath` to the repository name, such as `/LightFlow`.
+
+## Workflow
+
+The workflow is:
+
+```text
+.github/workflows/docs-pages.yml
+```
+
+It installs dependencies, builds the static site, uploads `docs-site/out/`, and deploys to Pages.
+
+Set repository Pages source to `GitHub Actions`.
+
+## Multi-Language Routes
+
+The exported site serves:
+
+```text
+/zh/
+/en/
+```
+
+The root page lets users choose a language. No middleware is required, so this works with static export.

@@ -1,0 +1,59 @@
+---
+title: CLI
+description: Current LightFlow CLI commands and shell workflows.
+---
+
+# CLI
+
+The CLI is a small JSON command surface around `ApiService`.
+
+## Assets
+
+```bash
+cargo run -- assets workflows
+cargo run -- assets nodes
+cargo run -- assets compositions
+cargo run -- assets models
+```
+
+## Runs
+
+```bash
+cargo run -- run preview workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
+cargo run -- run create workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
+cargo run -- run list
+cargo run -- run get run-001
+cargo run -- run status run-001
+cargo run -- run request run-001
+cargo run -- run workflow run-001
+```
+
+## Submit
+
+With request template:
+
+```bash
+cargo run -- run submit run-001 draft
+```
+
+With explicit JSON:
+
+```bash
+cargo run -- run submit run-001 draft '{"messages":[{"role":"user","content":"Draft a plan"}]}'
+```
+
+From stdin:
+
+```bash
+jq -n '{messages:[{role:"user",content:"Draft a plan"}]}' | cargo run -- run submit run-001 draft -
+```
+
+## Refresh and Streams
+
+```bash
+cargo run -- run refresh run-001
+cargo run -- run events run-001
+cargo run -- run trace run-001
+```
+
+The CLI fails fast on unknown arguments, duplicate flags, and missing flag values.

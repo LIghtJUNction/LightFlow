@@ -1,0 +1,56 @@
+---
+title: Core Concepts
+description: Node, Composition, Workflow, Model, Run, and CortexFS concepts.
+---
+
+# Core Concepts
+
+## Node
+
+A node is the smallest reusable pipeline unit. Project nodes live in:
+
+```text
+lightflow/nodes/*.rs
+```
+
+Today a node contains metadata. Later it can carry input/output schema, execution constraints, resource requirements, and UI hints.
+
+## Composition
+
+A composition is a reusable structure made from nodes or other compositions. It should make common pipeline patterns explicit without turning them into hidden runtime magic.
+
+```text
+lightflow/compositions/*.rs
+```
+
+## Workflow
+
+A workflow is the top-level pipeline definition. It declares public input, public output, required model aliases, and CortexFS-backed steps.
+
+```text
+lightflow/workflows/*.rs
+```
+
+## Model
+
+A model asset does not store model weights. It describes an alias, capabilities, provider hints, artifact expectations, and license notes.
+
+```text
+lightflow/models/*.rs
+```
+
+Workflows depend on aliases such as `llm.planner`, not raw local paths.
+
+## Run
+
+A run is LightFlow-owned state for one workflow request. It records workflow structure, step status, CortexFS request paths, response paths, error paths, route metadata, and fingerprints.
+
+Real run state belongs under:
+
+```text
+$XDG_STATE_HOME/lightflow/runs/<run_id>/
+```
+
+## CortexFS
+
+CortexFS is the Linux execution substrate. LightFlow uses `/ctx` for provider, model, tool, MCP, thread, policy, and audit surfaces instead of duplicating them.

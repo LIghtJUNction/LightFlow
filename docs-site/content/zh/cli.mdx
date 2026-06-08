@@ -1,0 +1,141 @@
+---
+title: CLI 使用
+description: LightFlow 当前 CLI 命令和典型 shell 工作流。
+---
+
+# CLI 使用
+
+LightFlow CLI 是一个小而明确的 JSON command surface。它不启动后台服务，而是直接调用 `ApiService`。
+
+## Asset commands
+
+列出 workflow：
+
+```bash
+cargo run -- assets workflows
+```
+
+列出 node：
+
+```bash
+cargo run -- assets nodes
+```
+
+列出 composition：
+
+```bash
+cargo run -- assets compositions
+```
+
+列出 model：
+
+```bash
+cargo run -- assets models
+```
+
+## Run preview
+
+Preview 不写 state，适合 agent 和脚本先检查 workflow 是否 ready：
+
+```bash
+cargo run -- run preview workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
+```
+
+返回内容包含：
+
+- planned `run_id`
+- workflow asset record
+- parsed workflow definition
+- validation issues
+- planned CortexFS paths
+- optional rendered request
+
+## Create run
+
+创建 run：
+
+```bash
+cargo run -- run create workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
+```
+
+如果不传 `--id`，LightFlow 会生成一个安全的 run id。
+
+## Inspect run
+
+```bash
+cargo run -- run list
+cargo run -- run get run-001
+cargo run -- run status run-001
+cargo run -- run request run-001
+cargo run -- run workflow run-001
+```
+
+## Submit step
+
+使用 workflow request template 自动渲染 body：
+
+```bash
+cargo run -- run submit run-001 draft
+```
+
+显式传入 JSON：
+
+```bash
+cargo run -- run submit run-001 draft '{"messages":[{"role":"user","content":"Draft a plan"}]}'
+```
+
+从文件读取：
+
+```bash
+cargo run -- run submit run-001 draft @request.json
+```
+
+从 stdin 读取：
+
+```bash
+jq -n '{messages:[{role:"user",content:"Draft a plan"}]}' | cargo run -- run submit run-001 draft -
+```
+
+## Refresh and streams
+
+刷新 CortexFS outbox：
+
+```bash
+cargo run -- run refresh run-001
+```
+
+读取 event stream：
+
+```bash
+cargo run -- run events run-001
+```
+
+读取 technical trace：
+
+```bash
+cargo run -- run trace run-001
+```
+
+## CortexFS path helpers
+
+查看 API exchange path：
+
+```bash
+cargo run -- ctx api openai.chat draft
+```
+
+查看 tool exchange path：
+
+```bash
+cargo run -- ctx tool filesystem.read read-file
+```
+
+查看 thread exchange path：
+
+```bash
+cargo run -- ctx thread design-review turn-1
+```
+
+## CLI 约束
+
+CLI 会对未知参数、重复 flag、缺失 flag value 和多余参数 fail fast。这个行为对 shell 脚本很重要，因为它避免了拼错参数后静默运行。

@@ -1,0 +1,88 @@
+---
+title: 快速开始
+description: 使用 Bun 文档站和 LightFlow CLI 了解项目。
+---
+
+# 快速开始
+
+## 环境要求
+
+LightFlow 的 runtime 设计面向 Linux。当前仓库包含 Rust crate、CortexFS submodule、OpenAPI contract 和 Nextra 文档站。
+
+本地开发建议准备：
+
+- Rust stable toolchain
+- Bun 1.3+
+- Linux shell 环境
+- 可选：CortexFS mount at `/ctx`
+
+## 查看 LightFlow CLI
+
+从仓库根目录运行：
+
+```bash
+cargo run -- assets workflows
+cargo run -- assets nodes
+cargo run -- assets models
+```
+
+预览示例 workflow：
+
+```bash
+cargo run -- run preview workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
+```
+
+创建 run manifest：
+
+```bash
+cargo run -- run create workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
+```
+
+查看 run 状态：
+
+```bash
+cargo run -- run status run-001
+cargo run -- run request run-001
+cargo run -- run workflow run-001
+```
+
+## 运行文档站
+
+文档站位于 `docs-site/`，使用 Bun 和 Nextra。
+
+```bash
+cd docs-site
+bun install
+bun run dev
+```
+
+默认开发地址是：
+
+```text
+http://localhost:3000
+```
+
+构建静态站点：
+
+```bash
+cd docs-site
+bun run build
+```
+
+构建产物会输出到：
+
+```text
+docs-site/out/
+```
+
+## GitHub Pages
+
+仓库已包含 `.github/workflows/docs-pages.yml`。推送到 `main` 后，GitHub Actions 会：
+
+1. 安装 Bun。
+2. 在 `docs-site/` 执行 `bun install --frozen-lockfile`。
+3. 执行 `bun run build`。
+4. 上传 `docs-site/out/`。
+5. 部署到 GitHub Pages。
+
+首次使用时，需要在仓库设置里把 Pages source 设置为 `GitHub Actions`。

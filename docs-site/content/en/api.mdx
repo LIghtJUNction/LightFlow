@@ -1,0 +1,115 @@
+---
+title: OpenAPI Boundary
+description: LightFlow's HTTP/OpenAPI control-plane design.
+---
+
+# OpenAPI Boundary
+
+The OpenAPI file is:
+
+```text
+openapi/lightflow.yaml
+```
+
+It describes the external control plane for future UIs, CLIs, agents, and non-Linux clients.
+
+The implementation should keep a strict separation:
+
+- OpenAPI describes request and response shape.
+- HTTP handlers adapt transport concerns.
+- `ApiService` owns business behavior.
+- Asset parsing, run storage, and CortexFS submission stay below the API layer.
+
+## Asset Endpoints
+
+```http
+GET /workflows
+GET /nodes
+GET /compositions
+GET /models
+```
+
+Clients receive asset records. They do not parse Rust source.
+
+Asset records should include enough information for a UI or agent to make decisions:
+
+- stable id
+- title and description
+- source path
+- built-in versus project-owned status
+- tags or categories when available
+- validation status when the backend can compute it
+
+This lets a client list, filter, inspect, and select assets without depending on the internal Rust asset syntax.
+
+## Run Endpoints
+
+```http
+POST /runs/preview
+POST /runs
+GET /runs
+GET /runs/{run_id}
+GET /runs/{run_id}/status
+GET /runs/{run_id}/request
+GET /runs/{run_id}/workflow
+POST /runs/{run_id}/steps/{step_id}/submit
+POST /runs/{run_id}/refresh
+GET /runs/{run_id}/events
+GET /runs/{run_id}/trace
+```
+
+These map to framework-independent `ApiService` methods.
+
+The run surface is split by intent:
+
+- `preview` checks a workflow and plans paths without writing state.
+- `POST /runs` creates durable run state.
+- read endpoints expose manifest, request, workflow, status, events, and trace.
+- `submit` commits one step request to CortexFS.
+- `refresh` observes CortexFS outbox state and updates the manifest.
+
+This split matters because agents often need a dry-run path before committing state. It also keeps UI behavior predictable: creating a run and submitting a step are different actions.
+
+## Request Shape
+
+Run creation and preview should keep the original user inputs visible:
+
+```json
+{
+  "workflow_id": "workflow.text_plan",
+  "run_id": "run-001",
+  "inputs": {
+    "prompt": "Plan a migration"
+  }
+}
+```
+
+Step submission can either use the workflow's request template or provide an explicit body:
+
+```json
+{
+  "body": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Draft the plan"
+      }
+    ]
+  }
+}
+```
+
+## Error Model
+
+- `400`: invalid request or asset error
+- `404`: run, workflow, or step not found
+- `409`: conflict
+- `500`: I/O error
+
+Errors should be structured and stable. A client should be able to distinguish invalid input, missing resources, conflicting state, and backend I/O failure without scraping human-readable text.
+
+## Boundary Rule
+
+HTTP handlers should adapt requests and responses. They should not reimplement asset parsing, run storage, or CortexFS submission.
+
+That rule is what keeps the CLI and HTTP server aligned. If behavior is needed by both, it belongs in `ApiService` or below it, not in a route handler.

@@ -1,0 +1,123 @@
+---
+title: 执行生命周期
+description: 从 asset discovery 到 CortexFS outbox refresh 的完整生命周期。
+---
+
+# 执行生命周期
+
+LightFlow 当前没有复杂 scheduler。它先实现一个清晰的手动生命周期，适合 CLI、脚本、agent 和未来 HTTP server 复用。
+
+## 1. Discover
+
+`assets workflows|nodes|compositions|models` 会扫描项目资产和 built-in 资产：
+
+```bash
+cargo run -- assets workflows
+```
+
+扫描结果是 `AssetRecord`：
+
+- metadata
+- source path
+- builtin flag
+
+## 2. Preview
+
+Preview 解析 workflow，但不写状态：
+
+```bash
+cargo run -- run preview workflow.text_plan --inputs '{"prompt":"Plan a migration"}'
+```
+
+Preview 会返回：
+
+- planned run id
+- workflow asset record
+- workflow definition
+- validation issues
+- planned CortexFS paths
+- rendered request if available
+
+这一步适合 agent 在改 workflow 后做自检。
+
+## 3. Create
+
+Create 写入 XDG run state：
+
+```bash
+cargo run -- run create workflow.text_plan --id run-001 --inputs '{"prompt":"Plan a migration"}'
+```
+
+写入顺序：
+
+1. 拒绝已有 run directory。
+2. 写 `request.json`。
+3. 写 `resolved_workflow.json`。
+4. append `run.created` event。
+5. 原子写 `manifest.json`。
+
+如果 run directory 已存在，即使 manifest 缺失，也拒绝覆盖。这避免 crash 后误覆盖半成品 run。
+
+## 4. Submit
+
+Submit 把一个 step request 提交到 CortexFS inbox：
+
+```bash
+cargo run -- run submit run-001 draft
+```
+
+状态要求：
+
+- step 必须存在。
+- step 必须是 `planned`。
+- 如果不传 body，step 必须有 request template。
+
+提交后：
+
+- 写 `*.tmp`
+- sync
+- rename 到 `*.req.json`
+- step 状态变成 `submitted`
+- append `step.submitted`
+- append `cortex.request.committed`
+
+## 5. Refresh
+
+Refresh 读取 CortexFS outbox：
+
+```bash
+cargo run -- run refresh run-001
+```
+
+如果观察到 response：
+
+- step 状态变成 `succeeded`
+- 记录 response path
+- 记录 fingerprint
+- 解析 route metadata
+- append `step.succeeded`
+- append `cortex.response.observed`
+
+如果观察到 error：
+
+- step 状态变成 `failed`
+- 记录 error path
+- 记录 fingerprint
+- append `step.failed`
+- append `cortex.error.observed`
+
+## 6. Inspect
+
+可检查面：
+
+```bash
+cargo run -- run status run-001
+cargo run -- run events run-001
+cargo run -- run trace run-001
+```
+
+`events.jsonl` 给人和 UI 看，`trace.jsonl` 给调试和审计关联看。
+
+## 未来 scheduler 的位置
+
+未来 scheduler 不应该绕过这个生命周期。它应该自动化 preview/create/submit/refresh，而不是重写 run store 或 CortexFS 语义。

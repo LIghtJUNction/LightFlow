@@ -1,0 +1,106 @@
+---
+title: LightFlow 项目总览
+description: LightFlow 的产品定位、设计目标和系统边界。
+---
+
+# LightFlow 项目总览
+
+LightFlow 是一个 backend-first 的 AI workflow 系统。它把 pipeline 结构放进可读、可审、可由 agent 修改的 Rust asset 文件里，而不是先把 workflow 建模成画布上的节点和连线。
+
+<img src="../architecture-overview.svg" alt="LightFlow 架构总览图" />
+
+## 阅读路径
+
+如果你第一次看这个项目，建议按这个顺序读：
+
+1. [核心概念](/zh/concepts/)：先建立 Node、Composition、Workflow、Model、Run、CortexFS 的词汇。
+2. [系统架构](/zh/architecture/)：理解 `src/`、`lightflow/`、`cortexfs/`、`openapi/` 的边界。
+3. [资产模型](/zh/assets/) 和 [Workflow DSL](/zh/workflow-dsl/)：理解 agent 应该如何生成和修改 pipeline。
+4. [运行与状态](/zh/runs/) 和 [执行生命周期](/zh/lifecycle/)：理解 preview、create、submit、refresh 的完整链路。
+5. [CortexFS 集成](/zh/cortexfs/)：理解为什么 LightFlow 不自己实现 provider/tool/policy/audit。
+6. [路线图](/zh/roadmap/)：理解下一步应该先补哪些能力。
+
+## 核心判断
+
+ComfyUI 的强项是人类反馈循环：看输出、调参数、换 seed、改 prompt，然后马上判断结果是否更好。LightFlow 不否定这个循环，而是把另一个阶段拆出来：workflow 的搭建、修复、复用和审查。
+
+这些工作通常更像软件工程：
+
+- 读模型和 provider 文档
+- 安装或定位模型资产
+- 处理输入输出 shape
+- 编写条件分支、复用模块和验证逻辑
+- 把 workflow 暴露成稳定 API
+
+LightFlow 的设计目标是让 agent 处理这部分工程化工作，人类继续负责意图、约束和结果判断。
+
+## 架构目标
+
+LightFlow 的第一阶段目标不是完整执行引擎，而是稳定的后端骨架：
+
+- 资产可发现：project asset 和 built-in asset 都能扫描、排序、返回 API record。
+- Workflow 可预览：在不写运行状态的前提下，能解析定义、验证引用、规划 CortexFS path。
+- Run 可追踪：每次 run 都有 manifest、request、resolved workflow、events、trace。
+- 请求可提交：step request 通过 CortexFS 原子文件语义提交，不绕过 `/ctx`。
+- 结果可刷新：response、error、route metadata、fingerprint 回写到 LightFlow manifest。
+- API 可适配：CLI 和未来 HTTP server 都调用同一个 `ApiService`。
+
+这个目标刻意小，但覆盖了后续功能都要依赖的核心路径。
+
+## 项目不是什么
+
+LightFlow 当前不是前端画布，不是通用 provider SDK，也不是跨平台桌面 runtime。
+
+它优先面向 Linux 工作站和 Linux server，使用 XDG 目录、Unix 文件语义、`/ctx` CortexFS mount point、OpenAPI 边界和普通 shell 工具链。
+
+## 当前仓库形态
+
+仓库里有四类重要目录：
+
+- `src/`：LightFlow engine，包括 API service、asset 解析、run store、CortexFS 路径规划。
+- `lightflow/`：项目资产，包括 model、node、composition、workflow、preset、policy。
+- `cortexfs/`：作为 Linux execution substrate 的 CortexFS submodule。
+- `openapi/`：面向未来 HTTP server、CLI、UI 和外部 client 的 API contract。
+
+## 谁应该关心哪些部分
+
+Agent workflow author：
+
+- 主要读 `lightflow/` 下的 asset。
+- 使用 `cargo run -- run preview` 检查 workflow。
+- 修改 `workflow.define()`、model alias 和 request template。
+
+Runtime implementer：
+
+- 主要读 `src/api.rs`、`src/runs.rs`、`src/cortex.rs`。
+- 关注 run manifest、CortexFS path planning、submit/refresh 语义。
+
+API 或 UI implementer：
+
+- 主要读 `openapi/lightflow.yaml` 和 `src/api.rs`。
+- 不应该直接解析 Rust asset source。
+- 应该通过 backend endpoint 获取 workflow/node/model/run 状态。
+
+## 最小运行链路
+
+LightFlow 当前先把一条可检查的链路跑通：
+
+1. 扫描 `lightflow/**/*.rs` 资产。
+2. 解析 workflow 的 `META` 和 `define()`。
+3. 验证 workflow 引用的 model、node、composition。
+4. 生成 run preview，不写运行状态。
+5. 创建 run manifest 到 XDG state。
+6. 把 step request 原子提交到 CortexFS inbox。
+7. 从 CortexFS outbox 刷新 response、error、route 和 fingerprint。
+
+这个链路先于复杂 scheduler、UI 和 provider adapter，因为它定义了系统最关键的边界。
+
+## 设计原则
+
+- Workflow 是代码资产，不是序列化画布状态。
+- Asset 文件自包含：metadata 和 definition 放在同一个 `.rs` 文件里。
+- Engine source 和项目资产分离。
+- LightFlow 负责 workflow authorship 和 run structure。
+- CortexFS 负责 provider、model、tool、MCP、thread、policy 和 audit execution surface。
+- API 层先是 framework-independent service，HTTP adapter 可以后加。
+- 运行输出、trace、cache、socket 和本地状态遵循 XDG Base Directory，不提交到仓库。
