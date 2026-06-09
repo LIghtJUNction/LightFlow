@@ -32,6 +32,8 @@ LightFlow is Linux-first. The primary target is a Linux workstation or Linux ser
 
 LightFlow deeply integrates [CortexFS](cortexfs/) as its Linux execution substrate. CortexFS is vendored as a submodule, and `/ctx` is the default global CortexFS mount point for model, provider, tool, thread, policy, and audit access.
 
+LightFlow is not a Linux kernel subsystem candidate. CortexFS is a userspace/FUSE boundary; kernel work must be a small generic primitive, not LightFlow or `/ctx`. See [docs/kernel-policy.md](docs/kernel-policy.md).
+
 The frontend is intentionally out of scope for now.
 
 ## Scope
@@ -40,20 +42,20 @@ Current scope:
 
 - Rust backend project foundation
 - node / composition / workflow asset layout
-- OpenAPI-first backend contract direction
+- framework-independent API service plus CLI and HTTP adapters
+- OpenAPI-first backend contract for asset discovery and run records
 - Linux-first runtime layout and deployment assumptions
 - CortexFS submodule integration and `/ctx` mount-point convention
-- minimal compileable crate scaffold
+- runtime stream discovery and FlatBuffers snapshot framing
 
 Not in scope yet:
 
-- frontend UI
-- node runtime implementation
+- embedded agent loop or visual workflow editor
+- node runtime implementation beyond CortexFS request planning
 - workflow scheduler
 - model provider integrations
 - persistence layer
 - auth / permissions
-- concrete API handler logic
 - non-Linux local runtime support
 
 ## Project Shape
@@ -98,7 +100,7 @@ LightFlow keeps engine source, built-in assets, and project assets separate:
 - workflow assets live in `lightflow/workflows/*.rs`
 - every built-in or project asset file contains its own metadata and definition; metadata is not split into sidecar JSON
 - CortexFS is the required Linux execution substrate, exposed at `/ctx`
-- the API boundary is a framework-independent service first; HTTP/OpenAPI adapters come after the core model is stable
+- the API boundary is a framework-independent service first; CLI, HTTP, MCP, and stream adapters call that service instead of owning behavior
 - real run output, caches, traces, sockets, locks, and local state use XDG Base Directory paths and are not committed
 
 See [docs/data-layout.md](docs/data-layout.md) for the full layout and commit policy.
@@ -110,8 +112,13 @@ The binary is a small Linux-friendly JSON command surface:
 
 ```bash
 cargo run -- assets workflows
+cargo run -- run preview workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
 cargo run -- run create workflow.text_plan --id run-001 --inputs '{"prompt":"Write a migration plan"}'
+cargo run -- run list
 cargo run -- run get run-001
+cargo run -- run status run-001
+cargo run -- run request run-001
+cargo run -- run workflow run-001
 cargo run -- run submit run-001 draft
 cargo run -- run submit run-001 draft '{"model":"demo","messages":[]}'
 cargo run -- run submit run-001 draft @request.json
@@ -119,12 +126,37 @@ jq -n '{model:"demo",messages:[]}' | cargo run -- run submit run-001 draft -
 cargo run -- run refresh run-001
 cargo run -- run events run-001
 cargo run -- run trace run-001
+cargo run -- ctx abi
 cargo run -- ctx api openai.chat step-001
+cargo run -- ctx chan fengying
+cargo run -- ctx job translate.zh
+cargo run -- ctx hook daily-translate
+cargo run -- serve --port 5174
+cargo run -- stream info
+cargo run -- stream snapshot run-001 > run-001.fb
 ```
 
-It does not start a background service. It lists Rust assets, parses workflow definitions, writes XDG run manifests, commits CortexFS requests, and exposes event/trace JSONL for shell pipelines. If a workflow step declares a request template, `run submit <run> <step>` renders the CortexFS request from the stored run inputs; passing explicit JSON keeps full caller control.
+It does not start a background service. It lists Rust assets, parses workflow definitions, writes XDG run manifests, commits CortexFS requests, exposes CortexFS channel/job/hook path records, and exposes event/trace JSONL for shell pipelines. If a workflow step declares a request template, `run submit <run> <step>` renders the CortexFS request from the stored run inputs; passing explicit JSON keeps full caller control.
+
+The CLI fails fast on unexpected extra arguments, unknown flags, duplicate flags, and missing flag values so scripts do not accidentally run with ignored input.
 
 For tests or sandboxes, `LIGHTFLOW_CTX_MOUNT` and `LIGHTFLOW_CTX_UID` override the default `/ctx/home/<current uid>` CortexFS path.
+
+## HTTP Gateway
+
+`cargo run -- serve --port 5174` starts an Axum gateway for the OpenAPI run surface, MCP endpoint, runtime stream discovery, and static `LightFlowUI/dist` files when present.
+
+Examples:
+
+```bash
+curl http://127.0.0.1:5174/workflows
+curl http://127.0.0.1:5174/ctx/abi
+curl -X POST http://127.0.0.1:5174/runs/preview \
+  -H 'content-type: application/json' \
+  -d '{"workflow_asset_id":"workflow.text_plan","run_id":"run-001","inputs":{"prompt":"Write a migration plan"}}'
+curl -X POST http://127.0.0.1:5174/runs/run-001/steps/draft/submit
+curl http://127.0.0.1:5174/runs/run-001/events
+```
 
 ## Design Principle
 

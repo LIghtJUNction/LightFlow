@@ -20,6 +20,8 @@ Other systems can use LightFlow through a network API exposed by a Linux host. T
 
 CortexFS is the required Linux execution substrate. LightFlow assumes CortexFS is available as a submodule and mounted at `/ctx` on the target Linux host. LightFlow should use CortexFS for provider/model/tool/MCP/thread/policy/audit execution surfaces instead of building parallel local abstractions.
 
+CortexFS is a userspace/FUSE boundary for LightFlow. LightFlow is not a Linux kernel subsystem, and `/ctx` is not a proposed kernel ABI. Kernel-facing work is limited to separately justified generic Linux primitives, as defined in [kernel-policy.md](kernel-policy.md).
+
 ## Concept Model
 
 Node:
@@ -92,6 +94,8 @@ The code boundary follows that split:
 - `src/api.rs` maps OpenAPI operations to framework-independent service methods.
 - `openapi/lightflow.yaml` exposes run manifests and CortexFS exchange paths without exposing internal Rust APIs.
 
+The boundary is queryable through `lightflow ctx abi`, `GET /ctx/abi`, and `lightflow://ctx-abi`.
+
 ## Non-Goals
 
 - No frontend in the initial project.
@@ -100,6 +104,7 @@ The code boundary follows that split:
 - No provider-specific AI integration is part of the initial skeleton.
 - No non-Linux local runtime support in the initial project.
 - No optional CortexFS mode; CortexFS is required for the Linux runtime path.
+- No attempt to upstream LightFlow, CortexFS product protocols, provider routing, model aliases, MCP, HTTP, OpenAPI, or JSON workflow contracts into the Linux kernel tree.
 
 ## Early Repository Rules
 

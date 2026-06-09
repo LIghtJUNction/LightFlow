@@ -122,7 +122,13 @@ impl RuntimeDirs {
     /// `$XDG_STATE_HOME/lightflow/runs/<run_id>`.
     #[must_use]
     pub fn run_dir(&self, run_id: &RunId) -> PathBuf {
-        self.state_home.join("runs").join(run_id.as_str())
+        self.runs_dir().join(run_id.as_str())
+    }
+
+    /// `$XDG_STATE_HOME/lightflow/runs`.
+    #[must_use]
+    pub fn runs_dir(&self) -> PathBuf {
+        self.state_home.join("runs")
     }
 
     /// `$XDG_STATE_HOME/lightflow/runs/<run_id>/manifest.json`.
@@ -194,6 +200,41 @@ impl RunStore {
     /// Read a run manifest by id.
     pub fn get_manifest(&self, run_id: &RunId) -> io::Result<RunManifest> {
         read_json(&self.dirs.run_manifest_path(run_id))
+    }
+
+    /// Return whether any run directory already exists for the id.
+    pub fn run_dir_exists(&self, run_id: &RunId) -> io::Result<bool> {
+        match fs::metadata(self.dirs.run_dir(run_id)) {
+            Ok(metadata) => Ok(metadata.is_dir()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// List run manifests currently stored under XDG state.
+    pub fn list_manifests(&self) -> io::Result<Vec<RunManifest>> {
+        let mut manifests: Vec<RunManifest> = Vec::new();
+        match fs::read_dir(self.dirs.runs_dir()) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let manifest_path = path.join(MANIFEST_FILE);
+                    match read_json(&manifest_path) {
+                        Ok(manifest) => manifests.push(manifest),
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        manifests.sort_by(|left, right| left.run_id.cmp(&right.run_id));
+        Ok(manifests)
     }
 
     /// Read the original create-run request.
@@ -324,6 +365,8 @@ pub struct RunTrace<'a> {
 pub struct RunManifest {
     pub run_id: RunId,
     pub workflow_asset_id: String,
+    #[serde(default)]
+    pub cancelled: bool,
     pub steps: Vec<RunStepRecord>,
 }
 
@@ -334,6 +377,7 @@ impl RunManifest {
         Self {
             run_id,
             workflow_asset_id: workflow_asset_id.into(),
+            cancelled: false,
             steps: Vec::new(),
         }
     }
@@ -462,8 +506,23 @@ impl RunStepRecord {
 pub enum RunStepStatus {
     Planned,
     Submitted,
+    Cancelled,
     Succeeded,
     Failed,
+}
+
+impl RunStepStatus {
+    /// Stable API string for the status.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Planned => "planned",
+            Self::Submitted => "submitted",
+            Self::Cancelled => "cancelled",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
 }
 
 #[cfg(test)]

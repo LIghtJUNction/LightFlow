@@ -55,7 +55,7 @@ Use the current Linux user entry for runtime execution:
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-The LightFlow runtime should use CortexFS paths under `/ctx` for model discovery, provider routing, API-format calls, tool/MCP calls, thread state, policy, and audit.
+The LightFlow runtime should use CortexFS paths under `/ctx` for model discovery, provider routing, API-format calls, tool/MCP calls, structured jobs, externally triggered hooks, runtime channel configuration, thread state, policy, and audit.
 
 Detailed integration rules live in [cortexfs-integration.md](cortexfs-integration.md).
 
@@ -163,9 +163,13 @@ Real run output is local runtime state:
 - `$XDG_STATE_HOME/lightflow/runs/<run_id>/outputs/`
 - `$XDG_STATE_HOME/lightflow/runs/<run_id>/trace.jsonl`
 
-`manifest.json` is the stable LightFlow-owned summary of workflow structure and CortexFS correlation paths. It includes planned request, response, error, fingerprint, and route metadata paths for each CortexFS-backed step.
+`manifest.json` is the stable LightFlow-owned summary of workflow structure and CortexFS correlation paths. It includes planned request, response, error, fingerprint, and route metadata paths for each inbox-backed CortexFS step. CortexFS structured jobs use `home/<uid>/job/<id>/{spec,req,out.json,status}`, hooks use `home/<uid>/hook/<id>/{trigger,spec,req,out.json,status,last,log.jsonl}`, and runtime channels use `/ctx/chan/<id>`; LightFlow exposes those path records without duplicating CortexFS provider configuration.
 
 `request.json` preserves the create-run request. `resolved_workflow.json` preserves the parsed workflow definition used for planning. `events.jsonl` is the append-only user-facing run event stream. `trace.jsonl` is the append-only technical trace for CortexFS file commits and related plumbing.
+
+Creating a run reserves the whole `$XDG_STATE_HOME/lightflow/runs/<run_id>/` directory. A later create with the same run id is rejected even if `manifest.json` is missing, so a partial or crashed run directory is not silently overwritten. Listing runs only returns directories with readable manifests and ignores incomplete run directories.
+
+`POST /runs/preview` and `lightflow run preview` use the same planner and template renderer as create/submit, but they do not create this directory or write any run state.
 
 Committed examples belong under `lightflow/runs/examples/` or docs. Do not commit real user outputs, logs, secrets, or bulky generated artifacts.
 
@@ -204,16 +208,25 @@ The backend may build a generated index under `$XDG_CACHE_HOME/lightflow/` for s
 
 The OpenAPI surface should read built-in and project assets through the asset loader and runtime state:
 
+- `GET /ctx/abi` returns the CortexFS userspace/FUSE ABI and kernel policy for this LightFlow process.
 - `GET /workflows` scans and validates `src/builtins/workflows/*.rs` and `lightflow/workflows/*.rs` through `src/workflows.rs`.
 - `GET /nodes` scans and validates `src/builtins/nodes/*.rs` and `lightflow/nodes/*.rs` through `src/nodes.rs`.
 - `GET /compositions` scans and validates `src/builtins/compositions/*.rs` and `lightflow/compositions/*.rs` through `src/compositions.rs`.
 - `GET /models` scans and validates `lightflow/models/*.rs` through `src/models.rs`.
-- `POST /runs` creates `$XDG_STATE_HOME/lightflow/runs/<run_id>/`.
+- `POST /runs/preview` resolves the workflow, validates references, plans CortexFS paths, and renders request templates without writing state.
+- `GET /runs` lists readable manifests under `$XDG_STATE_HOME/lightflow/runs/`, sorted by run id.
+- `POST /runs` creates `$XDG_STATE_HOME/lightflow/runs/<run_id>/` and rejects existing run directories with `409 Conflict`.
 - `GET /runs/{run_id}` reads `$XDG_STATE_HOME/lightflow/runs/<run_id>/`.
+- `GET /runs/{run_id}/status` returns a derived lifecycle summary and step counts from the manifest.
+- `GET /runs/{run_id}/request` reads the original create-run request stored in `request.json`.
+- `GET /runs/{run_id}/workflow` reads the resolved workflow definition stored in `resolved_workflow.json`.
+- `POST /runs/{run_id}/steps/{step_id}/submit` writes a CortexFS request only for planned steps; duplicate submitted, succeeded, or failed steps return `409 Conflict`.
+- `POST /runs/{run_id}/refresh` refreshes a run manifest from CortexFS outboxes and returns `404 Not Found` for missing run manifests.
+- `GET /runs/{run_id}/events` and `GET /runs/{run_id}/trace` read JSONL streams only for existing run manifests.
 
 The API should expose inspectable project state without requiring clients to understand Rust internals. Clients call the backend; the backend owns Rust asset parsing, validation, and execution.
 
-The current Rust API service is framework-independent. It lists assets through the discovery modules, parses workflow definitions, validates referenced model/node/composition assets before writing run records, plans CortexFS-backed run steps, submits step request bodies through CortexFS atomic file semantics, refreshes run state from CortexFS outboxes, and creates or reads run manifests through the XDG run store. A future HTTP server should adapt that service rather than reimplementing asset or run file access.
+The current Rust API service is framework-independent. It lists assets through the discovery modules, parses workflow definitions, validates referenced model/node/composition assets before writing run records, plans CortexFS-backed run steps, submits step request bodies through CortexFS atomic file semantics, refreshes run state from CortexFS outboxes, and creates or reads run manifests through the XDG run store. CLI, HTTP, MCP, and stream adapters should call that service rather than reimplementing asset or run file access.
 
 Workflow execution uses CortexFS under `/ctx` for provider/model/tool/thread/audit operations. LightFlow's run store records workflow structure and CortexFS correlation fields; CortexFS remains the authoritative Linux execution and audit substrate.
 
