@@ -1,6 +1,3 @@
-[submodule "cortexfs"]
-	path = cortexfs
-	url = https://github.com/LIghtJUNction/cortexfs.git
 [submodule "LightFlowUI"]
 	path = LightFlowUI
 	url = https://github.com/LIghtJUNction/LightFlowUI.git

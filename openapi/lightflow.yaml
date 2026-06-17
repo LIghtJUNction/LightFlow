@@ -2,926 +2,285 @@ openapi: 3.1.0
 info:
   title: LightFlow API
   version: 0.1.0
-  description: Backend API contract for Linux-hosted LightFlow workflow runs.
+  description: Backend API contract for LightFlow components and nested workflows.
 servers:
   - url: http://localhost:5174
 paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is reachable.
+  /components:
+    get:
+      summary: List components
+      operationId: listComponents
+      responses:
+        "200":
+          description: Component summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentList"
+    post:
+      summary: Save a component
+      operationId: saveComponent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentSpec"
+      responses:
+        "201":
+          description: Component saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentSpec"
+  /components/{component_id}:
+    get:
+      summary: Read a component
+      operationId: getComponent
+      parameters:
+        - name: component_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Component spec.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentSpec"
+        "404":
+          description: Component not found.
   /workflows:
     get:
-      summary: List workflow assets
+      summary: List workflows
       operationId: listWorkflows
       responses:
         "200":
-          description: Workflow assets discovered from Rust files.
+          description: Workflow summaries.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AssetList"
-  /nodes:
-    get:
-      summary: List node assets
-      operationId: listNodes
-      responses:
-        "200":
-          description: Node assets discovered from Rust files.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AssetList"
-  /compositions:
-    get:
-      summary: List composition assets
-      operationId: listCompositions
-      responses:
-        "200":
-          description: Composition assets discovered from Rust files.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AssetList"
-  /models:
-    get:
-      summary: List model assets
-      operationId: listModels
-      responses:
-        "200":
-          description: Model assets discovered from Rust files.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AssetList"
-  /ctx/abi:
-    get:
-      summary: Read the /ctx ABI contract
-      description: Describes LightFlow's CortexFS integration as a userspace/FUSE ABI, not a Linux kernel subsystem or kernel ABI.
-      operationId: getCtxAbi
-      responses:
-        "200":
-          description: /ctx ABI and kernel policy.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CtxAbi"
-  /runs:
-    get:
-      summary: List workflow run records
-      operationId: listRuns
-      responses:
-        "200":
-          description: Stored run manifests from the XDG state directory.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunList"
+                $ref: "#/components/schemas/WorkflowList"
     post:
-      summary: Plan a workflow run
-      description: Creates a LightFlow run record under the XDG state directory. Workflow execution uses CortexFS paths under /ctx.
-      operationId: createRun
+      summary: Save a workflow
+      operationId: saveWorkflow
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateRunRequest"
+              $ref: "#/components/schemas/WorkflowSpec"
       responses:
-        "202":
-          description: Run accepted and planned.
+        "201":
+          description: Workflow saved.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunManifest"
+                $ref: "#/components/schemas/WorkflowSpec"
         "400":
-          description: Invalid run request.
+          description: Workflow failed validation.
+  /workflows/{workflow_id}:
+    get:
+      summary: Read a workflow
+      operationId: getWorkflow
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Workflow spec.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-        "409":
-          description: Run id already exists.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/preview:
+                $ref: "#/components/schemas/WorkflowSpec"
+        "404":
+          description: Workflow not found.
+  /workflows/validate:
     post:
-      summary: Preview a workflow run
-      description: Resolves workflow assets, validates references, plans CortexFS paths, and renders request templates without writing run state.
-      operationId: previewRun
+      summary: Validate a workflow
+      operationId: validateWorkflow
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateRunRequest"
+              $ref: "#/components/schemas/WorkflowSpec"
       responses:
         "200":
-          description: Run preview with validation issues and planned steps.
+          description: Validation result.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunPreview"
-        "400":
-          description: Invalid preview request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}:
-    get:
-      summary: Read a workflow run record
-      operationId: getRun
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Run record.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunManifest"
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/status:
-    get:
-      summary: Read a derived workflow run status
-      operationId: getRunStatus
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Derived run lifecycle summary and step counts.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunStatusSummary"
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/cancel:
-    post:
-      summary: Cancel a workflow run record
-      description: Marks the run as cancelled and moves planned or submitted steps to cancelled without invoking CortexFS.
-      operationId: cancelRun
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Updated run manifest.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunManifest"
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/request:
-    get:
-      summary: Read the original run creation request
-      operationId: getRunRequest
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Original request stored for the run.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreateRunRequest"
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/workflow:
-    get:
-      summary: Read the resolved run workflow definition
-      operationId: getRunWorkflow
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Workflow definition resolved when the run was created.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkflowDef"
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/steps/{step_id}/submit:
-    post:
-      summary: Submit a run step request through CortexFS
-      description: Commits an explicit JSON request body to the CortexFS inbox, or renders one from stored run inputs when the workflow step declares a request template and no body is supplied.
-      operationId: submitRunStep
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: step_id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-      responses:
-        "202":
-          description: Step request committed to CortexFS inbox.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunManifest"
-        "400":
-          description: Invalid request body or missing request template.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "404":
-          description: Run or step not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "409":
-          description: Run step was already submitted or completed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/refresh:
-    post:
-      summary: Refresh run state from CortexFS outboxes
-      operationId: refreshRun
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Updated run manifest.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunManifest"
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/events:
-    get:
-      summary: Read run events as JSONL
-      operationId: getRunEvents
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Append-only event stream.
-          content:
-            application/x-ndjson:
-              schema:
-                type: string
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /runs/{run_id}/trace:
-    get:
-      summary: Read run trace as JSONL
-      operationId: getRunTrace
-      parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Append-only technical trace stream.
-          content:
-            application/x-ndjson:
-              schema:
-                type: string
-        "404":
-          description: Run not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/WorkflowValidation"
 components:
   schemas:
-    AssetList:
+    PortSpec:
       type: object
-      additionalProperties: false
-      required:
-        - assets
+      required: [name, type]
       properties:
-        assets:
-          type: array
-          items:
-            $ref: "#/components/schemas/AssetRecord"
-    AssetRecord:
-      type: object
-      additionalProperties: false
-      required:
-        - meta
-        - source_path
-        - builtin
-      properties:
-        meta:
-          $ref: "#/components/schemas/AssetMeta"
-        source_path:
+        name:
           type: string
-        builtin:
-          type: boolean
-    AssetMeta:
+        type:
+          type: string
+    ComponentSpec:
       type: object
-      additionalProperties: false
-      required:
-        - id
-        - title
-        - kind
-        - description
-        - stability
+      required: [id, name]
       properties:
         id:
           type: string
-        title:
+        name:
           type: string
-        kind:
-          type: string
-          enum:
-            - model
-            - node
-            - composition
-            - workflow
         description:
           type: string
-        stability:
-          type: string
-          enum:
-            - draft
-            - experimental
-            - stable
-    CtxAbi:
-      type: object
-      additionalProperties: false
-      required:
-        - mount
-        - uid
-        - home
-        - mode
-        - kernel
-        - kernel_tree
-        - abi
-        - upstream
-        - policy
-        - non_goals
-      properties:
-        mount:
-          type: string
-          description: CortexFS mount point used by this LightFlow process.
-        uid:
-          type: integer
-          minimum: 0
-          description: Linux uid used for the CortexFS user home.
-        home:
-          type: string
-        mode:
-          type: string
-          const: userspace
-        kernel:
-          type: string
-          const: fuse
-        kernel_tree:
-          type: boolean
-          const: false
-          description: False because LightFlow/CortexFS runtime protocols are userspace product protocols, not kernel subsystem code.
-        abi:
-          type: string
-          const: userspace
-        upstream:
-          type: string
-          const: generic kernel primitives only
-        policy:
-          type: string
-        non_goals:
+        inputs:
           type: array
           items:
-            type: string
-    CreateRunRequest:
+            $ref: "#/components/schemas/PortSpec"
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortSpec"
+        config_schema:
+          type:
+            - object
+            - "null"
+    ComponentList:
       type: object
-      additionalProperties: false
-      required:
-        - workflow_asset_id
+      required: [components]
       properties:
-        run_id:
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComponentSummary"
+    ComponentSummary:
+      type: object
+      required: [id, name, inputs, outputs]
+      properties:
+        id:
           type: string
-          description: Optional caller-provided run id. Must be one path segment.
-        workflow_asset_id:
+        name:
           type: string
-          description: Self-contained workflow asset id under lightflow/workflows or src/builtins/workflows.
         inputs:
-          type: object
-          description: Workflow-specific input object.
-          additionalProperties: true
-    RunPreview:
+          type: integer
+        outputs:
+          type: integer
+    WorkflowSpec:
       type: object
-      additionalProperties: false
-      required:
-        - run_id
-        - workflow
-        - definition
-        - ready
-        - issues
-        - steps
+      required: [id, name]
       properties:
-        run_id:
+        id:
           type: string
-        workflow:
-          $ref: "#/components/schemas/AssetRecord"
-        definition:
-          $ref: "#/components/schemas/WorkflowDef"
-        ready:
+        name:
+          type: string
+        description:
+          type: string
+        inputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortSpec"
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortSpec"
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowEdge"
+    WorkflowNode:
+      type: object
+      required: [id, uses]
+      properties:
+        id:
+          type: string
+        uses:
+          type: string
+          enum: [component, workflow]
+        component_id:
+          type: string
+        workflow_id:
+          type: string
+        title:
+          type: string
+        position:
+          $ref: "#/components/schemas/WorkflowPosition"
+        config:
+          type:
+            - object
+            - "null"
+    WorkflowPosition:
+      type: object
+      properties:
+        x:
+          type: integer
+        y:
+          type: integer
+    WorkflowEdge:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          $ref: "#/components/schemas/WorkflowEndpoint"
+        to:
+          $ref: "#/components/schemas/WorkflowEndpoint"
+    WorkflowEndpoint:
+      type: object
+      required: [node, port]
+      properties:
+        node:
+          type: string
+        port:
+          type: string
+    WorkflowList:
+      type: object
+      required: [workflows]
+      properties:
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowSummary"
+    WorkflowSummary:
+      type: object
+      required: [id, name, inputs, outputs, nodes, edges]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        inputs:
+          type: integer
+        outputs:
+          type: integer
+        nodes:
+          type: integer
+        edges:
+          type: integer
+    WorkflowValidation:
+      type: object
+      required: [valid, issues, topological_order]
+      properties:
+        valid:
           type: boolean
-          description: True when validation found no issues.
         issues:
           type: array
           items:
             type: string
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunPreviewStep"
-    RunPreviewStep:
-      type: object
-      additionalProperties: false
-      required:
-        - step_id
-        - node_or_composition_id
-        - target
-        - request_template
-        - cortex
-        - rendered_request
-      properties:
-        step_id:
-          type: string
-        node_or_composition_id:
-          type: string
-        target:
-          $ref: "#/components/schemas/WorkflowStepTarget"
-        request_template:
-          oneOf:
-            - $ref: "#/components/schemas/WorkflowRequestTemplate"
-            - type: "null"
-        cortex:
-          $ref: "#/components/schemas/CortexExchange"
-        rendered_request:
-          type:
-            - object
-            - "null"
-          additionalProperties: true
-    WorkflowDef:
-      type: object
-      additionalProperties: false
-      required:
-        - id
-        - input_schema
-        - output_schema
-        - required_models
-        - steps
-      properties:
-        id:
-          type: string
-        input_schema:
-          type:
-            - string
-            - "null"
-        output_schema:
-          type:
-            - string
-            - "null"
-        required_models:
+        topological_order:
           type: array
           items:
             type: string
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/WorkflowStepDef"
-    WorkflowStepDef:
-      type: object
-      additionalProperties: false
-      required:
-        - step_id
-        - node_or_composition_id
-        - target
-      properties:
-        step_id:
-          type: string
-        node_or_composition_id:
-          type: string
-        target:
-          $ref: "#/components/schemas/WorkflowStepTarget"
-        request:
-          oneOf:
-            - $ref: "#/components/schemas/WorkflowRequestTemplate"
-            - type: "null"
-    WorkflowStepTarget:
-      oneOf:
-        - $ref: "#/components/schemas/WorkflowApiTarget"
-        - $ref: "#/components/schemas/WorkflowToolTarget"
-        - $ref: "#/components/schemas/WorkflowThreadTarget"
-    WorkflowApiTarget:
-      type: object
-      additionalProperties: false
-      required:
-        - kind
-        - format
-      properties:
-        kind:
-          const: api
-        format:
-          type: string
-    WorkflowToolTarget:
-      type: object
-      additionalProperties: false
-      required:
-        - kind
-        - tool_id
-      properties:
-        kind:
-          const: tool
-        tool_id:
-          type: string
-    WorkflowThreadTarget:
-      type: object
-      additionalProperties: false
-      required:
-        - kind
-        - thread_id
-      properties:
-        kind:
-          const: thread
-        thread_id:
-          type: string
-    WorkflowRequestTemplate:
-      oneOf:
-        - $ref: "#/components/schemas/OpenAiChatPromptTemplate"
-    OpenAiChatPromptTemplate:
-      type: object
-      additionalProperties: false
-      required:
-        - kind
-        - model_alias
-        - input_field
-      properties:
-        kind:
-          const: openai_chat_prompt
-        model_alias:
-          type: string
-        input_field:
-          type: string
-    RunManifest:
-      type: object
-      additionalProperties: false
-      required:
-        - run_id
-        - workflow_asset_id
-        - cancelled
-        - steps
-      properties:
-        run_id:
-          type: string
-        workflow_asset_id:
-          type: string
-        cancelled:
-          type: boolean
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunStepRecord"
-    RunList:
-      type: object
-      additionalProperties: false
-      required:
-        - runs
-      properties:
-        runs:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunManifest"
-    RunStatusSummary:
-      type: object
-      additionalProperties: false
-      required:
-        - run_id
-        - workflow_asset_id
-        - status
-        - total_steps
-        - planned_steps
-        - submitted_steps
-        - cancelled_steps
-        - succeeded_steps
-        - failed_steps
-      properties:
-        run_id:
-          type: string
-        workflow_asset_id:
-          type: string
-        status:
-          type: string
-          enum:
-            - planned
-            - running
-            - cancelled
-            - succeeded
-            - failed
-        total_steps:
-          type: integer
-          minimum: 0
-        planned_steps:
-          type: integer
-          minimum: 0
-        submitted_steps:
-          type: integer
-          minimum: 0
-        cancelled_steps:
-          type: integer
-          minimum: 0
-        succeeded_steps:
-          type: integer
-          minimum: 0
-        failed_steps:
-          type: integer
-          minimum: 0
-    RunStepRecord:
-      type: object
-      additionalProperties: false
-      required:
-        - step_id
-        - node_or_composition_id
-        - cortex
-        - status
-        - output_artifacts
-      properties:
-        step_id:
-          type: string
-          description: LightFlow step id used as the CortexFS request id.
-        node_or_composition_id:
-          type: string
-        cortex:
-          $ref: "#/components/schemas/CortexExchange"
-        status:
-          type: string
-          enum:
-            - planned
-            - submitted
-            - cancelled
-            - succeeded
-            - failed
-        submitted_request_path:
-          type:
-            - string
-            - "null"
-        response_path:
-          type:
-            - string
-            - "null"
-        error_path:
-          type:
-            - string
-            - "null"
-        provider_id:
-          type:
-            - string
-            - "null"
-        model_id:
-          type:
-            - string
-            - "null"
-        route_decision:
-          type:
-            - string
-            - "null"
-        fingerprint:
-          type:
-            - string
-            - "null"
-        audit_correlation:
-          type:
-            - string
-            - "null"
-        output_artifacts:
-          type: array
-          items:
-            type: string
-    CortexExchange:
-      type: object
-      additionalProperties: false
-      required:
-        - target
-        - request_id
-        - inbox_dir
-        - outbox_dir
-        - staged_request
-        - commit_request
-        - response
-        - error
-        - fingerprint
-        - route_metadata
-      properties:
-        target:
-          $ref: "#/components/schemas/CortexTarget"
-        request_id:
-          type: string
-        inbox_dir:
-          type: string
-        outbox_dir:
-          type: string
-        staged_request:
-          type: string
-          description: Temporary file path written before atomic rename.
-        commit_request:
-          type: string
-          description: Final *.req.json path whose rename triggers CortexFS execution.
-        response:
-          type: string
-        error:
-          type: string
-        fingerprint:
-          type: string
-        route_metadata:
-          type:
-            - string
-            - "null"
-    CortexSubmitted:
-      type: object
-      additionalProperties: false
-      required:
-        - request_path
-        - response
-        - error
-        - fingerprint
-        - route_metadata
-      properties:
-        request_path:
-          type: string
-        response:
-          type: string
-        error:
-          type: string
-        fingerprint:
-          type: string
-        route_metadata:
-          type:
-            - string
-            - "null"
-    CortexOutcome:
-      oneOf:
-        - $ref: "#/components/schemas/CortexResponseOutcome"
-        - $ref: "#/components/schemas/CortexErrorOutcome"
-    CortexResponseOutcome:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - body
-        - fingerprint
-        - route_metadata
-      properties:
-        status:
-          const: response
-        body:
-          type: string
-        fingerprint:
-          type:
-            - string
-            - "null"
-        route_metadata:
-          type:
-            - string
-            - "null"
-    CortexErrorOutcome:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - body
-        - fingerprint
-        - route_metadata
-      properties:
-        status:
-          const: error
-        body:
-          type: string
-        fingerprint:
-          type:
-            - string
-            - "null"
-        route_metadata:
-          type:
-            - string
-            - "null"
-    CortexTarget:
-      oneOf:
-        - $ref: "#/components/schemas/CortexApiTarget"
-        - $ref: "#/components/schemas/CortexToolTarget"
-        - $ref: "#/components/schemas/CortexThreadTarget"
-    CortexApiTarget:
-      type: object
-      additionalProperties: false
-      required:
-        - kind
-        - format
-      properties:
-        kind:
-          const: api
-        format:
-          type: string
-          enum:
-            - openai.chat
-            - openai.responses
-            - anthropic.messages
-            - google.generate_content
-    CortexToolTarget:
-      type: object
-      additionalProperties: false
-      required:
-        - kind
-        - tool_id
-      properties:
-        kind:
-          const: tool
-        tool_id:
-          type: string
-    CortexThreadTarget:
-      type: object
-      additionalProperties: false
-      required:
-        - kind
-        - thread_id
-      properties:
-        kind:
-          const: thread
-        thread_id:
-          type: string
-    Error:
-      type: object
-      additionalProperties: false
-      required:
-        - error
-      properties:
-        error:
-          type: string

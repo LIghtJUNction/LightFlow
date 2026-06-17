@@ -1,0 +1,71 @@
+{
+  "id": "workflow.text_plan",
+  "name": "Text Plan",
+  "description": "Minimal nested-workflow-ready text planning shape.",
+  "inputs": [
+    {
+      "name": "value",
+      "type": "json"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "text",
+      "type": "text"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "input",
+      "uses": "component",
+      "component_id": "component.input",
+      "title": "Input",
+      "position": {
+        "x": 40,
+        "y": 120
+      }
+    },
+    {
+      "id": "prompt",
+      "uses": "component",
+      "component_id": "component.text_prompt",
+      "title": "Prompt",
+      "position": {
+        "x": 280,
+        "y": 120
+      }
+    },
+    {
+      "id": "result",
+      "uses": "component",
+      "component_id": "component.text_result",
+      "title": "Result",
+      "position": {
+        "x": 520,
+        "y": 120
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "node": "input",
+        "port": "value"
+      },
+      "to": {
+        "node": "prompt",
+        "port": "value"
+      }
+    },
+    {
+      "from": {
+        "node": "prompt",
+        "port": "prompt"
+      },
+      "to": {
+        "node": "result",
+        "port": "text"
+      }
+    }
+  ]
+}

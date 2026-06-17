@@ -1,0 +1,12 @@
+{
+  "id": "component.text_result",
+  "name": "Text Result",
+  "description": "Collects text as workflow output.",
+  "inputs": [
+    {
+      "name": "text",
+      "type": "text"
+    }
+  ],
+  "outputs": []
+}

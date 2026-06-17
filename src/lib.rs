@@ -1,11 +1,5 @@
 pub mod api;
-pub mod asset;
-pub mod compositions;
-pub mod cortex;
+pub mod component;
 pub mod mcp;
-pub mod models;
-pub mod nodes;
-pub mod runs;
 pub mod server;
-pub mod stream;
-pub mod workflows;
+pub mod workflow;

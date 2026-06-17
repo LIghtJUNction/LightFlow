@@ -1,0 +1,17 @@
+{
+  "id": "component.text_prompt",
+  "name": "Text Prompt",
+  "description": "Builds a text prompt payload from JSON input.",
+  "inputs": [
+    {
+      "name": "value",
+      "type": "json"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "prompt",
+      "type": "text"
+    }
+  ]
+}

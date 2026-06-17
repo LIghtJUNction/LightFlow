@@ -1,5 +1,4 @@
-# Workflow Metadata
+# Workflows
 
-Each workflow is a self-contained Rust asset file in this directory.
-
-Use `lightflow/workflows/<workflow_id>.rs`. The file must contain both metadata and executable workflow definition.
+Workflows are directed graphs. A workflow node uses either a component or
+another workflow, which is how nesting works.
