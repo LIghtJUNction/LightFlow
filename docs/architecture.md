@@ -92,6 +92,16 @@ lfw deps lightflow.text_plan
 The current validation deliberately does not implement execution scheduling,
 provider routing, or agent behavior.
 
+## Installation Model
+
+Installing a workflow means adding a Cargo dependency. The backend reads local
+workflow crates and Cargo `path` dependencies, then statically parses any
+dependency crate that exposes `pub fn define() -> WorkflowSpec` in `src/lib.rs`.
+This lets a project depend on `lightflow-std = { path = "..." }` and immediately
+use `lightflow.std` in `.depends_on(...)` or `.node(...)`. Remote git
+dependencies keep the same Cargo manifest shape; `lfw sync` will handle fetching
+and model/resource synchronization in a later iteration.
+
 ## Boundaries
 
 `src/api.rs` is the framework-independent service. CLI, HTTP, and MCP call this

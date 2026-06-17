@@ -53,6 +53,31 @@ executable entrypoint.
 The backend accepts `WorkflowSpec` JSON over HTTP/MCP/CLI for tool integration,
 but the source-controlled project format is Rust.
 
+## Installed Workflow Dependencies
+
+A workflow can be installed as a Cargo dependency. The backend scans local
+workflow crates under `lightflow/workflows/` and also scans `path`
+dependencies declared in the project `Cargo.toml`:
+
+```toml
+[workspace.dependencies]
+lightflow-std = { path = "lightflow/workflows/lightflow.std" }
+```
+
+If the dependency target contains `src/lib.rs` with `pub fn define() ->
+WorkflowSpec`, it is added to the workflow registry and can satisfy
+`.depends_on(...)` and `.node(...)` references.
+
+Git dependencies use the same manifest shape:
+
+```toml
+[dependencies]
+lightflow-std = { git = "https://github.com/lightjunction/LightFlow", package = "lightflow-std" }
+```
+
+The first implemented discovery path is local `path` dependencies. Remote git
+dependencies will be made local by `lfw sync` in the next installation pass.
+
 ## Not Stored Here
 
 Do not commit runtime state, credentials, generated artifacts, caches, or model

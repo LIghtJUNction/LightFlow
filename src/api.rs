@@ -12,6 +12,7 @@ use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use toml_edit::{DocumentMut, Item};
 
 const WORKFLOW_DIR: &str = "workflows";
 const LIGHTFLOW_DIR: &str = "lightflow";
@@ -163,6 +164,8 @@ pub type ApiResult<T> = Result<T, ApiError>;
 
 fn read_workflow_sources(root: &Path) -> ApiResult<Vec<WorkflowSpec>> {
     let mut workflows = Vec::new();
+    let mut manifests = BTreeSet::new();
+    let mut visited_libs = BTreeSet::new();
     match fs::read_dir(root.join(LIGHTFLOW_DIR).join(WORKFLOW_DIR)) {
         Ok(entries) => {
             for entry in entries {
@@ -172,17 +175,131 @@ fn read_workflow_sources(root: &Path) -> ApiResult<Vec<WorkflowSpec>> {
                         let lib = path.join("src").join("lib.rs");
                         if lib.exists() {
                             workflows.push(read_workflow_source(&lib)?);
+                            visited_libs.insert(normalize_existing_path(&lib)?);
+                            let manifest = path.join("Cargo.toml");
+                            if manifest.exists() {
+                                manifests.insert(normalize_existing_path(&manifest)?);
+                            }
                         }
                     }
                     continue;
                 }
                 workflows.push(read_workflow_source(&path)?);
+                visited_libs.insert(normalize_existing_path(&path)?);
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(ApiError::from(error)),
     }
+
+    let root_manifest = root.join("Cargo.toml");
+    if root_manifest.exists() {
+        manifests.insert(normalize_existing_path(&root_manifest)?);
+    }
+    read_path_dependency_workflows(&mut workflows, &mut manifests, &mut visited_libs)?;
+
     Ok(workflows)
+}
+
+fn read_path_dependency_workflows(
+    workflows: &mut Vec<WorkflowSpec>,
+    manifests: &mut BTreeSet<PathBuf>,
+    visited_libs: &mut BTreeSet<PathBuf>,
+) -> ApiResult<()> {
+    let mut scanned = BTreeSet::new();
+    while let Some(manifest) = manifests
+        .iter()
+        .find(|manifest| !scanned.contains(*manifest))
+        .cloned()
+    {
+        scanned.insert(manifest.clone());
+        for dependency_dir in cargo_path_dependencies(&manifest)? {
+            let manifest = dependency_dir.join("Cargo.toml");
+            if manifest.exists() {
+                manifests.insert(normalize_existing_path(&manifest)?);
+            }
+
+            let lib = dependency_dir.join("src").join("lib.rs");
+            if !lib.exists() {
+                continue;
+            }
+            let lib = normalize_existing_path(&lib)?;
+            if !visited_libs.insert(lib.clone()) {
+                continue;
+            }
+            if let Some(workflow) = read_optional_workflow_source(&lib)? {
+                workflows.push(workflow);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cargo_path_dependencies(manifest: &Path) -> ApiResult<Vec<PathBuf>> {
+    let manifest_dir = manifest.parent().ok_or_else(|| {
+        ApiError::InvalidRequest(format!("manifest {:?} has no parent", manifest))
+    })?;
+    let source = fs::read_to_string(manifest).map_err(ApiError::from)?;
+    let document = source.parse::<DocumentMut>().map_err(|error| {
+        ApiError::InvalidRequest(format!("invalid Cargo manifest {:?}: {error}", manifest))
+    })?;
+    let mut paths = Vec::new();
+    collect_dependency_paths(manifest_dir, document.get("dependencies"), &mut paths)?;
+    collect_dependency_paths(
+        manifest_dir,
+        document
+            .get("workspace")
+            .and_then(|workspace| workspace.get("dependencies")),
+        &mut paths,
+    )?;
+    Ok(paths)
+}
+
+fn collect_dependency_paths(
+    manifest_dir: &Path,
+    dependencies: Option<&Item>,
+    paths: &mut Vec<PathBuf>,
+) -> ApiResult<()> {
+    let Some(dependencies) = dependencies.and_then(Item::as_table_like) else {
+        return Ok(());
+    };
+    for (_name, dependency) in dependencies.iter() {
+        let Some(path) = dependency.get("path").and_then(Item::as_str) else {
+            continue;
+        };
+        let path = manifest_dir.join(path);
+        if path.exists() {
+            paths.push(normalize_existing_path(&path)?);
+        }
+    }
+    Ok(())
+}
+
+fn read_optional_workflow_source(path: &Path) -> ApiResult<Option<WorkflowSpec>> {
+    let source = fs::read_to_string(path).map_err(ApiError::from)?;
+    let file = syn::parse_file(&source).map_err(|error| {
+        ApiError::InvalidRequest(format!(
+            "invalid Rust workflow source in {:?}: {error}",
+            path
+        ))
+    })?;
+    let Some(define) = file.items.iter().find_map(|item| match item {
+        syn::Item::Fn(function) if function.sig.ident == "define" => Some(function),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    let expression = define_expression(define).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
+            "workflow source {:?} must return a workflow(...) builder expression",
+            path
+        ))
+    })?;
+    parse_workflow_builder(expression, path).map(Some)
+}
+
+fn normalize_existing_path(path: &Path) -> ApiResult<PathBuf> {
+    path.canonicalize().map_err(ApiError::from)
 }
 
 fn read_workflow_source(path: &Path) -> ApiResult<WorkflowSpec> {

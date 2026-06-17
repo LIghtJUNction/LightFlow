@@ -75,6 +75,20 @@ cargo run -- workflows validate '{"id":"lightflow.example","version":"0.1.0","na
 cargo run -- serve --port 5174
 ```
 
+## Installing Workflows
+
+Workflow dependencies are Cargo dependencies. A local standard workflow can be
+installed with:
+
+```toml
+[workspace.dependencies]
+lightflow-std = { path = "lightflow/workflows/lightflow.std" }
+```
+
+Any dependency crate that exposes `pub fn define() -> WorkflowSpec` in
+`src/lib.rs` is discovered by the backend and can be referenced from
+`.depends_on(...)` or `.node(...)`.
+
 ## HTTP
 
 ```bash

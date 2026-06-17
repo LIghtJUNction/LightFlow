@@ -203,6 +203,72 @@ fn repository_std_workflow_is_library_only_and_abstract() -> Result<(), Box<dyn 
     Ok(())
 }
 
+#[test]
+fn cargo_path_dependency_installs_workflow_for_dependency_resolution()
+-> Result<(), Box<dyn std::error::Error>> {
+    let base = unique_temp_root();
+    let project = base.join("project");
+    let std_dep = base.join("lightflow-std");
+    fs::create_dir_all(&project)?;
+    write_external_std_crate(&std_dep)?;
+
+    fs::write(
+        project.join("Cargo.toml"),
+        format!(
+            r#"[workspace]
+resolver = "3"
+members = ["lightflow/workflows/*"]
+
+[workspace.dependencies]
+lightflow = {{ path = {:?} }}
+lightflow-std = {{ path = "../lightflow-std" }}
+"#,
+            env!("CARGO_MANIFEST_DIR")
+        ),
+    )?;
+    write_workflow_crate(
+        &project,
+        "lightflow.image_prompt",
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.image_prompt")
+        .version("0.1.0")
+        .name("Image Prompt")
+        .input("positive", "text")
+        .input("negative", "text")
+        .output("prompt", "json")
+        .depends_on("lightflow.std", "0.1.0")
+        .node("passthrough", "lightflow.std")
+        .build()
+}
+"#,
+    )?;
+
+    let list = lfw(&project, ["list"])?;
+    let ids = list["workflows"]
+        .as_array()
+        .expect("workflows list returns an array")
+        .iter()
+        .map(|workflow| workflow["id"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["lightflow.image_prompt", "lightflow.std"]);
+
+    let deps = lfw(&project, ["deps", "lightflow.image_prompt"])?;
+    assert_eq!(deps["complete"], true);
+    assert_eq!(
+        deps["workflows"],
+        serde_json::json!(["lightflow.image_prompt", "lightflow.std"])
+    );
+    assert_eq!(
+        deps["workflow_order"],
+        serde_json::json!(["lightflow.std", "lightflow.image_prompt"])
+    );
+
+    let _ = fs::remove_dir_all(base);
+    Ok(())
+}
+
 fn lightflow<const N: usize>(
     root: &Path,
     args: [&str; N],
@@ -308,6 +374,39 @@ pub fn define() -> WorkflowSpec {
         .node("nested", "lightflow.child")
         .node("sink", "lightflow.sink")
         .edge("nested", "out", "sink", "in")
+        .build()
+}
+"#,
+    )?;
+    Ok(())
+}
+
+fn write_external_std_crate(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(
+        root.join("Cargo.toml"),
+        format!(
+            r#"[package]
+name = "lightflow-std"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lightflow = {{ path = {:?} }}
+"#,
+            env!("CARGO_MANIFEST_DIR")
+        ),
+    )?;
+    fs::write(
+        root.join("src/lib.rs"),
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.std")
+        .version("0.1.0")
+        .name("LightFlow Std Identity")
+        .input("value", "json")
+        .output("value", "json")
         .build()
 }
 "#,
