@@ -3,8 +3,8 @@ use lightflow::workflow::*;
 pub fn define() -> WorkflowSpec {
     workflow("lightflow.std")
         .version("0.1.0")
-        .name("LightFlow Standard Library")
-        .description("Minimal standard workflow crate for abstract reusable building blocks.")
+        .name("LightFlow Std Identity")
+        .description("Domain-neutral identity workflow for passing one JSON value through unchanged.")
         .input("value", "json")
         .output("value", "json")
         .build()

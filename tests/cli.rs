@@ -176,6 +176,33 @@ fn mcp_exposes_workflow_only_tools() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test]
+fn repository_std_workflow_is_library_only_and_abstract() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let service = ApiService::new(root);
+    let workflow = service.get_workflow("lightflow.std")?;
+
+    assert_eq!(workflow.id, "lightflow.std");
+    assert_eq!(workflow.version, "0.1.0");
+    assert_eq!(workflow.name, "LightFlow Std Identity");
+    assert_eq!(workflow.inputs.len(), 1);
+    assert_eq!(workflow.outputs.len(), 1);
+    assert!(workflow.dependencies.is_empty());
+    assert!(workflow.nodes.is_empty());
+    assert!(workflow.edges.is_empty());
+
+    let crate_dir = root.join("lightflow/workflows/lightflow.std");
+    assert!(crate_dir.join("src/lib.rs").exists());
+    assert!(!crate_dir.join("src/main.rs").exists());
+
+    let manifest = fs::read_to_string(crate_dir.join("Cargo.toml"))?;
+    assert!(manifest.contains("name = \"lightflow-std\""));
+    assert!(!manifest.contains("publish = false"));
+
+    Ok(())
+}
+
 fn lightflow<const N: usize>(
     root: &Path,
     args: [&str; N],

@@ -49,6 +49,15 @@ does not compile or execute workflow files.
 A future executable workflow entrypoint can be marked by adding `src/main.rs`.
 Until then, `lfw init` and `lfw add` generate reusable library workflows only.
 
+## Standard Workflows
+
+`lightflow.std` is a normal workflow crate, not backend code and not a hidden
+built-in. Its scope is limited to abstract, domain-neutral building blocks such
+as identity / passthrough, no-op control points, structural merge / split
+helpers, and basic type adapters when they are broadly useful. It must not
+contain agent behavior, provider integrations, model download logic, or
+business templates.
+
 ## Validation
 
 The backend validates:
