@@ -269,6 +269,68 @@ pub fn define() -> WorkflowSpec {
     Ok(())
 }
 
+#[test]
+fn workflow_versions_use_exact_semver_requirements() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    write_project_specs(&root)?;
+
+    write_workflow_crate(
+        &root,
+        "lightflow.parent",
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.parent")
+        .version("0.1.0")
+        .name("Parent")
+        .input("in", "json")
+        .output("out", "json")
+        .depends_on("lightflow.child", "9.9.9")
+        .node("nested", "lightflow.child")
+        .build()
+}
+"#,
+    )?;
+
+    let deps = lfw(&root, ["deps", "lightflow.parent"])?;
+    assert_eq!(deps["complete"], false);
+    assert_eq!(
+        deps["version_mismatches"][0]["workflow_id"],
+        "lightflow.child"
+    );
+    assert_eq!(deps["version_mismatches"][0]["required"], "9.9.9");
+    assert_eq!(deps["version_mismatches"][0]["found"], "0.1.0");
+    assert_eq!(
+        deps["version_mismatches"][0]["required_by"],
+        "lightflow.parent"
+    );
+
+    let validation = lightflow(
+        &root,
+        [
+            "workflows",
+            "validate",
+            r#"{
+              "id": "lightflow.invalid_version",
+              "version": "not-semver",
+              "name": "Invalid Version",
+              "nodes": [],
+              "edges": []
+            }"#,
+        ],
+    )?;
+    assert_eq!(validation["valid"], false);
+    assert!(
+        validation["issues"][0]
+            .as_str()
+            .unwrap()
+            .contains("must be semantic version")
+    );
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
 fn lightflow<const N: usize>(
     root: &Path,
     args: [&str; N],

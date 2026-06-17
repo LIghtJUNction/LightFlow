@@ -63,13 +63,17 @@ business templates.
 The backend validates:
 
 - id values are safe path segments
-- workflow names and versions are present
+- workflow names and SemVer versions are present
 - port names are non-empty and unique per direction
 - referenced workflows exist
 - a workflow does not directly nest itself
 - edge source and target ports exist
 - workflow graph edges are acyclic
 - declared dependency versions match local workflow versions
+
+Version matching is intentionally strict in the current iteration: dependency
+requirements are either exact SemVer strings such as `0.1.0` or `*`. SemVer
+ranges such as `^0.1` and `>=0.1` are reserved for a later update path.
 
 ## Dependency Resolution
 

@@ -78,6 +78,25 @@ lightflow-std = { git = "https://github.com/lightjunction/LightFlow", package = 
 The first implemented discovery path is local `path` dependencies. Remote git
 dependencies will be made local by `lfw sync` in the next installation pass.
 
+## Versioning
+
+Workflow definitions use SemVer strings:
+
+```rust
+workflow("lightflow.std")
+    .version("0.1.0")
+```
+
+Explicit workflow dependencies currently use exact SemVer requirements:
+
+```rust
+.depends_on("lightflow.std", "0.1.0")
+```
+
+The backend also accepts `*` for an unconstrained local dependency. Range
+requirements such as `^0.1` and `>=0.1` are intentionally not supported yet;
+they will be added after the exact-version update path is stable.
+
 ## Not Stored Here
 
 Do not commit runtime state, credentials, generated artifacts, caches, or model

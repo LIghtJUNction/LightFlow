@@ -89,6 +89,20 @@ Any dependency crate that exposes `pub fn define() -> WorkflowSpec` in
 `src/lib.rs` is discovered by the backend and can be referenced from
 `.depends_on(...)` or `.node(...)`.
 
+## Versioning
+
+Workflow versions are SemVer strings. The current resolver supports exact
+requirements and `*`:
+
+```rust
+workflow("lightflow.std")
+    .version("0.1.0")
+    .depends_on("lightflow.other", "0.1.0")
+```
+
+Range requirements such as `^0.1` and `>=0.1` are planned after the exact
+version update path is stable.
+
 ## HTTP
 
 ```bash

@@ -7,6 +7,7 @@ use crate::workflow::{
 };
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
+use semver::Version;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -498,6 +499,11 @@ fn validate_workflow_shape(workflow: &WorkflowSpec) -> ApiResult<()> {
     push_id_issue(&mut issues, &workflow.id, "workflow id");
     if workflow.version.trim().is_empty() {
         issues.push(format!("workflow {} must have a version", workflow.id));
+    } else if Version::parse(&workflow.version).is_err() {
+        issues.push(format!(
+            "workflow {} version {} must be semantic version",
+            workflow.id, workflow.version
+        ));
     }
     if workflow.name.trim().is_empty() {
         issues.push(format!("workflow {} must have a name", workflow.id));
@@ -532,6 +538,14 @@ fn validate_workflow_spec(
     };
 
     for dependency in &workflow.dependencies {
+        if let Some(version) = &dependency.version
+            && !is_supported_version_requirement(version)
+        {
+            issues.push(format!(
+                "workflow {} declares unsupported version requirement {} for {}",
+                workflow.id, version, dependency.workflow_id
+            ));
+        }
         if !workflows.contains_key(&dependency.workflow_id) {
             issues.push(format!(
                 "workflow {} declares missing dependency {}",
@@ -768,7 +782,20 @@ impl DependencyCollector<'_> {
 }
 
 fn version_satisfies(found: &str, required: &str) -> bool {
-    required == "*" || found == required
+    if required == "*" {
+        return true;
+    }
+    let Ok(found) = Version::parse(found) else {
+        return false;
+    };
+    let Ok(required) = Version::parse(required) else {
+        return false;
+    };
+    found == required
+}
+
+fn is_supported_version_requirement(required: &str) -> bool {
+    required == "*" || Version::parse(required).is_ok()
 }
 
 fn node_inputs(
