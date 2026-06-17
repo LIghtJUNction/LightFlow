@@ -97,6 +97,10 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let options = parse_sync_options(args)?;
             print_json(&sync_project(&service, &options)?)?;
         }
+        "publish" => {
+            let options = parse_publish_options(args)?;
+            print_json(&publish_crate(Path::new("."), &options)?)?;
+        }
         "run" => {
             let options = parse_run_options(args)?;
             print_json(&service.execute_workflow(&options.workflow_id, options.execution)?)?;
@@ -198,10 +202,226 @@ fn usage() -> String {
         "  lfw workflows save <json|-|@file>",
         "  lfw deps <workflow_id>",
         "  lfw sync [workflow_id] [--model <requirement=variant>] [--apply]",
+        "  lfw publish [workflow_id|--crate <path>] [--apply]",
         "  lfw run <workflow_id> [--input <name=json>] [--disable <node>] [--enable <node>]",
         "  lfw serve [--host <host>] [--port <port>]",
     ]
     .join("\n")
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct PublishOptions {
+    target: PublishTarget,
+    apply: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum PublishTarget {
+    Root,
+    Workflow(String),
+    Crate(PathBuf),
+}
+
+fn parse_publish_options(args: &[String]) -> CliResult<PublishOptions> {
+    let mut target = None;
+    let mut apply = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--apply" => {
+                apply = true;
+                index += 1;
+            }
+            "--dry-run" => {
+                apply = false;
+                index += 1;
+            }
+            "--crate" => {
+                if target.is_some() {
+                    return Err(CliError::Usage(
+                        "publish accepts only one target".to_owned(),
+                    ));
+                }
+                target = Some(PublishTarget::Crate(PathBuf::from(required_flag_value(
+                    args, index, "--crate",
+                )?)));
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                return Err(CliError::Usage(format!(
+                    "unexpected argument for publish: {value}"
+                )));
+            }
+            value => {
+                if target.is_some() {
+                    return Err(CliError::Usage(
+                        "publish accepts only one target".to_owned(),
+                    ));
+                }
+                target = Some(PublishTarget::Workflow(normalize_workflow_id(value)));
+                index += 1;
+            }
+        }
+    }
+    Ok(PublishOptions {
+        target: target.unwrap_or(PublishTarget::Root),
+        apply,
+    })
+}
+
+fn publish_crate(root: &Path, options: &PublishOptions) -> CliResult<serde_json::Value> {
+    let manifest_path = publish_manifest_path(root, &options.target);
+    if !manifest_path.exists() {
+        return Err(CliError::Usage(format!(
+            "publish manifest does not exist: {}",
+            manifest_path.display()
+        )));
+    }
+    let source = fs::read_to_string(&manifest_path)?;
+    let document = source
+        .parse::<DocumentMut>()
+        .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
+    let package = package_field(&document, "name")?;
+    let version = package_field(&document, "version")?;
+    let issues = publish_issues(&document);
+    let mut command = vec![
+        "cargo".to_owned(),
+        "publish".to_owned(),
+        "--manifest-path".to_owned(),
+        display_path(&manifest_path),
+    ];
+    if !options.apply {
+        command.push("--dry-run".to_owned());
+    }
+
+    if options.apply {
+        if !issues.is_empty() {
+            return Err(CliError::Usage(format!(
+                "crate is not publishable: {}",
+                issues.join("; ")
+            )));
+        }
+        let mut process = Command::new("cargo");
+        for arg in &command[1..] {
+            process.arg(arg);
+        }
+        run_status(&mut process)?;
+    }
+
+    Ok(json!({
+        "dry_run": !options.apply,
+        "target": publish_target_json(&options.target),
+        "manifest": manifest_path,
+        "package": package,
+        "version": version,
+        "publishable": issues.is_empty(),
+        "issues": issues,
+        "command": command,
+        "executed": if options.apply { vec![command] } else { Vec::<Vec<String>>::new() },
+    }))
+}
+
+fn display_path(path: &Path) -> String {
+    path.strip_prefix(".").unwrap_or(path).display().to_string()
+}
+
+fn publish_manifest_path(root: &Path, target: &PublishTarget) -> PathBuf {
+    match target {
+        PublishTarget::Root => root.join("Cargo.toml"),
+        PublishTarget::Workflow(workflow_id) => workflow_manifest_path(root, workflow_id),
+        PublishTarget::Crate(path) => {
+            if path.ends_with("Cargo.toml") {
+                root.join(path)
+            } else {
+                root.join(path).join("Cargo.toml")
+            }
+        }
+    }
+}
+
+fn publish_target_json(target: &PublishTarget) -> serde_json::Value {
+    match target {
+        PublishTarget::Root => json!({ "kind": "root" }),
+        PublishTarget::Workflow(workflow_id) => {
+            json!({ "kind": "workflow", "workflow_id": workflow_id })
+        }
+        PublishTarget::Crate(path) => json!({ "kind": "crate", "path": path }),
+    }
+}
+
+fn package_field(document: &DocumentMut, field: &str) -> CliResult<String> {
+    document
+        .get("package")
+        .and_then(|package| package.get(field))
+        .and_then(Item::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| CliError::Usage(format!("Cargo manifest is missing package.{field}")))
+}
+
+fn publish_issues(document: &DocumentMut) -> Vec<String> {
+    let mut issues = Vec::new();
+    let package = document.get("package");
+    if package
+        .and_then(|package| package.get("publish"))
+        .and_then(Item::as_bool)
+        == Some(false)
+    {
+        issues.push("package.publish is false".to_owned());
+    }
+    match package
+        .and_then(|package| package.get("version"))
+        .and_then(Item::as_str)
+    {
+        Some(version) if semver::Version::parse(version).is_err() => {
+            issues.push(format!("package.version {version} is not semantic version"));
+        }
+        Some(_) => {}
+        None => issues.push("package.version is missing".to_owned()),
+    }
+    if package
+        .and_then(|package| package.get("description"))
+        .and_then(Item::as_str)
+        .is_none_or(str::is_empty)
+    {
+        issues.push("package.description is missing".to_owned());
+    }
+    let has_license = package
+        .and_then(|package| package.get("license"))
+        .and_then(Item::as_str)
+        .is_some_and(|license| !license.is_empty())
+        || package
+            .and_then(|package| package.get("license-file"))
+            .and_then(Item::as_str)
+            .is_some_and(|license_file| !license_file.is_empty());
+    if !has_license {
+        issues.push("package.license or package.license-file is missing".to_owned());
+    }
+    collect_publish_dependency_issues(document.get("dependencies"), &mut issues);
+    collect_publish_dependency_issues(
+        document
+            .get("workspace")
+            .and_then(|workspace| workspace.get("dependencies")),
+        &mut issues,
+    );
+    issues
+}
+
+fn collect_publish_dependency_issues(dependencies: Option<&Item>, issues: &mut Vec<String>) {
+    let Some(dependencies) = dependencies.and_then(Item::as_table_like) else {
+        return;
+    };
+    for (name, dependency) in dependencies.iter() {
+        if dependency.get("git").is_some() {
+            issues.push(format!(
+                "dependency {name} uses git, which cannot be published to crates.io"
+            ));
+        }
+        if dependency.get("path").is_some() && dependency.get("version").is_none() {
+            issues.push(format!(
+                "dependency {name} uses path without a crates.io version"
+            ));
+        }
+    }
 }
 
 /// Run the quick workflow executor from process arguments.
@@ -809,15 +1029,17 @@ fn ensure_workspace_manifest(root: &Path, created: &mut Vec<String>) -> CliResul
 
 fn workspace_manifest() -> String {
     format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\"lightflow/workflows/*\"]\n\n[workspace.dependencies]\nlightflow = {{ git = {:?} }}\n",
-        env!("CARGO_PKG_REPOSITORY")
+        "[workspace]\nresolver = \"3\"\nmembers = [\"lightflow/workflows/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
+        env!("CARGO_PKG_VERSION")
     )
 }
 
 fn workflow_manifest(workflow_id: &str) -> String {
     format!(
-        "[package]\nname = {:?}\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n[dependencies]\nlightflow = {{ workspace = true }}\n",
-        package_name_from_id(workflow_id)
+        "[package]\nname = {:?}\nversion = \"0.1.0\"\nedition = \"2024\"\ndescription = {:?}\nlicense = \"MIT OR Apache-2.0\"\nrepository = {:?}\n\n[dependencies]\nlightflow = {{ workspace = true }}\n",
+        package_name_from_id(workflow_id),
+        format!("LightFlow workflow {}", workflow_id),
+        env!("CARGO_PKG_REPOSITORY")
     )
 }
 

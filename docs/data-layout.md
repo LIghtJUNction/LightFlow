@@ -88,6 +88,21 @@ lfw add-dep lightflow-std --git https://github.com/lightjunction/LightFlow --pac
 
 `lfw sync` delegates Rust module fetching to Cargo.
 
+## Publishing Workflow Crates
+
+`lfw init` and `lfw add` generate workflow crates with versioned `lightflow`
+dependencies and without `publish = false`, so they can become crates.io
+packages once their metadata is ready.
+
+```bash
+lfw publish lightflow.example
+lfw publish lightflow.example --apply
+```
+
+Repository-internal examples can still opt out with `publish = false`.
+`lfw publish` reports those as non-publishable instead of trying to upload
+them.
+
 ## Versioning
 
 Workflow definitions use SemVer strings:

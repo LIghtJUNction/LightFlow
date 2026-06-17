@@ -101,6 +101,9 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert_eq!(added["workflow_id"], "lightflow.extra");
     let manifest = fs::read_to_string(root.join("lightflow/workflows/lightflow.extra/Cargo.toml"))?;
     assert!(manifest.contains("name = \"lightflow-extra\""));
+    assert!(!manifest.contains("publish = false"));
+    let workspace = fs::read_to_string(root.join("Cargo.toml"))?;
+    assert!(workspace.contains("lightflow = \"0.1.0\""));
     let path = root.join("lightflow/workflows/lightflow.extra/src/lib.rs");
     let source = fs::read_to_string(path)?;
     assert!(source.contains("workflow(\"lightflow.extra\")"));
@@ -211,8 +214,64 @@ fn repository_std_workflow_is_library_only_and_abstract() -> Result<(), Box<dyn 
 
     let manifest = fs::read_to_string(crate_dir.join("Cargo.toml"))?;
     assert!(manifest.contains("name = \"lightflow-std\""));
+    assert!(manifest.contains("lightflow = { version = \"0.1.0\", path = \"../../..\" }"));
     assert!(!manifest.contains("publish = false"));
 
+    Ok(())
+}
+
+#[test]
+fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    lfw(&root, ["init"])?;
+
+    let workflow_plan = lfw(&root, ["publish", "lightflow.example"])?;
+    assert_eq!(workflow_plan["dry_run"], true);
+    assert_eq!(workflow_plan["target"]["workflow_id"], "lightflow.example");
+    assert_eq!(workflow_plan["package"], "lightflow-example");
+    assert_eq!(workflow_plan["version"], "0.1.0");
+    assert_eq!(workflow_plan["publishable"], true);
+    assert_eq!(workflow_plan["issues"], serde_json::json!([]));
+    assert_eq!(
+        workflow_plan["command"],
+        serde_json::json!([
+            "cargo",
+            "publish",
+            "--manifest-path",
+            "lightflow/workflows/lightflow.example/Cargo.toml",
+            "--dry-run"
+        ])
+    );
+
+    let workspace_root_publish = Command::new(env!("CARGO_BIN_EXE_lfw"))
+        .arg("publish")
+        .current_dir(&root)
+        .output()?;
+    assert!(!workspace_root_publish.status.success());
+    assert!(
+        String::from_utf8_lossy(&workspace_root_publish.stderr)
+            .contains("Cargo manifest is missing package.name")
+    );
+
+    let root_plan = lfw(Path::new(env!("CARGO_MANIFEST_DIR")), ["publish"])?;
+    assert_eq!(root_plan["package"], "lightflow");
+    assert_eq!(root_plan["publishable"], true);
+
+    let internal_plan = lfw(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        ["publish", "lightflow.text_prompt"],
+    )?;
+    assert_eq!(internal_plan["publishable"], false);
+    assert!(
+        internal_plan["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue == "package.publish is false")
+    );
+
+    let _ = fs::remove_dir_all(root);
     Ok(())
 }
 

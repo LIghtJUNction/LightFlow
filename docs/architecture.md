@@ -128,6 +128,16 @@ use `lightflow.std` in `.depends_on(...)` or `.node(...)`. Remote git
 dependencies keep the same Cargo manifest shape; `lfw sync` handles Cargo
 fetching and model/resource synchronization.
 
+## Publishing Model
+
+Publishing is intentionally delegated to Cargo. `lfw publish` selects a root
+crate, workflow id, or explicit crate path, validates the manifest for common
+crates.io blockers, and returns the exact `cargo publish --manifest-path ...`
+command. The command is a plan by default; `--apply` executes it.
+
+This keeps workflow installation and workflow publishing on the same primitive:
+ordinary Rust crates.
+
 ## Sync Model
 
 `lfw sync` separates module dependencies from model resources:

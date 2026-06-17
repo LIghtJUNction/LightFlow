@@ -77,6 +77,7 @@ cargo run --bin lfw -- deps lightflow.text_plan
 cargo run --bin lfw -- run lightflow.text_plan --input value='{"topic":"demo"}'
 cargo run --bin lfwx -- lightflow.text_plan --input value='{"topic":"demo"}' --disable prompt
 cargo run -- workflows validate '{"id":"lightflow.example","version":"0.1.0","name":"Example"}'
+cargo run --bin lfw -- publish lightflow.std
 cargo run -- serve --port 5174
 ```
 
@@ -121,6 +122,22 @@ workflow("lightflow.std")
 
 Range requirements such as `^0.1` and `>=0.1` are planned after the exact
 version update path is stable.
+
+## Publishing
+
+`lfw publish` creates a Cargo publish plan by default. It checks the target
+manifest for basic crates.io blockers such as `publish = false`, non-SemVer
+versions, git dependencies, and path dependencies without a version.
+
+```bash
+lfw publish                  # root lightflow crate plan
+lfw publish lightflow.std    # workflow crate plan
+lfw publish --crate path/to/crate
+lfw publish lightflow.std --apply
+```
+
+`--apply` runs `cargo publish --manifest-path ...`. Without `--apply`, no
+network publish is attempted and the generated command includes `--dry-run`.
 
 ## Sync
 
