@@ -3,3 +3,7 @@
 Each directory is one workflow crate. Reusable workflows define `src/lib.rs`
 and do not define `src/main.rs`. Leaf workflows declare ports and no nodes.
 Composite workflows use `.node(..., workflow_id)` to nest other workflows.
+
+`lightflow.std` is a normal workflow crate in this repository, not a backend
+built-in. It is reserved for minimal, abstract, reusable building blocks and
+must not contain agent behavior, provider integrations, or business templates.
