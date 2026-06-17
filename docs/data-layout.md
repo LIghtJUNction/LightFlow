@@ -11,6 +11,36 @@ lightflow/
         lib.rs
 ```
 
+Shared user workflows follow XDG paths. The CLI loads:
+
+```text
+$XDG_CONFIG_HOME/lightflow/.lfwrc
+# default: ~/.config/lightflow/.lfwrc
+```
+
+The rc file uses shell-style export syntax:
+
+```bash
+export LFW_PATH="$HOME/.local/share/lightflow/workflows"
+```
+
+If there is no rc file, `lfw` still uses the XDG default
+`$XDG_DATA_HOME/lightflow/workflows`, or
+`~/.local/share/lightflow/workflows` when `XDG_DATA_HOME` is not set.
+`lfw init` creates the default rc file and workflow directory when missing.
+
+Each `LFW_PATH` entry can point at a workflow collection, a LightFlow project
+root, or a single workflow crate. A workflow collection has the same crate
+shape without the project wrapper:
+
+```text
+$XDG_DATA_HOME/lightflow/workflows/
+  <workflow_id>/
+    Cargo.toml
+    src/
+      lib.rs
+```
+
 ## Workflow Crates
 
 Each workflow is a Rust library crate with embedded metadata and definition in
@@ -82,11 +112,30 @@ lightflow-std = { git = "https://github.com/lightjunction/LightFlow", package = 
 `lfw add-dep` writes these dependencies into the workspace manifest:
 
 ```bash
+lfw add-dep lightflow-std --version 0.1.0
 lfw add-dep lightflow-std --path lightflow/workflows/lightflow.std
 lfw add-dep lightflow-std --git https://github.com/lightjunction/LightFlow --package lightflow-std
 ```
 
-`lfw sync` delegates Rust module fetching to Cargo.
+Workflow dependencies can embed the same install metadata in the Rust file:
+
+```rust
+workflow("lightflow.image_prompt")
+    .depends_on_crate("lightflow.std", "0.1.0", "lightflow-std")
+    .depends_on_path("lightflow.local_std", "0.1.0", "lightflow-std", "../lightflow-std")
+    .depends_on_git(
+        "lightflow.remote_std",
+        "0.1.0",
+        "lightflow-std",
+        "https://github.com/lightjunction/LightFlow",
+        "lightflow-std",
+    )
+```
+
+`lfw sync` delegates Rust module fetching to Cargo. If a declared workflow
+dependency is not installed yet and has install metadata, `lfw sync --apply`
+adds the Cargo dependency to the workspace manifest before running
+`cargo fetch`.
 
 ## Publishing Workflow Crates
 
@@ -116,6 +165,13 @@ Explicit workflow dependencies currently use exact SemVer requirements:
 
 ```rust
 .depends_on("lightflow.std", "0.1.0")
+```
+
+The install-aware forms keep the same exact workflow version and add Cargo
+resolution metadata:
+
+```rust
+.depends_on_crate("lightflow.std", "0.1.0", "lightflow-std")
 ```
 
 The backend also accepts `*` for an unconstrained local dependency. Range

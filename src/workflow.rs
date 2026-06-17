@@ -47,6 +47,28 @@ pub struct WorkflowDependencyRequirement {
     pub workflow_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install: Option<CargoDependency>,
+}
+
+/// Cargo dependency metadata for installing a workflow dependency.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CargoDependency {
+    pub crate_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<CargoDependencySource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+}
+
+/// Where Cargo should resolve an installable workflow dependency.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum CargoDependencySource {
+    Path(String),
+    Git(String),
 }
 
 /// A model resource needed by a workflow.
@@ -315,6 +337,74 @@ impl WorkflowBuilder {
         self.spec.dependencies.push(WorkflowDependencyRequirement {
             workflow_id: workflow_id.into(),
             version: Some(version.into()),
+            install: None,
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn depends_on_crate(
+        mut self,
+        workflow_id: impl Into<String>,
+        version: impl Into<String>,
+        crate_name: impl Into<String>,
+    ) -> Self {
+        let version = version.into();
+        self.spec.dependencies.push(WorkflowDependencyRequirement {
+            workflow_id: workflow_id.into(),
+            version: Some(version.clone()),
+            install: Some(CargoDependency {
+                crate_name: crate_name.into(),
+                version: Some(version),
+                source: None,
+                package: None,
+            }),
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn depends_on_path(
+        mut self,
+        workflow_id: impl Into<String>,
+        version: impl Into<String>,
+        crate_name: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Self {
+        let version = version.into();
+        self.spec.dependencies.push(WorkflowDependencyRequirement {
+            workflow_id: workflow_id.into(),
+            version: Some(version.clone()),
+            install: Some(CargoDependency {
+                crate_name: crate_name.into(),
+                version: Some(version),
+                source: Some(CargoDependencySource::Path(path.into())),
+                package: None,
+            }),
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn depends_on_git(
+        mut self,
+        workflow_id: impl Into<String>,
+        version: impl Into<String>,
+        crate_name: impl Into<String>,
+        git: impl Into<String>,
+        package: impl Into<String>,
+    ) -> Self {
+        let version = version.into();
+        let package = package.into();
+        self.spec.dependencies.push(WorkflowDependencyRequirement {
+            workflow_id: workflow_id.into(),
+            version: Some(version.clone()),
+            install: Some(CargoDependency {
+                crate_name: crate_name.into(),
+                version: Some(version),
+                source: Some(CargoDependencySource::Git(git.into())),
+                package: Some(package).filter(|package| !package.is_empty()),
+            }),
         });
         self
     }

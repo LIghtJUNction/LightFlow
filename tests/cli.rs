@@ -104,6 +104,9 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert!(!manifest.contains("publish = false"));
     let workspace = fs::read_to_string(root.join("Cargo.toml"))?;
     assert!(workspace.contains("lightflow = \"0.1.0\""));
+    let rc = fs::read_to_string(root.join(".test-xdg/config/lightflow/.lfwrc"))?;
+    assert!(rc.contains("export LFW_PATH="));
+    assert!(rc.contains(".test-xdg/data/lightflow/workflows"));
     let path = root.join("lightflow/workflows/lightflow.extra/src/lib.rs");
     let source = fs::read_to_string(path)?;
     assert!(source.contains("workflow(\"lightflow.extra\")"));
@@ -116,6 +119,60 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
 
     let workflow = lightflow(&root, ["workflows", "get", "lightflow.extra"])?;
     assert_eq!(workflow["id"], "lightflow.extra");
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn lfw_loads_xdg_rc_and_lfw_path() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    let xdg_data_workflows = root.join(".test-xdg/data/lightflow/workflows");
+    write_workflow_crate_in(
+        &xdg_data_workflows,
+        "lightflow.xdg_default",
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.xdg_default")
+        .version("0.1.0")
+        .name("XDG Default")
+        .input("value", "json")
+        .output("value", "json")
+        .build()
+}
+"#,
+    )?;
+
+    let default_list = lfw(&root, ["list"])?;
+    assert_eq!(default_list["workflows"][0]["id"], "lightflow.xdg_default");
+
+    let custom_workflows = root.join("custom-workflows");
+    write_workflow_crate_in(
+        &custom_workflows,
+        "lightflow.rc",
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.rc")
+        .version("0.1.0")
+        .name("RC Workflow")
+        .input("value", "json")
+        .output("value", "json")
+        .build()
+}
+"#,
+    )?;
+    let rc_dir = root.join(".test-xdg/config/lightflow");
+    fs::create_dir_all(&rc_dir)?;
+    fs::write(
+        rc_dir.join(".lfwrc"),
+        format!("export LFW_PATH='{}'\n", custom_workflows.display()),
+    )?;
+
+    let rc_list = lfw(&root, ["list"])?;
+    assert_eq!(rc_list["workflows"][0]["id"], "lightflow.rc");
 
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -578,6 +635,83 @@ fn add_dep_writes_git_workflow_dependency() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
+fn sync_applies_declared_workflow_module_dependencies() -> Result<(), Box<dyn std::error::Error>> {
+    let base = unique_temp_root();
+    let project = base.join("project");
+    let std_dep = base.join("lightflow-std");
+    fs::create_dir_all(&project)?;
+    write_external_std_crate(&std_dep)?;
+
+    fs::write(
+        project.join("Cargo.toml"),
+        format!(
+            r#"[workspace]
+resolver = "3"
+members = ["lightflow/workflows/*"]
+
+[workspace.dependencies]
+lightflow = {{ path = {:?} }}
+"#,
+            env!("CARGO_MANIFEST_DIR")
+        ),
+    )?;
+    write_workflow_crate(
+        &project,
+        "lightflow.image_prompt",
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.image_prompt")
+        .version("0.1.0")
+        .name("Image Prompt")
+        .input("positive", "text")
+        .input("negative", "text")
+        .output("prompt", "json")
+        .depends_on_path("lightflow.std", "0.1.0", "lightflow-std", "../lightflow-std")
+        .node("passthrough", "lightflow.std")
+        .build()
+}
+"#,
+    )?;
+
+    let dry_run = lfw(&project, ["sync", "lightflow.image_prompt"])?;
+    assert_eq!(dry_run["dry_run"], true);
+    assert_eq!(
+        dry_run["module_dependencies"]["installs"][0]["dependency"],
+        "lightflow-std"
+    );
+    assert_eq!(
+        dry_run["module_dependencies"]["installs"][0]["source"]["path"],
+        "../lightflow-std"
+    );
+    let manifest = fs::read_to_string(project.join("Cargo.toml"))?;
+    assert!(!manifest.contains("lightflow-std = { path = \"../lightflow-std\" }"));
+
+    let applied = lfw(&project, ["sync", "lightflow.image_prompt", "--apply"])?;
+    assert_eq!(applied["dry_run"], false);
+    assert_eq!(
+        applied["executed"][0]["dependency"],
+        serde_json::json!("lightflow-std")
+    );
+    let manifest = fs::read_to_string(project.join("Cargo.toml"))?;
+    assert!(
+        manifest.contains("lightflow-std = { version = \"0.1.0\", path = \"../lightflow-std\" }")
+    );
+
+    let list = lfw(&project, ["list"])?;
+    let ids = list["workflows"]
+        .as_array()
+        .expect("workflows list returns an array")
+        .iter()
+        .map(|workflow| workflow["id"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["lightflow.image_prompt", "lightflow.std"]);
+
+    let _ = fs::remove_dir_all(base);
+    Ok(())
+}
+
+#[test]
 fn workflow_versions_use_exact_semver_requirements() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     write_project_specs(&root)?;
@@ -655,7 +789,13 @@ fn lfwx<const N: usize>(root: &Path, args: [&str; N]) -> Result<Value, Box<dyn s
 }
 
 fn run_json(binary: &str, root: &Path, args: &[&str]) -> Result<Value, Box<dyn std::error::Error>> {
-    let output = Command::new(binary).args(args).current_dir(root).output()?;
+    let output = Command::new(binary)
+        .args(args)
+        .current_dir(root)
+        .env("XDG_CONFIG_HOME", root.join(".test-xdg/config"))
+        .env("XDG_DATA_HOME", root.join(".test-xdg/data"))
+        .env_remove("LFW_PATH")
+        .output()?;
 
     if !output.status.success() {
         return Err(format!(
@@ -808,6 +948,33 @@ publish = false
 lightflow = {{ workspace = true }}
 "#,
             workflow_id.replace('.', "-")
+        ),
+    )?;
+    fs::write(crate_dir.join("src/lib.rs"), source)?;
+    Ok(())
+}
+
+fn write_workflow_crate_in(
+    collection: &Path,
+    workflow_id: &str,
+    source: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let crate_dir = collection.join(workflow_id);
+    fs::create_dir_all(crate_dir.join("src"))?;
+    fs::write(
+        crate_dir.join("Cargo.toml"),
+        format!(
+            r#"[package]
+name = "{}"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+lightflow = {{ path = {:?} }}
+"#,
+            workflow_id.replace('.', "-"),
+            env!("CARGO_MANIFEST_DIR")
         ),
     )?;
     fs::write(crate_dir.join("src/lib.rs"), source)?;

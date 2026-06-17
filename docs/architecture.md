@@ -121,12 +121,18 @@ execution substrates, or agent behavior.
 ## Installation Model
 
 Installing a workflow means adding a Cargo dependency. The backend reads local
-workflow crates and Cargo `path` dependencies, then statically parses any
-dependency crate that exposes `pub fn define() -> WorkflowSpec` in `src/lib.rs`.
-This lets a project depend on `lightflow-std = { path = "..." }` and immediately
-use `lightflow.std` in `.depends_on(...)` or `.node(...)`. Remote git
-dependencies keep the same Cargo manifest shape; `lfw sync` handles Cargo
-fetching and model/resource synchronization.
+workflow crates, XDG `LFW_PATH` entries, and Cargo `path` dependencies, then
+statically parses any dependency crate that exposes
+`pub fn define() -> WorkflowSpec` in `src/lib.rs`. This lets a project depend
+on `lightflow-std = { path = "..." }` and immediately use `lightflow.std` in
+`.depends_on(...)` or `.node(...)`. Remote git dependencies keep the same Cargo
+manifest shape; `lfw sync` handles Cargo fetching and model/resource
+synchronization.
+
+`LFW_PATH` is loaded from `$XDG_CONFIG_HOME/lightflow/.lfwrc`, defaulting to
+`~/.config/lightflow/.lfwrc`. The default workflow collection lives under
+`$XDG_DATA_HOME/lightflow/workflows`, or
+`~/.local/share/lightflow/workflows` when `XDG_DATA_HOME` is not set.
 
 ## Publishing Model
 

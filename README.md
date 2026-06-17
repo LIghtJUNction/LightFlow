@@ -97,6 +97,23 @@ runtime adapters are added.
 
 ## Installing Workflows
 
+LightFlow loads user configuration from:
+
+```text
+$XDG_CONFIG_HOME/lightflow/.lfwrc
+# default: ~/.config/lightflow/.lfwrc
+```
+
+`lfw init` creates the file when missing:
+
+```bash
+export LFW_PATH='/home/alice/.local/share/lightflow/workflows'
+```
+
+If `XDG_DATA_HOME` is not set, the default workflow search directory is
+`~/.local/share/lightflow/workflows`. `LFW_PATH` uses the platform path-list
+format, so multiple workflow collections can be searched.
+
 Workflow dependencies are Cargo dependencies. A local standard workflow can be
 installed with:
 
@@ -108,6 +125,23 @@ lightflow-std = { path = "lightflow/workflows/lightflow.std" }
 Any dependency crate that exposes `pub fn define() -> WorkflowSpec` in
 `src/lib.rs` is discovered by the backend and can be referenced from
 `.depends_on(...)` or `.node(...)`.
+
+Workflow files can also embed the Cargo installation hint:
+
+```rust
+workflow("lightflow.image_prompt")
+    .depends_on_path("lightflow.std", "0.1.0", "lightflow-std", "../lightflow-std")
+    .depends_on_git(
+        "lightflow.std",
+        "0.1.0",
+        "lightflow-std",
+        "https://github.com/lightjunction/LightFlow",
+        "lightflow-std",
+    )
+```
+
+`lfw sync --apply` uses those hints to add missing Cargo dependencies before
+running `cargo fetch`.
 
 ## Versioning
 
@@ -154,6 +188,11 @@ The module side uses Cargo:
 ```bash
 cargo fetch
 ```
+
+If a workflow dependency embeds install metadata with `.depends_on_crate(...)`,
+`.depends_on_path(...)`, or `.depends_on_git(...)`, `lfw sync` reports missing
+Cargo dependencies under `module_dependencies.installs`; `--apply` writes them
+to the workspace manifest.
 
 The model side uses Hugging Face's CLI and global cache:
 

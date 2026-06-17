@@ -1,11 +1,11 @@
 //! Framework-independent LightFlow backend service.
 
 use crate::workflow::{
-    ModelProvider, ModelRequirement, ModelVariant, NodeExecution, NodeExecutionStatus, PortSpec,
-    ResolvedWorkflowDependency, WorkflowDependencyReport, WorkflowDependencyRequirement,
-    WorkflowEdge, WorkflowEndpoint, WorkflowExecution, WorkflowExecutionOptions, WorkflowList,
-    WorkflowNode, WorkflowPosition, WorkflowSpec, WorkflowSummary, WorkflowValidation,
-    WorkflowVersionMismatch,
+    CargoDependency, CargoDependencySource, ModelProvider, ModelRequirement, ModelVariant,
+    NodeExecution, NodeExecutionStatus, PortSpec, ResolvedWorkflowDependency,
+    WorkflowDependencyReport, WorkflowDependencyRequirement, WorkflowEdge, WorkflowEndpoint,
+    WorkflowExecution, WorkflowExecutionOptions, WorkflowList, WorkflowNode, WorkflowPosition,
+    WorkflowSpec, WorkflowSummary, WorkflowValidation, WorkflowVersionMismatch,
 };
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -24,6 +24,7 @@ const LIGHTFLOW_DIR: &str = "lightflow";
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ApiService {
     repo_root: PathBuf,
+    workflow_paths: Vec<PathBuf>,
 }
 
 impl ApiService {
@@ -32,7 +33,16 @@ impl ApiService {
     pub fn new(repo_root: impl Into<PathBuf>) -> Self {
         Self {
             repo_root: repo_root.into(),
+            workflow_paths: Vec::new(),
         }
+    }
+
+    /// Add workflow search paths. Each path can point at a workflow collection,
+    /// a LightFlow project root, or one workflow crate.
+    #[must_use]
+    pub fn with_workflow_paths(mut self, workflow_paths: Vec<PathBuf>) -> Self {
+        self.workflow_paths = workflow_paths;
+        self
     }
 
     /// Repository root used for project file discovery.
@@ -114,7 +124,7 @@ impl ApiService {
 
     fn workflow_specs(&self) -> ApiResult<BTreeMap<String, WorkflowSpec>> {
         let mut workflows = BTreeMap::new();
-        for workflow in read_workflow_sources(&self.repo_root)? {
+        for workflow in read_workflow_sources(&self.repo_root, &self.workflow_paths)? {
             validate_workflow_shape(&workflow)?;
             workflows.insert(workflow.id.clone(), workflow);
         }
@@ -178,34 +188,20 @@ impl From<io::Error> for ApiError {
 /// Service result.
 pub type ApiResult<T> = Result<T, ApiError>;
 
-fn read_workflow_sources(root: &Path) -> ApiResult<Vec<WorkflowSpec>> {
+fn read_workflow_sources(root: &Path, workflow_paths: &[PathBuf]) -> ApiResult<Vec<WorkflowSpec>> {
     let mut workflows = Vec::new();
     let mut manifests = BTreeSet::new();
     let mut visited_libs = BTreeSet::new();
-    match fs::read_dir(root.join(LIGHTFLOW_DIR).join(WORKFLOW_DIR)) {
-        Ok(entries) => {
-            for entry in entries {
-                let path = entry.map_err(ApiError::from)?.path();
-                if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
-                    if path.is_dir() {
-                        let lib = path.join("src").join("lib.rs");
-                        if lib.exists() {
-                            workflows.push(read_workflow_source(&lib)?);
-                            visited_libs.insert(normalize_existing_path(&lib)?);
-                            let manifest = path.join("Cargo.toml");
-                            if manifest.exists() {
-                                manifests.insert(normalize_existing_path(&manifest)?);
-                            }
-                        }
-                    }
-                    continue;
-                }
-                workflows.push(read_workflow_source(&path)?);
-                visited_libs.insert(normalize_existing_path(&path)?);
-            }
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(ApiError::from(error)),
+    read_workflow_collection(
+        &root.join(LIGHTFLOW_DIR).join(WORKFLOW_DIR),
+        true,
+        &mut workflows,
+        &mut manifests,
+        &mut visited_libs,
+    )?;
+
+    for path in workflow_paths {
+        read_workflow_search_path(path, &mut workflows, &mut manifests, &mut visited_libs)?;
     }
 
     let root_manifest = root.join("Cargo.toml");
@@ -215,6 +211,99 @@ fn read_workflow_sources(root: &Path) -> ApiResult<Vec<WorkflowSpec>> {
     read_path_dependency_workflows(&mut workflows, &mut manifests, &mut visited_libs)?;
 
     Ok(workflows)
+}
+
+fn read_workflow_search_path(
+    path: &Path,
+    workflows: &mut Vec<WorkflowSpec>,
+    manifests: &mut BTreeSet<PathBuf>,
+    visited_libs: &mut BTreeSet<PathBuf>,
+) -> ApiResult<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.join(LIGHTFLOW_DIR).join(WORKFLOW_DIR).is_dir() {
+        return read_workflow_collection(
+            &path.join(LIGHTFLOW_DIR).join(WORKFLOW_DIR),
+            false,
+            workflows,
+            manifests,
+            visited_libs,
+        );
+    }
+    if path.join(WORKFLOW_DIR).is_dir() {
+        return read_workflow_collection(
+            &path.join(WORKFLOW_DIR),
+            false,
+            workflows,
+            manifests,
+            visited_libs,
+        );
+    }
+    if path.join("src").join("lib.rs").exists() {
+        return read_one_workflow_crate(path, false, workflows, manifests, visited_libs);
+    }
+    read_workflow_collection(path, false, workflows, manifests, visited_libs)
+}
+
+fn read_workflow_collection(
+    collection: &Path,
+    strict: bool,
+    workflows: &mut Vec<WorkflowSpec>,
+    manifests: &mut BTreeSet<PathBuf>,
+    visited_libs: &mut BTreeSet<PathBuf>,
+) -> ApiResult<()> {
+    match fs::read_dir(collection) {
+        Ok(entries) => {
+            for entry in entries {
+                let path = entry.map_err(ApiError::from)?.path();
+                if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                    if path.is_dir() {
+                        read_one_workflow_crate(&path, strict, workflows, manifests, visited_libs)?;
+                    }
+                    continue;
+                }
+                let lib = normalize_existing_path(&path)?;
+                if !visited_libs.insert(lib.clone()) {
+                    continue;
+                }
+                workflows.push(read_workflow_source(&lib)?);
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(ApiError::from(error)),
+    }
+    Ok(())
+}
+
+fn read_one_workflow_crate(
+    crate_dir: &Path,
+    strict: bool,
+    workflows: &mut Vec<WorkflowSpec>,
+    manifests: &mut BTreeSet<PathBuf>,
+    visited_libs: &mut BTreeSet<PathBuf>,
+) -> ApiResult<()> {
+    let lib = crate_dir.join("src").join("lib.rs");
+    if !lib.exists() {
+        return Ok(());
+    }
+    let lib = normalize_existing_path(&lib)?;
+    if !visited_libs.insert(lib.clone()) {
+        return Ok(());
+    }
+    let workflow = if strict {
+        Some(read_workflow_source(&lib)?)
+    } else {
+        read_optional_workflow_source(&lib)?
+    };
+    if let Some(workflow) = workflow {
+        workflows.push(workflow);
+        let manifest = crate_dir.join("Cargo.toml");
+        if manifest.exists() {
+            manifests.insert(normalize_existing_path(&manifest)?);
+        }
+    }
+    Ok(())
 }
 
 fn read_path_dependency_workflows(
@@ -398,8 +487,60 @@ fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<Work
                     workflow.dependencies.push(WorkflowDependencyRequirement {
                         workflow_id: string_arg(&call.args, 0, &method, path)?,
                         version: Some(string_arg(&call.args, 1, &method, path)?),
+                        install: None,
                     });
                     expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "depends_on_crate" => {
+                    let workflow_id = string_arg(&call.args, 0, &method, path)?;
+                    let version = string_arg(&call.args, 1, &method, path)?;
+                    let crate_name = string_arg(&call.args, 2, &method, path)?;
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id,
+                        version: Some(version.clone()),
+                        install: Some(CargoDependency {
+                            crate_name,
+                            version: Some(version),
+                            source: None,
+                            package: None,
+                        }),
+                    });
+                    expect_arg_len(&call.args, 3, &method, path)?;
+                }
+                "depends_on_path" => {
+                    let workflow_id = string_arg(&call.args, 0, &method, path)?;
+                    let version = string_arg(&call.args, 1, &method, path)?;
+                    let crate_name = string_arg(&call.args, 2, &method, path)?;
+                    let dependency_path = string_arg(&call.args, 3, &method, path)?;
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id,
+                        version: Some(version.clone()),
+                        install: Some(CargoDependency {
+                            crate_name,
+                            version: Some(version),
+                            source: Some(CargoDependencySource::Path(dependency_path)),
+                            package: None,
+                        }),
+                    });
+                    expect_arg_len(&call.args, 4, &method, path)?;
+                }
+                "depends_on_git" => {
+                    let workflow_id = string_arg(&call.args, 0, &method, path)?;
+                    let version = string_arg(&call.args, 1, &method, path)?;
+                    let crate_name = string_arg(&call.args, 2, &method, path)?;
+                    let git = string_arg(&call.args, 3, &method, path)?;
+                    let package = string_arg(&call.args, 4, &method, path)?;
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id,
+                        version: Some(version.clone()),
+                        install: Some(CargoDependency {
+                            crate_name,
+                            version: Some(version),
+                            source: Some(CargoDependencySource::Git(git)),
+                            package: Some(package).filter(|package| !package.is_empty()),
+                        }),
+                    });
+                    expect_arg_len(&call.args, 5, &method, path)?;
                 }
                 "model" => {
                     workflow.models.push(ModelRequirement {
@@ -1117,11 +1258,43 @@ fn workflow_source(workflow: &WorkflowSpec) -> String {
         ));
     }
     for dependency in &workflow.dependencies {
-        source.push_str(&format!(
-            "        .depends_on({}, {})\n",
-            rust_string(&dependency.workflow_id),
-            rust_string(dependency.version.as_deref().unwrap_or("*"))
-        ));
+        if let Some(install) = &dependency.install {
+            match &install.source {
+                Some(CargoDependencySource::Path(path)) => {
+                    source.push_str(&format!(
+                        "        .depends_on_path({}, {}, {}, {})\n",
+                        rust_string(&dependency.workflow_id),
+                        rust_string(dependency.version.as_deref().unwrap_or("*")),
+                        rust_string(&install.crate_name),
+                        rust_string(path)
+                    ));
+                }
+                Some(CargoDependencySource::Git(git)) => {
+                    source.push_str(&format!(
+                        "        .depends_on_git({}, {}, {}, {}, {})\n",
+                        rust_string(&dependency.workflow_id),
+                        rust_string(dependency.version.as_deref().unwrap_or("*")),
+                        rust_string(&install.crate_name),
+                        rust_string(git),
+                        rust_string(install.package.as_deref().unwrap_or(""))
+                    ));
+                }
+                None => {
+                    source.push_str(&format!(
+                        "        .depends_on_crate({}, {}, {})\n",
+                        rust_string(&dependency.workflow_id),
+                        rust_string(dependency.version.as_deref().unwrap_or("*")),
+                        rust_string(&install.crate_name)
+                    ));
+                }
+            }
+        } else {
+            source.push_str(&format!(
+                "        .depends_on({}, {})\n",
+                rust_string(&dependency.workflow_id),
+                rust_string(dependency.version.as_deref().unwrap_or("*"))
+            ));
+        }
     }
     for model in &workflow.models {
         if model.variants.is_empty() {
