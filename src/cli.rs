@@ -1,12 +1,14 @@
 use crate::api::{ApiError, ApiService};
 use crate::server;
-use crate::workflow::WorkflowSpec;
+use crate::workflow::{ModelProvider, ModelVariant, WorkflowSpec};
 use serde::Serialize;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Run the LightFlow CLI from process arguments.
 pub async fn run_from_env() -> CliResult<()> {
@@ -85,6 +87,10 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let workflow_id = required_arg(args, 0, "workflow id")?;
             ensure_no_extra_args(args, 1, "deps")?;
             print_json(&service.workflow_dependencies(workflow_id)?)?;
+        }
+        "sync" => {
+            let options = parse_sync_options(args)?;
+            print_json(&sync_project(&service, &options)?)?;
         }
         "serve" => {
             let bind = parse_bind_addr(args, command)?;
@@ -181,9 +187,230 @@ fn usage() -> String {
         "  lfw workflows validate <json|-|@file>",
         "  lfw workflows save <json|-|@file>",
         "  lfw deps <workflow_id>",
+        "  lfw sync [workflow_id] [--model <requirement=variant>] [--apply]",
         "  lfw serve [--host <host>] [--port <port>]",
     ]
     .join("\n")
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct SyncOptions {
+    workflow_id: Option<String>,
+    model_selections: BTreeMap<String, String>,
+    apply: bool,
+}
+
+fn parse_sync_options(args: &[String]) -> CliResult<SyncOptions> {
+    let mut workflow_id = None;
+    let mut model_selections = BTreeMap::new();
+    let mut apply = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--apply" => {
+                apply = true;
+                index += 1;
+            }
+            "--dry-run" => {
+                apply = false;
+                index += 1;
+            }
+            "--model" => {
+                let value = required_flag_value(args, index, "--model")?;
+                let Some((requirement, variant)) = value.split_once('=') else {
+                    return Err(CliError::Usage(
+                        "--model must use <requirement=variant>".to_owned(),
+                    ));
+                };
+                if requirement.is_empty() || variant.is_empty() {
+                    return Err(CliError::Usage(
+                        "--model must use <requirement=variant>".to_owned(),
+                    ));
+                }
+                model_selections.insert(requirement.to_owned(), variant.to_owned());
+                index += 2;
+            }
+            value if value.starts_with("--") => {
+                return Err(CliError::Usage(format!(
+                    "unexpected argument for sync: {value}"
+                )));
+            }
+            value => {
+                if workflow_id.is_some() {
+                    return Err(CliError::Usage(format!(
+                        "unexpected argument for sync: {value}"
+                    )));
+                }
+                workflow_id = Some(value.to_owned());
+                index += 1;
+            }
+        }
+    }
+    Ok(SyncOptions {
+        workflow_id,
+        model_selections,
+        apply,
+    })
+}
+
+fn sync_project(service: &ApiService, options: &SyncOptions) -> CliResult<serde_json::Value> {
+    let workflows = if let Some(workflow_id) = &options.workflow_id {
+        let deps = service.workflow_dependencies(workflow_id)?;
+        deps.workflows
+            .into_iter()
+            .map(|workflow_id| service.get_workflow(&workflow_id))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        service
+            .list_workflows()?
+            .workflows
+            .into_iter()
+            .map(|summary| service.get_workflow(&summary.id))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let model_requirements = workflows
+        .iter()
+        .flat_map(|workflow| {
+            workflow.models.iter().map(|model| {
+                json!({
+                    "workflow_id": workflow.id,
+                    "id": model.id,
+                    "capability": model.capability,
+                    "variants": model.variants.iter().map(model_variant_json).collect::<Vec<_>>()
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let selected_models = select_model_variants(&workflows, &options.model_selections)?;
+    let hf_downloads = selected_models
+        .iter()
+        .filter(|selection| selection.variant.provider == ModelProvider::HuggingFace)
+        .map(|selection| hf_download_plan(selection))
+        .collect::<Vec<_>>();
+    let unresolved_models = workflows
+        .iter()
+        .flat_map(|workflow| {
+            workflow.models.iter().filter_map(|model| {
+                if options.model_selections.contains_key(&model.id) {
+                    return None;
+                }
+                Some(json!({
+                    "workflow_id": workflow.id,
+                    "id": model.id,
+                    "capability": model.capability,
+                    "variants": model.variants.iter().map(model_variant_json).collect::<Vec<_>>(),
+                    "reason": if model.variants.is_empty() { "no concrete variants declared" } else { "model variant not selected" }
+                }))
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut executed = Vec::new();
+    if options.apply {
+        run_status(Command::new("cargo").arg("fetch"))?;
+        executed.push(json!({ "command": ["cargo", "fetch"] }));
+        for download in &hf_downloads {
+            let command = download["command"].as_array().unwrap();
+            let mut process = Command::new(command[0].as_str().unwrap());
+            for arg in &command[1..] {
+                process.arg(arg.as_str().unwrap());
+            }
+            run_status(&mut process)?;
+            executed.push(download.clone());
+        }
+    }
+
+    Ok(json!({
+        "dry_run": !options.apply,
+        "workflow_scope": options.workflow_id,
+        "module_dependencies": {
+            "manager": "cargo",
+            "command": ["cargo", "fetch"],
+            "note": "Cargo resolves Rust workflow module dependencies."
+        },
+        "model_requirements": model_requirements,
+        "unresolved_models": unresolved_models,
+        "hf_downloads": hf_downloads,
+        "executed": executed
+    }))
+}
+
+struct SelectedModel<'a> {
+    requirement_id: &'a str,
+    variant: &'a ModelVariant,
+}
+
+fn select_model_variants<'a>(
+    workflows: &'a [WorkflowSpec],
+    selections: &BTreeMap<String, String>,
+) -> CliResult<Vec<SelectedModel<'a>>> {
+    let mut selected = Vec::new();
+    for (requirement_id, variant_id) in selections {
+        let Some(model) = workflows
+            .iter()
+            .flat_map(|workflow| workflow.models.iter())
+            .find(|model| model.id == *requirement_id)
+        else {
+            return Err(CliError::Usage(format!(
+                "unknown model requirement: {requirement_id}"
+            )));
+        };
+        let Some(variant) = model
+            .variants
+            .iter()
+            .find(|variant| variant.id == *variant_id)
+        else {
+            return Err(CliError::Usage(format!(
+                "unknown variant {variant_id} for model requirement {requirement_id}"
+            )));
+        };
+        selected.push(SelectedModel {
+            requirement_id: &model.id,
+            variant,
+        });
+    }
+    Ok(selected)
+}
+
+fn model_variant_json(variant: &ModelVariant) -> serde_json::Value {
+    json!({
+        "id": variant.id,
+        "provider": variant.provider.as_str(),
+        "format": variant.format,
+        "repo": variant.repo,
+        "file": variant.file,
+    })
+}
+
+fn hf_download_plan(selection: &SelectedModel<'_>) -> serde_json::Value {
+    let mut command = vec![
+        "hf".to_owned(),
+        "download".to_owned(),
+        selection.variant.repo.clone(),
+    ];
+    if let Some(file) = &selection.variant.file {
+        command.push(file.clone());
+    }
+    json!({
+        "requirement_id": selection.requirement_id,
+        "variant_id": selection.variant.id,
+        "provider": selection.variant.provider.as_str(),
+        "format": selection.variant.format,
+        "repo": selection.variant.repo,
+        "file": selection.variant.file,
+        "command": command,
+    })
+}
+
+fn run_status(command: &mut Command) -> CliResult<()> {
+    let status = command.status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Usage(format!(
+            "command failed with status {status}"
+        )))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

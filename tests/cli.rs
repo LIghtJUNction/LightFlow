@@ -300,6 +300,22 @@ pub fn define() -> WorkflowSpec {
         .input("negative", "text")
         .output("prompt", "json")
         .depends_on("lightflow.std", "0.1.0")
+        .hf_model(
+            "image_model",
+            "flux2-safetensors",
+            "text-to-image",
+            "safetensors",
+            "black-forest-labs/FLUX.2-dev",
+            "flux2-dev.safetensors"
+        )
+        .hf_model(
+            "image_model",
+            "flux2-gguf",
+            "text-to-image",
+            "gguf",
+            "city96/FLUX.2-dev-gguf",
+            "flux2-dev-q4.gguf"
+        )
         .node("passthrough", "lightflow.std")
         .build()
 }
@@ -324,6 +340,40 @@ pub fn define() -> WorkflowSpec {
     assert_eq!(
         deps["workflow_order"],
         serde_json::json!(["lightflow.std", "lightflow.image_prompt"])
+    );
+
+    let sync = lfw(&project, ["sync", "lightflow.image_prompt", "--dry-run"])?;
+    assert_eq!(sync["dry_run"], true);
+    assert_eq!(sync["hf_downloads"], serde_json::json!([]));
+    assert_eq!(sync["unresolved_models"][0]["id"], "image_model");
+    assert_eq!(
+        sync["unresolved_models"][0]["variants"][0]["id"],
+        "flux2-safetensors"
+    );
+    assert_eq!(
+        sync["unresolved_models"][0]["variants"][1]["id"],
+        "flux2-gguf"
+    );
+
+    let selected = lfw(
+        &project,
+        [
+            "sync",
+            "lightflow.image_prompt",
+            "--model",
+            "image_model=flux2-gguf",
+        ],
+    )?;
+    assert_eq!(selected["unresolved_models"], serde_json::json!([]));
+    assert_eq!(selected["hf_downloads"][0]["format"], "gguf");
+    assert_eq!(
+        selected["hf_downloads"][0]["command"],
+        serde_json::json!([
+            "hf",
+            "download",
+            "city96/FLUX.2-dev-gguf",
+            "flux2-dev-q4.gguf"
+        ])
     );
 
     let _ = fs::remove_dir_all(base);

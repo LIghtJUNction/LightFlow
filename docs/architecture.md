@@ -109,6 +109,21 @@ use `lightflow.std` in `.depends_on(...)` or `.node(...)`. Remote git
 dependencies keep the same Cargo manifest shape; `lfw sync` will handle fetching
 and model/resource synchronization in a later iteration.
 
+## Sync Model
+
+`lfw sync` separates module dependencies from model resources:
+
+- module dependencies are resolved by Cargo, currently planned as `cargo fetch`
+- model resources are declared as workflow metadata and downloaded through the
+  Hugging Face CLI
+
+Model declarations are capability-oriented. A workflow can say it needs an
+`image_model` with a `text-to-image` capability and list concrete HF variants
+such as safetensors or GGUF. `lfw sync` does not pick or download every variant
+automatically; users must select a variant with `--model image_model=<variant>`.
+This keeps large model artifacts out of the repository and lets HF manage
+deduplication, sharding, compression, and cache placement.
+
 ## Boundaries
 
 `src/api.rs` is the framework-independent service. CLI, HTTP, and MCP call this

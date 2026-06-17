@@ -97,6 +97,38 @@ The backend also accepts `*` for an unconstrained local dependency. Range
 requirements such as `^0.1` and `>=0.1` are intentionally not supported yet;
 they will be added after the exact-version update path is stable.
 
+## Model Requirements
+
+Model requirements are embedded in the workflow file. A workflow can declare an
+abstract model capability and provide multiple Hugging Face variants:
+
+```rust
+workflow("lightflow.image_prompt")
+    .version("0.1.0")
+    .hf_model(
+        "image_model",
+        "flux2-safetensors",
+        "text-to-image",
+        "safetensors",
+        "black-forest-labs/FLUX.2-dev",
+        "flux2-dev.safetensors",
+    )
+    .hf_model(
+        "image_model",
+        "flux2-gguf",
+        "text-to-image",
+        "gguf",
+        "city96/FLUX.2-dev-gguf",
+        "flux2-dev-q4.gguf",
+    )
+```
+
+`lfw sync` will not download every variant. Without a `--model
+image_model=<variant>` selection it reports the unresolved model requirement.
+With a selection it builds an `hf download ...` command and, when `--apply` is
+used, executes it through the Hugging Face CLI so the artifact is managed by
+the global HF cache.
+
 ## Not Stored Here
 
 Do not commit runtime state, credentials, generated artifacts, caches, or model

@@ -26,6 +26,8 @@ pub struct WorkflowSpec {
     #[serde(default)]
     pub dependencies: Vec<WorkflowDependencyRequirement>,
     #[serde(default)]
+    pub models: Vec<ModelRequirement>,
+    #[serde(default)]
     pub nodes: Vec<WorkflowNode>,
     #[serde(default)]
     pub edges: Vec<WorkflowEdge>,
@@ -45,6 +47,46 @@ pub struct WorkflowDependencyRequirement {
     pub workflow_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+}
+
+/// A model resource needed by a workflow.
+///
+/// Requirements are intentionally capability-oriented. A workflow can describe
+/// what kind of model it needs without forcing every user to download the same
+/// concrete file.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelRequirement {
+    pub id: String,
+    pub capability: String,
+    #[serde(default)]
+    pub variants: Vec<ModelVariant>,
+}
+
+/// One concrete model option that can satisfy a model requirement.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelVariant {
+    pub id: String,
+    pub provider: ModelProvider,
+    pub format: String,
+    pub repo: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+/// Supported model resource provider.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProvider {
+    HuggingFace,
+}
+
+impl ModelProvider {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HuggingFace => "hugging_face",
+        }
+    }
 }
 
 /// One node in a composite workflow graph.
@@ -96,6 +138,7 @@ pub struct WorkflowSummary {
     pub inputs: usize,
     pub outputs: usize,
     pub dependencies: usize,
+    pub models: usize,
     pub nodes: usize,
     pub edges: usize,
 }
@@ -109,6 +152,7 @@ impl From<WorkflowSpec> for WorkflowSummary {
             inputs: workflow.inputs.len(),
             outputs: workflow.outputs.len(),
             dependencies: workflow.dependencies.len(),
+            models: workflow.models.len(),
             nodes: workflow.nodes.len(),
             edges: workflow.edges.len(),
         }
@@ -165,6 +209,7 @@ pub fn workflow(id: impl Into<String>) -> WorkflowBuilder {
             outputs: Vec::new(),
             config_schema: serde_json::Value::Null,
             dependencies: Vec::new(),
+            models: Vec::new(),
             nodes: Vec::new(),
             edges: Vec::new(),
         },
@@ -224,6 +269,53 @@ impl WorkflowBuilder {
             workflow_id: workflow_id.into(),
             version: Some(version.into()),
         });
+        self
+    }
+
+    #[must_use]
+    pub fn model(mut self, id: impl Into<String>, capability: impl Into<String>) -> Self {
+        self.spec.models.push(ModelRequirement {
+            id: id.into(),
+            capability: capability.into(),
+            variants: Vec::new(),
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn hf_model(
+        mut self,
+        requirement_id: impl Into<String>,
+        variant_id: impl Into<String>,
+        capability: impl Into<String>,
+        format: impl Into<String>,
+        repo: impl Into<String>,
+        file: impl Into<String>,
+    ) -> Self {
+        let requirement_id = requirement_id.into();
+        let capability = capability.into();
+        let variant = ModelVariant {
+            id: variant_id.into(),
+            provider: ModelProvider::HuggingFace,
+            format: format.into(),
+            repo: repo.into(),
+            file: Some(file.into()).filter(|file| !file.is_empty()),
+        };
+
+        if let Some(requirement) = self
+            .spec
+            .models
+            .iter_mut()
+            .find(|requirement| requirement.id == requirement_id)
+        {
+            requirement.variants.push(variant);
+        } else {
+            self.spec.models.push(ModelRequirement {
+                id: requirement_id,
+                capability,
+                variants: vec![variant],
+            });
+        }
         self
     }
 

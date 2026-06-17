@@ -132,6 +132,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkflowDependencyRequirement"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelRequirement"
         nodes:
           type: array
           items:
@@ -195,7 +199,7 @@ components:
             $ref: "#/components/schemas/WorkflowSummary"
     WorkflowSummary:
       type: object
-      required: [id, version, name, inputs, outputs, dependencies, nodes, edges]
+      required: [id, version, name, inputs, outputs, dependencies, models, nodes, edges]
       properties:
         id:
           type: string
@@ -208,6 +212,8 @@ components:
         outputs:
           type: integer
         dependencies:
+          type: integer
+        models:
           type: integer
         nodes:
           type: integer
@@ -276,6 +282,33 @@ components:
         workflow_id:
           type: string
         version:
+          type: string
+    ModelRequirement:
+      type: object
+      required: [id, capability]
+      properties:
+        id:
+          type: string
+        capability:
+          type: string
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelVariant"
+    ModelVariant:
+      type: object
+      required: [id, provider, format, repo]
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+          enum: [hugging_face]
+        format:
+          type: string
+        repo:
+          type: string
+        file:
           type: string
     WorkflowVersionMismatch:
       type: object

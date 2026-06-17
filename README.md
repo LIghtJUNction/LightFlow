@@ -106,6 +106,32 @@ workflow("lightflow.std")
 Range requirements such as `^0.1` and `>=0.1` are planned after the exact
 version update path is stable.
 
+## Sync
+
+`lfw sync` prepares module and model dependencies. It always treats model
+requirements as choices, not as mandatory downloads of every possible file.
+
+```bash
+lfw sync lightflow.image_prompt --dry-run
+lfw sync lightflow.image_prompt --model image_model=flux2-gguf --apply
+```
+
+The module side uses Cargo:
+
+```bash
+cargo fetch
+```
+
+The model side uses Hugging Face's CLI and global cache:
+
+```bash
+hf download city96/FLUX.2-dev-gguf flux2-dev-q4.gguf
+```
+
+This lets workflows declare a model capability, such as text-to-image, and
+offer safetensors / GGUF variants without forcing every user to sync the same
+model artifact.
+
 ## HTTP
 
 ```bash

@@ -1,9 +1,10 @@
 //! Framework-independent LightFlow backend service.
 
 use crate::workflow::{
-    PortSpec, ResolvedWorkflowDependency, WorkflowDependencyReport, WorkflowDependencyRequirement,
-    WorkflowEdge, WorkflowEndpoint, WorkflowList, WorkflowNode, WorkflowPosition, WorkflowSpec,
-    WorkflowSummary, WorkflowValidation, WorkflowVersionMismatch,
+    ModelProvider, ModelRequirement, ModelVariant, PortSpec, ResolvedWorkflowDependency,
+    WorkflowDependencyReport, WorkflowDependencyRequirement, WorkflowEdge, WorkflowEndpoint,
+    WorkflowList, WorkflowNode, WorkflowPosition, WorkflowSpec, WorkflowSummary,
+    WorkflowValidation, WorkflowVersionMismatch,
 };
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -386,6 +387,26 @@ fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<Work
                     });
                     expect_arg_len(&call.args, 2, &method, path)?;
                 }
+                "model" => {
+                    workflow.models.push(ModelRequirement {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        capability: string_arg(&call.args, 1, &method, path)?,
+                        variants: Vec::new(),
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "hf_model" => {
+                    push_hf_model_variant(
+                        &mut workflow,
+                        string_arg(&call.args, 0, &method, path)?,
+                        string_arg(&call.args, 1, &method, path)?,
+                        string_arg(&call.args, 2, &method, path)?,
+                        string_arg(&call.args, 3, &method, path)?,
+                        string_arg(&call.args, 4, &method, path)?,
+                        string_arg(&call.args, 5, &method, path)?,
+                    );
+                    expect_arg_len(&call.args, 6, &method, path)?;
+                }
                 "node" => {
                     workflow.nodes.push(WorkflowNode {
                         id: string_arg(&call.args, 0, &method, path)?,
@@ -429,6 +450,7 @@ fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<Work
                 outputs: Vec::new(),
                 config_schema: serde_json::Value::Null,
                 dependencies: Vec::new(),
+                models: Vec::new(),
                 nodes: Vec::new(),
                 edges: Vec::new(),
             })
@@ -437,6 +459,37 @@ fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<Work
             "unsupported workflow definition expression in {:?}",
             path
         ))),
+    }
+}
+
+fn push_hf_model_variant(
+    workflow: &mut WorkflowSpec,
+    requirement_id: String,
+    variant_id: String,
+    capability: String,
+    format: String,
+    repo: String,
+    file: String,
+) {
+    let variant = ModelVariant {
+        id: variant_id,
+        provider: ModelProvider::HuggingFace,
+        format,
+        repo,
+        file: Some(file).filter(|file| !file.is_empty()),
+    };
+    if let Some(requirement) = workflow
+        .models
+        .iter_mut()
+        .find(|requirement| requirement.id == requirement_id)
+    {
+        requirement.variants.push(variant);
+    } else {
+        workflow.models.push(ModelRequirement {
+            id: requirement_id,
+            capability,
+            variants: vec![variant],
+        });
     }
 }
 
@@ -910,6 +963,30 @@ fn workflow_source(workflow: &WorkflowSpec) -> String {
             rust_string(&dependency.workflow_id),
             rust_string(dependency.version.as_deref().unwrap_or("*"))
         ));
+    }
+    for model in &workflow.models {
+        if model.variants.is_empty() {
+            source.push_str(&format!(
+                "        .model({}, {})\n",
+                rust_string(&model.id),
+                rust_string(&model.capability)
+            ));
+        } else {
+            for variant in &model.variants {
+                if variant.provider != ModelProvider::HuggingFace {
+                    continue;
+                }
+                source.push_str(&format!(
+                    "        .hf_model({}, {}, {}, {}, {}, {})\n",
+                    rust_string(&model.id),
+                    rust_string(&variant.id),
+                    rust_string(&model.capability),
+                    rust_string(&variant.format),
+                    rust_string(&variant.repo),
+                    rust_string(variant.file.as_deref().unwrap_or(""))
+                ));
+            }
+        }
     }
     for node in &workflow.nodes {
         source.push_str(&format!(
