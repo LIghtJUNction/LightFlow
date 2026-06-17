@@ -11,23 +11,32 @@ lightflow/
         lib.rs
 ```
 
-Shared user workflows follow XDG paths. The CLI loads:
+Shared user workflows follow XDG paths. The shell sources:
 
 ```text
 $XDG_CONFIG_HOME/lightflow/.lfwrc
 # default: ~/.config/lightflow/.lfwrc
 ```
 
-The rc file uses shell-style export syntax:
+For bash and zsh, the rc file uses shell-style export syntax:
 
 ```bash
 export LFW_PATH="$HOME/.local/share/lightflow/workflows"
 ```
 
-If there is no rc file, `lfw` still uses the XDG default
+For fish, `lfw init` writes fish syntax instead:
+
+```fish
+set -gx LFW_PATH "$HOME/.local/share/lightflow/workflows"
+```
+
+`lfw init` detects `SHELL` and appends `source <rc>` to `.bashrc`, `.zshrc`,
+or `$XDG_CONFIG_HOME/fish/config.fish`. If there is no exported `LFW_PATH`,
+`lfw` still uses the XDG default
 `$XDG_DATA_HOME/lightflow/workflows`, or
 `~/.local/share/lightflow/workflows` when `XDG_DATA_HOME` is not set.
-`lfw init` creates the default rc file and workflow directory when missing.
+`lfw` does not parse `.lfwrc` directly at runtime; it reads the environment
+provided by the shell.
 
 Each `LFW_PATH` entry can point at a workflow collection, a LightFlow project
 root, or a single workflow crate. A workflow collection has the same crate

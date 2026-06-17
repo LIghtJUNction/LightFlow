@@ -107,6 +107,16 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     let rc = fs::read_to_string(root.join(".test-xdg/config/lightflow/.lfwrc"))?;
     assert!(rc.contains("export LFW_PATH="));
     assert!(rc.contains(".test-xdg/data/lightflow/workflows"));
+    let zshrc = fs::read_to_string(root.join(".zshrc"))?;
+    assert!(zshrc.contains("source "));
+    assert!(zshrc.contains(".test-xdg/config/lightflow/.lfwrc"));
+    assert_eq!(init["config"]["shell"], "zsh");
+    assert_eq!(init["config"]["source_installed"], true);
+
+    let second_init = lfw(&root, ["init"])?;
+    assert_eq!(second_init["created"], serde_json::json!([]));
+    assert_eq!(second_init["config"]["rc_created"], false);
+    assert_eq!(second_init["config"]["source_installed"], false);
     let path = root.join("lightflow/workflows/lightflow.extra/src/lib.rs");
     let source = fs::read_to_string(path)?;
     assert!(source.contains("workflow(\"lightflow.extra\")"));
@@ -125,7 +135,7 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
-fn lfw_loads_xdg_rc_and_lfw_path() -> Result<(), Box<dyn std::error::Error>> {
+fn lfw_uses_xdg_default_and_lfw_path_environment() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     let xdg_data_workflows = root.join(".test-xdg/data/lightflow/workflows");
@@ -171,8 +181,44 @@ pub fn define() -> WorkflowSpec {
         format!("export LFW_PATH='{}'\n", custom_workflows.display()),
     )?;
 
-    let rc_list = lfw(&root, ["list"])?;
-    assert_eq!(rc_list["workflows"][0]["id"], "lightflow.rc");
+    let still_default = lfw(&root, ["list"])?;
+    assert_eq!(still_default["workflows"][0]["id"], "lightflow.xdg_default");
+
+    let env_list = lfw_with_env(&root, ["list"], [("LFW_PATH", custom_workflows.as_path())])?;
+    assert_eq!(env_list["workflows"][0]["id"], "lightflow.rc");
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn lfw_init_installs_fish_source_when_shell_is_fish() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    let output = Command::new(env!("CARGO_BIN_EXE_lfw"))
+        .arg("init")
+        .current_dir(&root)
+        .env("HOME", &root)
+        .env("SHELL", "/usr/bin/fish")
+        .env("XDG_CONFIG_HOME", root.join(".test-xdg/config"))
+        .env("XDG_DATA_HOME", root.join(".test-xdg/data"))
+        .env_remove("LFW_PATH")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "lfw init failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let init: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(init["config"]["shell"], "fish");
+    assert_eq!(init["config"]["source_installed"], true);
+
+    let rc = fs::read_to_string(root.join(".test-xdg/config/lightflow/.lfwrc"))?;
+    assert!(rc.contains("set -gx LFW_PATH "));
+    let fish_config = fs::read_to_string(root.join(".test-xdg/config/fish/config.fish"))?;
+    assert!(fish_config.contains("source "));
+    assert!(fish_config.contains(".test-xdg/config/lightflow/.lfwrc"));
 
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -784,19 +830,41 @@ fn lfw<const N: usize>(root: &Path, args: [&str; N]) -> Result<Value, Box<dyn st
     run_json(env!("CARGO_BIN_EXE_lfw"), root, &args)
 }
 
+fn lfw_with_env<const N: usize, const M: usize>(
+    root: &Path,
+    args: [&str; N],
+    envs: [(&str, &Path); M],
+) -> Result<Value, Box<dyn std::error::Error>> {
+    run_json_with_env(env!("CARGO_BIN_EXE_lfw"), root, &args, &envs)
+}
+
 fn lfwx<const N: usize>(root: &Path, args: [&str; N]) -> Result<Value, Box<dyn std::error::Error>> {
     run_json(env!("CARGO_BIN_EXE_lfwx"), root, &args)
 }
 
 fn run_json(binary: &str, root: &Path, args: &[&str]) -> Result<Value, Box<dyn std::error::Error>> {
-    let output = Command::new(binary)
+    run_json_with_env(binary, root, args, &[])
+}
+
+fn run_json_with_env(
+    binary: &str,
+    root: &Path,
+    args: &[&str],
+    envs: &[(&str, &Path)],
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let mut command = Command::new(binary);
+    command
         .args(args)
         .current_dir(root)
+        .env("HOME", root)
+        .env("SHELL", "/bin/zsh")
         .env("XDG_CONFIG_HOME", root.join(".test-xdg/config"))
         .env("XDG_DATA_HOME", root.join(".test-xdg/data"))
-        .env_remove("LFW_PATH")
-        .output()?;
-
+        .env_remove("LFW_PATH");
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    let output = command.output()?;
     if !output.status.success() {
         return Err(format!(
             "{binary} failed with status {}\nstdout:\n{}\nstderr:\n{}",

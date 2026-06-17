@@ -129,9 +129,11 @@ on `lightflow-std = { path = "..." }` and immediately use `lightflow.std` in
 manifest shape; `lfw sync` handles Cargo fetching and model/resource
 synchronization.
 
-`LFW_PATH` is loaded from `$XDG_CONFIG_HOME/lightflow/.lfwrc`, defaulting to
-`~/.config/lightflow/.lfwrc`. The default workflow collection lives under
-`$XDG_DATA_HOME/lightflow/workflows`, or
+`lfw init` writes `$XDG_CONFIG_HOME/lightflow/.lfwrc`, defaulting to
+`~/.config/lightflow/.lfwrc`, and appends a shell-specific source line to the
+detected bash, zsh, or fish startup file. At runtime `lfw` reads `LFW_PATH`
+from the process environment. If it is not set, the default workflow
+collection is `$XDG_DATA_HOME/lightflow/workflows`, or
 `~/.local/share/lightflow/workflows` when `XDG_DATA_HOME` is not set.
 
 ## Publishing Model

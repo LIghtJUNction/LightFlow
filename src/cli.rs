@@ -26,7 +26,6 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
     };
     let args = &args[1..];
     let runtime = RuntimeConfig::load()?;
-    install_lfw_env(&runtime);
     let service =
         ApiService::new(env::current_dir()?).with_workflow_paths(runtime.workflow_paths.clone());
 
@@ -37,12 +36,16 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 .map(PathBuf::from)
                 .unwrap_or(env::current_dir()?);
             ensure_no_extra_args(args, 1, "init")?;
+            let shell_setup = ensure_lfw_shell_setup(&runtime)?;
             let mut output = init_project(&root)?;
-            let created_rc = ensure_lfwrc(&runtime)?;
             output["config"] = json!({
                 "rc": runtime.rc_path,
                 "lfw_path": runtime.lfw_path,
-                "created": created_rc,
+                "rc_created": shell_setup.rc_created,
+                "shell": shell_setup.shell,
+                "shell_config": shell_setup.shell_config,
+                "source_line": shell_setup.source_line,
+                "source_installed": shell_setup.source_installed,
             });
             print_json(&output)?;
         }
@@ -451,7 +454,6 @@ pub async fn run_lfwx(args: Vec<String>) -> CliResult<()> {
         return Err(CliError::Usage(lfwx_usage()));
     }
     let runtime = RuntimeConfig::load()?;
-    install_lfw_env(&runtime);
     let service =
         ApiService::new(env::current_dir()?).with_workflow_paths(runtime.workflow_paths.clone());
     let options = parse_run_options(&args)?;
@@ -473,15 +475,9 @@ impl RuntimeConfig {
         let data_home = xdg_data_home()?;
         let rc_path = config_home.join("lightflow").join(".lfwrc");
         let default_workflow_path = data_home.join("lightflow").join("workflows");
-        let rc_lfw_path = if rc_path.exists() {
-            read_lfw_path_from_rc(&rc_path, &data_home)?
-        } else {
-            None
-        };
         let lfw_path = env::var("LFW_PATH")
             .ok()
             .filter(|value| !value.trim().is_empty())
-            .or(rc_lfw_path)
             .unwrap_or_else(|| default_workflow_path.display().to_string());
         let workflow_paths = env::split_paths(&lfw_path).collect::<Vec<_>>();
         Ok(Self {
@@ -493,30 +489,128 @@ impl RuntimeConfig {
     }
 }
 
-fn install_lfw_env(runtime: &RuntimeConfig) {
-    // This is done at CLI startup before LightFlow spawns background work.
-    unsafe {
-        env::set_var("LFW_PATH", &runtime.lfw_path);
-    }
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ShellSetup {
+    rc_created: bool,
+    shell: Option<&'static str>,
+    shell_config: Option<PathBuf>,
+    source_line: Option<String>,
+    source_installed: bool,
 }
 
-fn ensure_lfwrc(runtime: &RuntimeConfig) -> CliResult<bool> {
+fn ensure_lfw_shell_setup(runtime: &RuntimeConfig) -> CliResult<ShellSetup> {
     fs::create_dir_all(&runtime.default_workflow_path)?;
-    if runtime.rc_path.exists() {
-        return Ok(false);
-    }
     let parent = runtime
         .rc_path
         .parent()
         .ok_or_else(|| CliError::Usage("invalid LightFlow rc path".to_owned()))?;
     fs::create_dir_all(parent)?;
-    fs::write(
-        &runtime.rc_path,
+
+    let shell = detect_shell();
+    let rc_created = if runtime.rc_path.exists() {
+        false
+    } else {
+        fs::write(&runtime.rc_path, lfwrc_body(shell, runtime))?;
+        true
+    };
+    let Some(shell) = shell else {
+        return Ok(ShellSetup {
+            rc_created,
+            shell: None,
+            shell_config: None,
+            source_line: None,
+            source_installed: false,
+        });
+    };
+    let Some(shell_config) = shell_config_path(shell)? else {
+        return Ok(ShellSetup {
+            rc_created,
+            shell: Some(shell),
+            shell_config: None,
+            source_line: None,
+            source_installed: false,
+        });
+    };
+    let source_line = source_line(shell, &runtime.rc_path);
+    let source_installed = ensure_source_line(&shell_config, &source_line)?;
+    Ok(ShellSetup {
+        rc_created,
+        shell: Some(shell),
+        shell_config: Some(shell_config),
+        source_line: Some(source_line),
+        source_installed,
+    })
+}
+
+fn lfwrc_body(shell: Option<&str>, runtime: &RuntimeConfig) -> String {
+    let value = runtime.default_workflow_path.display().to_string();
+    if shell == Some("fish") {
+        format!(
+            "# LightFlow CLI configuration\nset -gx LFW_PATH {}\n",
+            fish_quote(&value)
+        )
+    } else {
         format!(
             "# LightFlow CLI configuration\nexport LFW_PATH={}\n",
-            shell_quote(&runtime.default_workflow_path.display().to_string())
-        ),
-    )?;
+            shell_quote(&value)
+        )
+    }
+}
+
+fn detect_shell() -> Option<&'static str> {
+    let shell = env::var("SHELL").ok()?;
+    let name = Path::new(&shell).file_name()?.to_str()?;
+    match name {
+        "bash" => Some("bash"),
+        "zsh" => Some("zsh"),
+        "fish" => Some("fish"),
+        _ => None,
+    }
+}
+
+fn shell_config_path(shell: &str) -> CliResult<Option<PathBuf>> {
+    match shell {
+        "bash" => Ok(env::var_os("HOME").map(|home| PathBuf::from(home).join(".bashrc"))),
+        "zsh" => {
+            if let Some(zdotdir) = env::var_os("ZDOTDIR") {
+                Ok(Some(PathBuf::from(zdotdir).join(".zshrc")))
+            } else {
+                Ok(env::var_os("HOME").map(|home| PathBuf::from(home).join(".zshrc")))
+            }
+        }
+        "fish" => Ok(Some(xdg_config_home()?.join("fish").join("config.fish"))),
+        _ => Ok(None),
+    }
+}
+
+fn source_line(shell: &str, rc_path: &Path) -> String {
+    let rc = rc_path.display().to_string();
+    match shell {
+        "fish" => format!("source {}", fish_quote(&rc)),
+        _ => format!("source {}", shell_quote(&rc)),
+    }
+}
+
+fn ensure_source_line(path: &Path, source_line: &str) -> CliResult<bool> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let existing = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    if existing.lines().any(|line| line.trim() == source_line) {
+        return Ok(false);
+    }
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str("\n# LightFlow\n");
+    next.push_str(source_line);
+    next.push('\n');
+    fs::write(path, next)?;
     Ok(true)
 }
 
@@ -534,48 +628,12 @@ fn xdg_data_home() -> CliResult<PathBuf> {
         .ok_or_else(|| CliError::Usage("HOME is required to locate XDG_DATA_HOME".to_owned()))
 }
 
-fn read_lfw_path_from_rc(rc_path: &Path, data_home: &Path) -> CliResult<Option<String>> {
-    let source = fs::read_to_string(rc_path)?;
-    for line in source.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let line = line.strip_prefix("export ").unwrap_or(line).trim();
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if key.trim() == "LFW_PATH" {
-            return Ok(Some(expand_rc_value(value.trim(), data_home)));
-        }
-    }
-    Ok(None)
-}
-
-fn expand_rc_value(value: &str, data_home: &Path) -> String {
-    let value = unquote(value);
-    let home = env::var("HOME").unwrap_or_default();
-    value
-        .replace("${HOME}", &home)
-        .replace("$HOME", &home)
-        .replace("${XDG_DATA_HOME}", &data_home.display().to_string())
-        .replace("$XDG_DATA_HOME", &data_home.display().to_string())
-}
-
-fn unquote(value: &str) -> String {
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2
-        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
-    {
-        value[1..value.len() - 1].to_owned()
-    } else {
-        value.to_owned()
-    }
-}
-
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn fish_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 fn lfwx_usage() -> String {
@@ -1215,34 +1273,37 @@ fn optional_name(args: &[String], start: usize, command: &str) -> CliResult<Opti
 fn init_project(root: &Path) -> CliResult<serde_json::Value> {
     let lightflow = root.join("lightflow");
     let workflows = lightflow.join("workflows");
+    let create_example = !root.join("Cargo.toml").exists();
     fs::create_dir_all(&workflows)?;
 
     let mut created = Vec::new();
-    write_new_text(
+    write_init_text(
         &root.join("Cargo.toml"),
         &workspace_manifest(),
         &mut created,
     )?;
-    write_new_text(
+    write_init_text(
         &lightflow.join("README.md"),
         "# LightFlow Project\n\nThis repository is a Cargo workspace for source-controlled Rust workflow crates.\n",
         &mut created,
     )?;
-    write_new_text(
+    write_init_text(
         &workflows.join("README.md"),
         "# Workflows\n\nEach directory is one workflow crate. The workflow definition lives in `src/lib.rs`.\n",
         &mut created,
     )?;
-    write_new_text(
-        &workflow_manifest_path(root, "lightflow.example"),
-        &workflow_manifest("lightflow.example"),
-        &mut created,
-    )?;
-    write_new_text(
-        &workflow_source_path(root, "lightflow.example"),
-        &example_workflow_source("lightflow.example", "Example Workflow"),
-        &mut created,
-    )?;
+    if create_example {
+        write_init_text(
+            &workflow_manifest_path(root, "lightflow.example"),
+            &workflow_manifest("lightflow.example"),
+            &mut created,
+        )?;
+        write_init_text(
+            &workflow_source_path(root, "lightflow.example"),
+            &example_workflow_source("lightflow.example", "Example Workflow"),
+            &mut created,
+        )?;
+    }
 
     Ok(json!({
         "project_root": root,
@@ -1349,6 +1410,18 @@ fn write_new_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResu
             "{} already exists; refusing to overwrite",
             path.display()
         )));
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, body)?;
+    created.push(path.to_string_lossy().into_owned());
+    Ok(())
+}
+
+fn write_init_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResult<()> {
+    if path.exists() {
+        return Ok(());
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

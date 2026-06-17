@@ -97,22 +97,26 @@ runtime adapters are added.
 
 ## Installing Workflows
 
-LightFlow loads user configuration from:
+LightFlow stores user shell configuration in:
 
 ```text
 $XDG_CONFIG_HOME/lightflow/.lfwrc
 # default: ~/.config/lightflow/.lfwrc
 ```
 
-`lfw init` creates the file when missing:
+`lfw init` creates the file when missing and appends a source line to the
+detected shell startup file (`.bashrc`, `.zshrc`, or fish `config.fish`):
 
 ```bash
+source ~/.config/lightflow/.lfwrc
 export LFW_PATH='/home/alice/.local/share/lightflow/workflows'
 ```
 
 If `XDG_DATA_HOME` is not set, the default workflow search directory is
 `~/.local/share/lightflow/workflows`. `LFW_PATH` uses the platform path-list
-format, so multiple workflow collections can be searched.
+format, so multiple workflow collections can be searched. `lfw` itself reads
+the environment variable provided by the shell; it does not parse `.lfwrc` as a
+runtime config file.
 
 Workflow dependencies are Cargo dependencies. A local standard workflow can be
 installed with:
