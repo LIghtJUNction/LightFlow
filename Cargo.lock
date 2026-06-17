@@ -273,6 +273,7 @@ dependencies = [
  "petgraph",
  "serde",
  "serde_json",
+ "syn",
  "tokio",
  "tower",
 ]

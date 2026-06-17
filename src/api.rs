@@ -1,20 +1,18 @@
 //! Framework-independent LightFlow backend service.
 
-use crate::component::{ComponentList, ComponentSpec, ComponentSummary, PortSpec};
 use crate::workflow::{
-    WorkflowList, WorkflowNodeTarget, WorkflowSpec, WorkflowSummary, WorkflowValidation,
+    PortSpec, ResolvedWorkflowDependency, WorkflowDependencyReport, WorkflowDependencyRequirement,
+    WorkflowEdge, WorkflowEndpoint, WorkflowList, WorkflowNode, WorkflowPosition, WorkflowSpec,
+    WorkflowSummary, WorkflowValidation, WorkflowVersionMismatch,
 };
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
-const COMPONENT_DIR: &str = "components";
 const WORKFLOW_DIR: &str = "workflows";
 const LIGHTFLOW_DIR: &str = "lightflow";
 
@@ -39,31 +37,6 @@ impl ApiService {
         &self.repo_root
     }
 
-    /// List component specs.
-    pub fn list_components(&self) -> ApiResult<ComponentList> {
-        let components = self
-            .component_specs()?
-            .into_values()
-            .map(ComponentSummary::from)
-            .collect();
-        Ok(ComponentList { components })
-    }
-
-    /// Read one component spec.
-    pub fn get_component(&self, component_id: &str) -> ApiResult<ComponentSpec> {
-        self.component_specs()?
-            .remove(component_id)
-            .ok_or_else(|| ApiError::NotFound(format!("component {component_id}")))
-    }
-
-    /// Save one component spec under `lightflow/components/<id>.json`.
-    pub fn save_component(&self, component: ComponentSpec) -> ApiResult<ComponentSpec> {
-        validate_component(&component)?;
-        let path = self.component_path(&component.id)?;
-        write_json_atomic(&path, &component)?;
-        Ok(component)
-    }
-
     /// List workflow specs.
     pub fn list_workflows(&self) -> ApiResult<WorkflowList> {
         let workflows = self
@@ -81,54 +54,54 @@ impl ApiService {
             .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))
     }
 
-    /// Save one workflow spec under `lightflow/workflows/<id>.json`.
+    /// Save one workflow spec under `lightflow/workflows/<id>.rs`.
     pub fn save_workflow(&self, workflow: WorkflowSpec) -> ApiResult<WorkflowSpec> {
         let validation = self.validate_workflow(&workflow);
         if !validation.valid {
             return Err(ApiError::InvalidRequest(validation.issues.join("; ")));
         }
         let path = self.workflow_path(&workflow.id)?;
-        write_json_atomic(&path, &workflow)?;
+        write_text_atomic(&path, &workflow_source(&workflow))?;
         Ok(workflow)
     }
 
-    /// Validate a workflow against current component and workflow specs.
+    /// Validate a workflow against current workflow specs.
     pub fn validate_workflow(&self, workflow: &WorkflowSpec) -> WorkflowValidation {
-        let components = self.component_specs().unwrap_or_default();
-        let workflows = self.workflow_specs().unwrap_or_default();
-        validate_workflow_spec(workflow, &components, &workflows)
+        let mut workflows = self.workflow_specs().unwrap_or_default();
+        workflows.insert(workflow.id.clone(), workflow.clone());
+        let mut validation = validate_workflow_spec(workflow, &workflows);
+        let dependencies = dependency_report(&workflow.id, &workflows);
+        for cycle in dependencies.cycles {
+            validation
+                .issues
+                .push(format!("workflow dependency cycle: {}", cycle.join(" -> ")));
+        }
+        for mismatch in dependencies.version_mismatches {
+            validation.issues.push(format!(
+                "workflow {} requires version {} but found {}",
+                mismatch.workflow_id, mismatch.required, mismatch.found
+            ));
+        }
+        validation.valid = validation.issues.is_empty();
+        validation
     }
 
-    fn component_specs(&self) -> ApiResult<BTreeMap<String, ComponentSpec>> {
-        let mut components = builtin_components()
-            .into_iter()
-            .map(|component| (component.id.clone(), component))
-            .collect::<BTreeMap<_, _>>();
-        for component in read_specs::<ComponentSpec>(&self.repo_root, COMPONENT_DIR)? {
-            validate_component(&component)?;
-            components.insert(component.id.clone(), component);
+    /// Resolve the recursive workflow dependencies for a workflow.
+    pub fn workflow_dependencies(&self, workflow_id: &str) -> ApiResult<WorkflowDependencyReport> {
+        let workflows = self.workflow_specs()?;
+        if !workflows.contains_key(workflow_id) {
+            return Err(ApiError::NotFound(format!("workflow {workflow_id}")));
         }
-        Ok(components)
+        Ok(dependency_report(workflow_id, &workflows))
     }
 
     fn workflow_specs(&self) -> ApiResult<BTreeMap<String, WorkflowSpec>> {
-        let mut workflows = builtin_workflows()
-            .into_iter()
-            .map(|workflow| (workflow.id.clone(), workflow))
-            .collect::<BTreeMap<_, _>>();
-        for workflow in read_specs::<WorkflowSpec>(&self.repo_root, WORKFLOW_DIR)? {
+        let mut workflows = BTreeMap::new();
+        for workflow in read_workflow_sources(&self.repo_root)? {
+            validate_workflow_shape(&workflow)?;
             workflows.insert(workflow.id.clone(), workflow);
         }
         Ok(workflows)
-    }
-
-    fn component_path(&self, component_id: &str) -> ApiResult<PathBuf> {
-        validate_id_segment(component_id, "component id")?;
-        Ok(self
-            .repo_root
-            .join(LIGHTFLOW_DIR)
-            .join(COMPONENT_DIR)
-            .join(format!("{component_id}.json")))
     }
 
     fn workflow_path(&self, workflow_id: &str) -> ApiResult<PathBuf> {
@@ -137,7 +110,7 @@ impl ApiService {
             .repo_root
             .join(LIGHTFLOW_DIR)
             .join(WORKFLOW_DIR)
-            .join(format!("{workflow_id}.json")))
+            .join(format!("{workflow_id}.rs")))
     }
 }
 
@@ -186,46 +159,221 @@ impl From<io::Error> for ApiError {
 /// Service result.
 pub type ApiResult<T> = Result<T, ApiError>;
 
-fn read_specs<T: DeserializeOwned>(root: &Path, dir: &str) -> ApiResult<Vec<T>> {
-    let mut specs = Vec::new();
-    match fs::read_dir(root.join(LIGHTFLOW_DIR).join(dir)) {
+fn read_workflow_sources(root: &Path) -> ApiResult<Vec<WorkflowSpec>> {
+    let mut workflows = Vec::new();
+    match fs::read_dir(root.join(LIGHTFLOW_DIR).join(WORKFLOW_DIR)) {
         Ok(entries) => {
             for entry in entries {
                 let path = entry.map_err(ApiError::from)?.path();
-                if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+                if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
                     continue;
                 }
-                specs.push(read_json(&path)?);
+                workflows.push(read_workflow_source(&path)?);
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(ApiError::from(error)),
     }
-    Ok(specs)
+    Ok(workflows)
 }
 
-fn validate_component(component: &ComponentSpec) -> ApiResult<()> {
-    let mut issues = Vec::new();
-    push_id_issue(&mut issues, &component.id, "component id");
-    if component.name.trim().is_empty() {
-        issues.push(format!("component {} must have a name", component.id));
+fn read_workflow_source(path: &Path) -> ApiResult<WorkflowSpec> {
+    let source = fs::read_to_string(path).map_err(ApiError::from)?;
+    let file = syn::parse_file(&source).map_err(|error| {
+        ApiError::InvalidRequest(format!(
+            "invalid Rust workflow source in {:?}: {error}",
+            path
+        ))
+    })?;
+    let define = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Fn(function) if function.sig.ident == "define" => Some(function),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            ApiError::InvalidRequest(format!(
+                "workflow source {:?} must define pub fn define() -> WorkflowSpec",
+                path
+            ))
+        })?;
+    let expression = define_expression(define).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
+            "workflow source {:?} must return a workflow(...) builder expression",
+            path
+        ))
+    })?;
+    parse_workflow_builder(expression, path)
+}
+
+fn define_expression(function: &syn::ItemFn) -> Option<&syn::Expr> {
+    function
+        .block
+        .stmts
+        .iter()
+        .rev()
+        .find_map(|statement| match statement {
+            syn::Stmt::Expr(syn::Expr::Return(return_expr), _) => return_expr.expr.as_deref(),
+            syn::Stmt::Expr(expression, _) => Some(expression),
+            _ => None,
+        })
+}
+
+fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<WorkflowSpec> {
+    match expression {
+        syn::Expr::MethodCall(call) => {
+            let mut workflow = parse_workflow_builder(&call.receiver, path)?;
+            let method = call.method.to_string();
+            match method.as_str() {
+                "build" => expect_arg_len(&call.args, 0, &method, path)?,
+                "version" => {
+                    workflow.version = string_arg(&call.args, 0, &method, path)?;
+                    expect_arg_len(&call.args, 1, &method, path)?;
+                }
+                "name" => {
+                    workflow.name = string_arg(&call.args, 0, &method, path)?;
+                    expect_arg_len(&call.args, 1, &method, path)?;
+                }
+                "description" => {
+                    workflow.description = Some(string_arg(&call.args, 0, &method, path)?);
+                    expect_arg_len(&call.args, 1, &method, path)?;
+                }
+                "input" => {
+                    workflow.inputs.push(PortSpec {
+                        name: string_arg(&call.args, 0, &method, path)?,
+                        ty: string_arg(&call.args, 1, &method, path)?,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "output" => {
+                    workflow.outputs.push(PortSpec {
+                        name: string_arg(&call.args, 0, &method, path)?,
+                        ty: string_arg(&call.args, 1, &method, path)?,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "depends_on" => {
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id: string_arg(&call.args, 0, &method, path)?,
+                        version: Some(string_arg(&call.args, 1, &method, path)?),
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "node" => {
+                    workflow.nodes.push(WorkflowNode {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        workflow_id: string_arg(&call.args, 1, &method, path)?,
+                        title: None,
+                        position: WorkflowPosition::default(),
+                        config: serde_json::Value::Null,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "edge" => {
+                    workflow.edges.push(WorkflowEdge {
+                        from: WorkflowEndpoint {
+                            node: string_arg(&call.args, 0, &method, path)?,
+                            port: string_arg(&call.args, 1, &method, path)?,
+                        },
+                        to: WorkflowEndpoint {
+                            node: string_arg(&call.args, 2, &method, path)?,
+                            port: string_arg(&call.args, 3, &method, path)?,
+                        },
+                    });
+                    expect_arg_len(&call.args, 4, &method, path)?;
+                }
+                _ => {
+                    return Err(ApiError::InvalidRequest(format!(
+                        "unsupported workflow builder method .{method}(...) in {:?}",
+                        path
+                    )));
+                }
+            }
+            Ok(workflow)
+        }
+        syn::Expr::Call(call) if is_workflow_constructor(call) => {
+            expect_arg_len(&call.args, 1, "workflow", path)?;
+            Ok(WorkflowSpec {
+                id: string_arg(&call.args, 0, "workflow", path)?,
+                version: "0.1.0".to_owned(),
+                name: String::new(),
+                description: None,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                config_schema: serde_json::Value::Null,
+                dependencies: Vec::new(),
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            })
+        }
+        _ => Err(ApiError::InvalidRequest(format!(
+            "unsupported workflow definition expression in {:?}",
+            path
+        ))),
     }
-    push_duplicate_port_issues(&mut issues, "input", &component.id, &component.inputs);
-    push_duplicate_port_issues(&mut issues, "output", &component.id, &component.outputs);
-    if issues.is_empty() {
+}
+
+fn is_workflow_constructor(call: &syn::ExprCall) -> bool {
+    match call.func.as_ref() {
+        syn::Expr::Path(path) => path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "workflow"),
+        _ => false,
+    }
+}
+
+fn string_arg(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    index: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<String> {
+    let Some(argument) = args.iter().nth(index) else {
+        return Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) in {:?} is missing argument {}",
+            path,
+            index + 1
+        )));
+    };
+    match argument {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(value),
+            ..
+        }) => Ok(value.value()),
+        _ => Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) argument {} in {:?} must be a string literal",
+            index + 1,
+            path
+        ))),
+    }
+}
+
+fn expect_arg_len(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    expected: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<()> {
+    if args.len() == expected {
         Ok(())
     } else {
-        Err(ApiError::InvalidRequest(issues.join("; ")))
+        Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) in {:?} expects {expected} arguments, got {}",
+            path,
+            args.len()
+        )))
     }
 }
 
-fn validate_workflow_spec(
-    workflow: &WorkflowSpec,
-    components: &BTreeMap<String, ComponentSpec>,
-    workflows: &BTreeMap<String, WorkflowSpec>,
-) -> WorkflowValidation {
+fn validate_workflow_shape(workflow: &WorkflowSpec) -> ApiResult<()> {
     let mut issues = Vec::new();
     push_id_issue(&mut issues, &workflow.id, "workflow id");
+    if workflow.version.trim().is_empty() {
+        issues.push(format!("workflow {} must have a version", workflow.id));
+    }
     if workflow.name.trim().is_empty() {
         issues.push(format!("workflow {} must have a name", workflow.id));
     }
@@ -241,6 +389,31 @@ fn validate_workflow_spec(
         &workflow.id,
         &workflow.outputs,
     );
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidRequest(issues.join("; ")))
+    }
+}
+
+fn validate_workflow_spec(
+    workflow: &WorkflowSpec,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+) -> WorkflowValidation {
+    let mut issues = match validate_workflow_shape(workflow) {
+        Ok(()) => Vec::new(),
+        Err(ApiError::InvalidRequest(message)) => vec![message],
+        Err(error) => vec![error.to_string()],
+    };
+
+    for dependency in &workflow.dependencies {
+        if !workflows.contains_key(&dependency.workflow_id) {
+            issues.push(format!(
+                "workflow {} declares missing dependency {}",
+                workflow.id, dependency.workflow_id
+            ));
+        }
+    }
 
     let mut nodes = BTreeMap::new();
     for node in &workflow.nodes {
@@ -248,28 +421,16 @@ fn validate_workflow_spec(
         if nodes.insert(node.id.as_str(), node).is_some() {
             issues.push(format!("duplicate node id {}", node.id));
         }
-        match &node.uses {
-            WorkflowNodeTarget::Component { component_id } => {
-                if !components.contains_key(component_id) {
-                    issues.push(format!(
-                        "node {} references missing component {}",
-                        node.id, component_id
-                    ));
-                }
-            }
-            WorkflowNodeTarget::Workflow { workflow_id } => {
-                if workflow_id == &workflow.id {
-                    issues.push(format!(
-                        "workflow {} cannot directly nest itself",
-                        workflow.id
-                    ));
-                } else if !workflows.contains_key(workflow_id) {
-                    issues.push(format!(
-                        "node {} references missing workflow {}",
-                        node.id, workflow_id
-                    ));
-                }
-            }
+        if node.workflow_id == workflow.id {
+            issues.push(format!(
+                "workflow {} cannot directly nest itself",
+                workflow.id
+            ));
+        } else if !workflows.contains_key(&node.workflow_id) {
+            issues.push(format!(
+                "node {} references missing workflow {}",
+                node.id, node.workflow_id
+            ));
         }
     }
 
@@ -289,7 +450,7 @@ fn validate_workflow_spec(
             ));
             continue;
         };
-        if !node_outputs(from_node, components, workflows)
+        if !node_outputs(from_node, workflows)
             .iter()
             .any(|port| port.name == edge.from.port)
         {
@@ -305,7 +466,7 @@ fn validate_workflow_spec(
             ));
             continue;
         };
-        if !node_inputs(to_node, components, workflows)
+        if !node_inputs(to_node, workflows)
             .iter()
             .any(|port| port.name == edge.to.port)
         {
@@ -348,38 +509,161 @@ fn validate_workflow_spec(
     }
 }
 
+fn dependency_report(
+    workflow_id: &str,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+) -> WorkflowDependencyReport {
+    let mut collector = DependencyCollector {
+        workflows,
+        states: BTreeMap::new(),
+        stack: Vec::new(),
+        workflow_ids: BTreeSet::new(),
+        resolved: BTreeMap::new(),
+        workflow_order: Vec::new(),
+        missing_workflows: BTreeSet::new(),
+        version_mismatches: Vec::new(),
+        cycles: Vec::new(),
+    };
+    collector.visit_workflow(workflow_id);
+    let missing_workflows = collector.missing_workflows.into_iter().collect::<Vec<_>>();
+    let complete = missing_workflows.is_empty()
+        && collector.version_mismatches.is_empty()
+        && collector.cycles.is_empty();
+    WorkflowDependencyReport {
+        workflow_id: workflow_id.to_owned(),
+        complete,
+        workflows: collector.workflow_ids.into_iter().collect(),
+        resolved: collector.resolved.into_values().collect(),
+        workflow_order: collector.workflow_order,
+        missing_workflows,
+        version_mismatches: collector.version_mismatches,
+        cycles: collector.cycles,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum VisitState {
+    Visiting,
+    Visited,
+}
+
+struct DependencyCollector<'a> {
+    workflows: &'a BTreeMap<String, WorkflowSpec>,
+    states: BTreeMap<String, VisitState>,
+    stack: Vec<String>,
+    workflow_ids: BTreeSet<String>,
+    resolved: BTreeMap<String, ResolvedWorkflowDependency>,
+    workflow_order: Vec<String>,
+    missing_workflows: BTreeSet<String>,
+    version_mismatches: Vec<WorkflowVersionMismatch>,
+    cycles: Vec<Vec<String>>,
+}
+
+impl DependencyCollector<'_> {
+    fn visit_workflow(&mut self, workflow_id: &str) {
+        match self.states.get(workflow_id).copied() {
+            Some(VisitState::Visited) => return,
+            Some(VisitState::Visiting) => {
+                if let Some(index) = self.stack.iter().position(|id| id == workflow_id) {
+                    let mut cycle = self.stack[index..].to_vec();
+                    cycle.push(workflow_id.to_owned());
+                    if !self.cycles.contains(&cycle) {
+                        self.cycles.push(cycle);
+                    }
+                }
+                return;
+            }
+            None => {}
+        }
+
+        let Some(workflow) = self.workflows.get(workflow_id) else {
+            self.missing_workflows.insert(workflow_id.to_owned());
+            return;
+        };
+
+        self.workflow_ids.insert(workflow_id.to_owned());
+        self.resolved.insert(
+            workflow_id.to_owned(),
+            ResolvedWorkflowDependency {
+                workflow_id: workflow_id.to_owned(),
+                version: workflow.version.clone(),
+            },
+        );
+        self.states
+            .insert(workflow_id.to_owned(), VisitState::Visiting);
+        self.stack.push(workflow_id.to_owned());
+
+        for dependency in &workflow.dependencies {
+            self.record_workflow_requirement(
+                &dependency.workflow_id,
+                dependency.version.as_deref(),
+                workflow_id,
+            );
+            self.visit_workflow(&dependency.workflow_id);
+        }
+
+        for node in &workflow.nodes {
+            self.record_workflow_requirement(&node.workflow_id, None, workflow_id);
+            self.visit_workflow(&node.workflow_id);
+        }
+
+        self.stack.pop();
+        self.states
+            .insert(workflow_id.to_owned(), VisitState::Visited);
+        if !self
+            .workflow_order
+            .iter()
+            .any(|ordered| ordered == workflow_id)
+        {
+            self.workflow_order.push(workflow_id.to_owned());
+        }
+    }
+
+    fn record_workflow_requirement(
+        &mut self,
+        workflow_id: &str,
+        required: Option<&str>,
+        required_by: &str,
+    ) {
+        let Some(workflow) = self.workflows.get(workflow_id) else {
+            self.missing_workflows.insert(workflow_id.to_owned());
+            return;
+        };
+        if let Some(required) = required
+            && !version_satisfies(&workflow.version, required)
+        {
+            self.version_mismatches.push(WorkflowVersionMismatch {
+                workflow_id: workflow_id.to_owned(),
+                required: required.to_owned(),
+                found: workflow.version.clone(),
+                required_by: required_by.to_owned(),
+            });
+        }
+    }
+}
+
+fn version_satisfies(found: &str, required: &str) -> bool {
+    required == "*" || found == required
+}
+
 fn node_inputs(
     node: &crate::workflow::WorkflowNode,
-    components: &BTreeMap<String, ComponentSpec>,
     workflows: &BTreeMap<String, WorkflowSpec>,
 ) -> Vec<PortSpec> {
-    match &node.uses {
-        WorkflowNodeTarget::Component { component_id } => components
-            .get(component_id)
-            .map(|component| component.inputs.clone())
-            .unwrap_or_default(),
-        WorkflowNodeTarget::Workflow { workflow_id } => workflows
-            .get(workflow_id)
-            .map(|workflow| workflow.inputs.clone())
-            .unwrap_or_default(),
-    }
+    workflows
+        .get(&node.workflow_id)
+        .map(|workflow| workflow.inputs.clone())
+        .unwrap_or_default()
 }
 
 fn node_outputs(
     node: &crate::workflow::WorkflowNode,
-    components: &BTreeMap<String, ComponentSpec>,
     workflows: &BTreeMap<String, WorkflowSpec>,
 ) -> Vec<PortSpec> {
-    match &node.uses {
-        WorkflowNodeTarget::Component { component_id } => components
-            .get(component_id)
-            .map(|component| component.outputs.clone())
-            .unwrap_or_default(),
-        WorkflowNodeTarget::Workflow { workflow_id } => workflows
-            .get(workflow_id)
-            .map(|workflow| workflow.outputs.clone())
-            .unwrap_or_default(),
-    }
+    workflows
+        .get(&node.workflow_id)
+        .map(|workflow| workflow.outputs.clone())
+        .unwrap_or_default()
 }
 
 fn push_id_issue(issues: &mut Vec<String>, value: &str, label: &str) {
@@ -425,58 +709,77 @@ fn validate_id_segment(value: &str, label: &str) -> ApiResult<()> {
     Ok(())
 }
 
-fn read_json<T: DeserializeOwned>(path: &Path) -> ApiResult<T> {
-    let file = fs::File::open(path).map_err(ApiError::from)?;
-    serde_json::from_reader(file)
-        .map_err(|error| ApiError::InvalidRequest(format!("invalid JSON in {:?}: {error}", path)))
-}
-
-fn write_json_atomic(path: &Path, value: &impl Serialize) -> ApiResult<()> {
+fn write_text_atomic(path: &Path, body: &str) -> ApiResult<()> {
     let parent = path
         .parent()
-        .ok_or_else(|| ApiError::InvalidRequest("json path has no parent".to_owned()))?;
+        .ok_or_else(|| ApiError::InvalidRequest("workflow path has no parent".to_owned()))?;
     fs::create_dir_all(parent).map_err(ApiError::from)?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| ApiError::InvalidRequest("json path has no file name".to_owned()))?;
+        .ok_or_else(|| ApiError::InvalidRequest("workflow path has no file name".to_owned()))?;
     let temp_path = parent.join(format!("{file_name}.tmp"));
-    let mut file = fs::File::create(&temp_path).map_err(ApiError::from)?;
-    serde_json::to_writer_pretty(&mut file, value)
-        .map_err(|error| ApiError::InvalidRequest(format!("failed to encode JSON: {error}")))?;
-    file.write_all(b"\n").map_err(ApiError::from)?;
-    file.sync_all().map_err(ApiError::from)?;
-    drop(file);
+    fs::write(&temp_path, body).map_err(ApiError::from)?;
     fs::rename(temp_path, path).map_err(ApiError::from)
 }
 
-fn builtin_components() -> Vec<ComponentSpec> {
-    vec![
-        ComponentSpec {
-            id: "component.input".to_owned(),
-            name: "Workflow Input".to_owned(),
-            description: Some("Passes external workflow input into the graph.".to_owned()),
-            inputs: Vec::new(),
-            outputs: vec![PortSpec {
-                name: "value".to_owned(),
-                ty: "json".to_owned(),
-            }],
-            config_schema: serde_json::Value::Null,
-        },
-        ComponentSpec {
-            id: "component.output".to_owned(),
-            name: "Workflow Output".to_owned(),
-            description: Some("Collects graph output.".to_owned()),
-            inputs: vec![PortSpec {
-                name: "value".to_owned(),
-                ty: "json".to_owned(),
-            }],
-            outputs: Vec::new(),
-            config_schema: serde_json::Value::Null,
-        },
-    ]
+fn workflow_source(workflow: &WorkflowSpec) -> String {
+    let mut source = String::from("use lightflow::workflow::*;\n\n");
+    source.push_str("pub fn define() -> WorkflowSpec {\n");
+    source.push_str(&format!("    workflow({})\n", rust_string(&workflow.id)));
+    source.push_str(&format!(
+        "        .version({})\n",
+        rust_string(&workflow.version)
+    ));
+    source.push_str(&format!("        .name({})\n", rust_string(&workflow.name)));
+    if let Some(description) = &workflow.description {
+        source.push_str(&format!(
+            "        .description({})\n",
+            rust_string(description)
+        ));
+    }
+    for input in &workflow.inputs {
+        source.push_str(&format!(
+            "        .input({}, {})\n",
+            rust_string(&input.name),
+            rust_string(&input.ty)
+        ));
+    }
+    for output in &workflow.outputs {
+        source.push_str(&format!(
+            "        .output({}, {})\n",
+            rust_string(&output.name),
+            rust_string(&output.ty)
+        ));
+    }
+    for dependency in &workflow.dependencies {
+        source.push_str(&format!(
+            "        .depends_on({}, {})\n",
+            rust_string(&dependency.workflow_id),
+            rust_string(dependency.version.as_deref().unwrap_or("*"))
+        ));
+    }
+    for node in &workflow.nodes {
+        source.push_str(&format!(
+            "        .node({}, {})\n",
+            rust_string(&node.id),
+            rust_string(&node.workflow_id)
+        ));
+    }
+    for edge in &workflow.edges {
+        source.push_str(&format!(
+            "        .edge({}, {}, {}, {})\n",
+            rust_string(&edge.from.node),
+            rust_string(&edge.from.port),
+            rust_string(&edge.to.node),
+            rust_string(&edge.to.port)
+        ));
+    }
+    source.push_str("        .build()\n");
+    source.push_str("}\n");
+    source
 }
 
-fn builtin_workflows() -> Vec<WorkflowSpec> {
-    Vec::new()
+fn rust_string(value: &str) -> String {
+    format!("{value:?}")
 }

@@ -1,7 +1,6 @@
 //! Minimal MCP surface for external editors and agents.
 
 use crate::api::{ApiError, ApiService};
-use crate::component::ComponentSpec;
 use crate::workflow::WorkflowSpec;
 use serde_json::{Value, json};
 
@@ -52,21 +51,6 @@ fn initialize_result() -> Value {
 fn tools() -> Value {
     json!([
         tool(
-            "lightflow.component.list",
-            "List LightFlow components.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool(
-            "lightflow.component.get",
-            "Read one LightFlow component.",
-            id_schema("component_id")
-        ),
-        tool(
-            "lightflow.component.save",
-            "Save one LightFlow component.",
-            component_schema()
-        ),
-        tool(
             "lightflow.workflow.list",
             "List LightFlow workflows.",
             json!({ "type": "object", "properties": {} })
@@ -74,6 +58,11 @@ fn tools() -> Value {
         tool(
             "lightflow.workflow.get",
             "Read one LightFlow workflow.",
+            id_schema("workflow_id")
+        ),
+        tool(
+            "lightflow.workflow.dependencies",
+            "Resolve recursive workflow dependencies for one LightFlow workflow.",
             id_schema("workflow_id")
         ),
         tool(
@@ -107,16 +96,6 @@ fn id_schema(id_name: &str) -> Value {
     })
 }
 
-fn component_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["component"],
-        "properties": {
-            "component": { "type": "object", "additionalProperties": true }
-        }
-    })
-}
-
 fn workflow_schema() -> Value {
     json!({
         "type": "object",
@@ -129,7 +108,6 @@ fn workflow_schema() -> Value {
 
 fn resources() -> Value {
     json!([
-        resource("lightflow://components", "Components", "application/json"),
         resource("lightflow://workflows", "Workflows", "application/json"),
         resource("lightflow://mcp", "MCP Endpoint", "application/json")
     ])
@@ -153,17 +131,13 @@ fn call_tool(service: &ApiService, params: &Value) -> Result<Value, McpError> {
         .cloned()
         .unwrap_or_else(|| json!({}));
     let value = match name {
-        "lightflow.component.list" => serde_json::to_value(service.list_components()?)?,
-        "lightflow.component.get" => {
-            serde_json::to_value(service.get_component(required_str(&arguments, "component_id")?)?)?
-        }
-        "lightflow.component.save" => {
-            serde_json::to_value(service.save_component(component_arg(&arguments)?)?)?
-        }
         "lightflow.workflow.list" => serde_json::to_value(service.list_workflows()?)?,
         "lightflow.workflow.get" => {
             serde_json::to_value(service.get_workflow(required_str(&arguments, "workflow_id")?)?)?
         }
+        "lightflow.workflow.dependencies" => serde_json::to_value(
+            service.workflow_dependencies(required_str(&arguments, "workflow_id")?)?,
+        )?,
         "lightflow.workflow.validate" => {
             serde_json::to_value(service.validate_workflow(&workflow_arg(&arguments)?))?
         }
@@ -190,7 +164,6 @@ fn read_resource(service: &ApiService, params: &Value) -> Result<Value, McpError
         .and_then(Value::as_str)
         .ok_or_else(|| McpError::new(-32602, "resources/read requires params.uri"))?;
     let value = match uri {
-        "lightflow://components" => serde_json::to_value(service.list_components()?)?,
         "lightflow://workflows" => serde_json::to_value(service.list_workflows()?)?,
         "lightflow://mcp" => mcp_resource(),
         _ => return Err(McpError::new(-32602, format!("unknown resource: {uri}"))),
@@ -205,13 +178,6 @@ fn read_resource(service: &ApiService, params: &Value) -> Result<Value, McpError
             }
         ]
     }))
-}
-
-fn component_arg(arguments: &Value) -> Result<ComponentSpec, McpError> {
-    let component = arguments
-        .get("component")
-        .ok_or_else(|| McpError::new(-32602, "missing object argument: component"))?;
-    serde_json::from_value(component.clone()).map_err(McpError::from)
 }
 
 fn workflow_arg(arguments: &Value) -> Result<WorkflowSpec, McpError> {
@@ -280,16 +246,13 @@ fn mcp_resource() -> Value {
             "resources/read"
         ],
         "tools": [
-            "lightflow.component.list",
-            "lightflow.component.get",
-            "lightflow.component.save",
             "lightflow.workflow.list",
             "lightflow.workflow.get",
+            "lightflow.workflow.dependencies",
             "lightflow.workflow.validate",
             "lightflow.workflow.save"
         ],
         "resources": [
-            "lightflow://components",
             "lightflow://workflows",
             "lightflow://mcp"
         ]

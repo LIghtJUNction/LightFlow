@@ -4,51 +4,46 @@ LightFlow project files are ordinary source-controlled files under `lightflow/`.
 
 ```text
 lightflow/
-  components/
-    <component_id>.json
   workflows/
-    <workflow_id>.json
-```
-
-## Component Files
-
-Component files describe reusable leaf units:
-
-```json
-{
-  "id": "component.text_prompt",
-  "name": "Text Prompt",
-  "inputs": [{ "name": "value", "type": "json" }],
-  "outputs": [{ "name": "prompt", "type": "text" }]
-}
+    <workflow_id>.rs
 ```
 
 ## Workflow Files
 
-Workflow files describe directed graphs. Nodes can reference either components
-or workflows:
+Each workflow file is Rust source code with embedded metadata and definition:
 
-```json
-{
-  "id": "workflow.example",
-  "name": "Example",
-  "inputs": [{ "name": "value", "type": "json" }],
-  "outputs": [{ "name": "text", "type": "text" }],
-  "nodes": [
-    {
-      "id": "prompt",
-      "uses": "component",
-      "component_id": "component.text_prompt"
-    },
-    {
-      "id": "nested",
-      "uses": "workflow",
-      "workflow_id": "workflow.other"
-    }
-  ],
-  "edges": []
+```rust
+use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("workflow.example")
+        .version("0.1.0")
+        .name("Example")
+        .description("Reusable workflow definition.")
+        .input("value", "json")
+        .output("text", "text")
+        .build()
 }
 ```
+
+Composite workflows nest other workflows with `.node()` and connect node ports
+with `.edge()`:
+
+```rust
+use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("workflow.parent")
+        .version("0.1.0")
+        .name("Parent")
+        .depends_on("workflow.child", "0.1.0")
+        .node("child", "workflow.child")
+        .build()
+}
+```
+
+The backend accepts `WorkflowSpec` JSON over HTTP/MCP/CLI for tool integration,
+but the source-controlled project format is Rust.
 
 ## Not Stored Here
 

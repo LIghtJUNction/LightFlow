@@ -1,12 +1,19 @@
-use crate::component::PortSpec;
 use serde::{Deserialize, Serialize};
 
-/// A directed workflow graph. Workflows can be used as nodes inside other
-/// workflows, so composition is represented by one concept instead of a
-/// separate "composition" asset kind.
+fn default_version() -> String {
+    "0.1.0".to_owned()
+}
+
+/// A LightFlow workflow.
+///
+/// A workflow can be a reusable leaf unit or a composite graph. Leaf workflows
+/// declare ports and optional configuration but have no nodes. Composite
+/// workflows declare nodes that reference other workflows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowSpec {
     pub id: String,
+    #[serde(default = "default_version")]
+    pub version: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -14,42 +21,43 @@ pub struct WorkflowSpec {
     pub inputs: Vec<PortSpec>,
     #[serde(default)]
     pub outputs: Vec<PortSpec>,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub config_schema: serde_json::Value,
+    #[serde(default)]
+    pub dependencies: Vec<WorkflowDependencyRequirement>,
     #[serde(default)]
     pub nodes: Vec<WorkflowNode>,
     #[serde(default)]
     pub edges: Vec<WorkflowEdge>,
 }
 
-/// One node in a workflow graph.
+/// A named typed input or output.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PortSpec {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub ty: String,
+}
+
+/// Explicit workflow dependency constraint.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowDependencyRequirement {
+    pub workflow_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+/// One node in a composite workflow graph.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowNode {
     pub id: String,
-    #[serde(flatten)]
-    pub uses: WorkflowNodeTarget,
+    pub workflow_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default)]
     pub position: WorkflowPosition,
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub config: serde_json::Value,
-}
-
-/// The executable target for a workflow node.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "uses", rename_all = "snake_case")]
-pub enum WorkflowNodeTarget {
-    Component { component_id: String },
-    Workflow { workflow_id: String },
-}
-
-impl WorkflowNodeTarget {
-    #[must_use]
-    pub fn target_id(&self) -> &str {
-        match self {
-            Self::Component { component_id } => component_id,
-            Self::Workflow { workflow_id } => workflow_id,
-        }
-    }
 }
 
 /// Canvas position stored with the workflow as authoring metadata.
@@ -83,9 +91,11 @@ pub struct WorkflowList {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowSummary {
     pub id: String,
+    pub version: String,
     pub name: String,
     pub inputs: usize,
     pub outputs: usize,
+    pub dependencies: usize,
     pub nodes: usize,
     pub edges: usize,
 }
@@ -94,9 +104,11 @@ impl From<WorkflowSpec> for WorkflowSummary {
     fn from(workflow: WorkflowSpec) -> Self {
         Self {
             id: workflow.id,
+            version: workflow.version,
             name: workflow.name,
             inputs: workflow.inputs.len(),
             outputs: workflow.outputs.len(),
+            dependencies: workflow.dependencies.len(),
             nodes: workflow.nodes.len(),
             edges: workflow.edges.len(),
         }
@@ -109,4 +121,153 @@ pub struct WorkflowValidation {
     pub valid: bool,
     pub issues: Vec<String>,
     pub topological_order: Vec<String>,
+}
+
+/// Recursive dependency report for one workflow.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowDependencyReport {
+    pub workflow_id: String,
+    pub complete: bool,
+    pub workflows: Vec<String>,
+    pub resolved: Vec<ResolvedWorkflowDependency>,
+    pub workflow_order: Vec<String>,
+    pub missing_workflows: Vec<String>,
+    pub version_mismatches: Vec<WorkflowVersionMismatch>,
+    pub cycles: Vec<Vec<String>>,
+}
+
+/// One resolved local workflow dependency with the currently available version.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ResolvedWorkflowDependency {
+    pub workflow_id: String,
+    pub version: String,
+}
+
+/// A workflow exists but does not satisfy a declared version requirement.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowVersionMismatch {
+    pub workflow_id: String,
+    pub required: String,
+    pub found: String,
+    pub required_by: String,
+}
+
+/// Start a Rust workflow definition.
+#[must_use]
+pub fn workflow(id: impl Into<String>) -> WorkflowBuilder {
+    WorkflowBuilder {
+        spec: WorkflowSpec {
+            id: id.into(),
+            version: default_version(),
+            name: String::new(),
+            description: None,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            config_schema: serde_json::Value::Null,
+            dependencies: Vec::new(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        },
+    }
+}
+
+/// Builder used by source-controlled Rust workflow files.
+#[derive(Debug, Clone)]
+pub struct WorkflowBuilder {
+    spec: WorkflowSpec,
+}
+
+impl WorkflowBuilder {
+    #[must_use]
+    pub fn version(mut self, version: impl Into<String>) -> Self {
+        self.spec.version = version.into();
+        self
+    }
+
+    #[must_use]
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.spec.name = name.into();
+        self
+    }
+
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.spec.description = Some(description.into());
+        self
+    }
+
+    #[must_use]
+    pub fn input(mut self, name: impl Into<String>, ty: impl Into<String>) -> Self {
+        self.spec.inputs.push(PortSpec {
+            name: name.into(),
+            ty: ty.into(),
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn output(mut self, name: impl Into<String>, ty: impl Into<String>) -> Self {
+        self.spec.outputs.push(PortSpec {
+            name: name.into(),
+            ty: ty.into(),
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn depends_on(
+        mut self,
+        workflow_id: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
+        self.spec.dependencies.push(WorkflowDependencyRequirement {
+            workflow_id: workflow_id.into(),
+            version: Some(version.into()),
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn node(mut self, id: impl Into<String>, workflow_id: impl Into<String>) -> Self {
+        self.spec.nodes.push(WorkflowNode {
+            id: id.into(),
+            workflow_id: workflow_id.into(),
+            title: None,
+            position: WorkflowPosition::default(),
+            config: serde_json::Value::Null,
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn edge(
+        mut self,
+        from_node: impl Into<String>,
+        from_port: impl Into<String>,
+        to_node: impl Into<String>,
+        to_port: impl Into<String>,
+    ) -> Self {
+        self.spec.edges.push(WorkflowEdge {
+            from: WorkflowEndpoint {
+                node: from_node.into(),
+                port: from_port.into(),
+            },
+            to: WorkflowEndpoint {
+                node: to_node.into(),
+                port: to_port.into(),
+            },
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn build(self) -> WorkflowSpec {
+        self.spec
+    }
+}
+
+impl From<WorkflowBuilder> for WorkflowSpec {
+    fn from(builder: WorkflowBuilder) -> Self {
+        builder.spec
+    }
 }

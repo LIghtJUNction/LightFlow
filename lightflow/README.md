@@ -1,9 +1,8 @@
 # LightFlow Project Files
 
-LightFlow currently has two source-controlled concepts:
+LightFlow currently has one source-controlled concept:
 
-- `components/`: reusable leaf building blocks.
-- `workflows/`: directed graphs that can call components or nest other workflows.
+- `workflows/`: Rust files that define reusable leaf or composite workflows.
 
 Runtime state, credentials, caches, generated artifacts, and heavyweight model
 weights do not belong here.

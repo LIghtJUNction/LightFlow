@@ -2,67 +2,17 @@ openapi: 3.1.0
 info:
   title: LightFlow API
   version: 0.1.0
-  description: Backend API contract for LightFlow components and nested workflows.
-servers:
-  - url: http://localhost:5174
+  description: Backend API contract for Rust-defined LightFlow workflows.
 paths:
   /health:
     get:
       summary: Health check
-      operationId: getHealth
       responses:
         "200":
-          description: Service is reachable.
-  /components:
-    get:
-      summary: List components
-      operationId: listComponents
-      responses:
-        "200":
-          description: Component summaries.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ComponentList"
-    post:
-      summary: Save a component
-      operationId: saveComponent
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ComponentSpec"
-      responses:
-        "201":
-          description: Component saved.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ComponentSpec"
-  /components/{component_id}:
-    get:
-      summary: Read a component
-      operationId: getComponent
-      parameters:
-        - name: component_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Component spec.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ComponentSpec"
-        "404":
-          description: Component not found.
+          description: Backend is reachable.
   /workflows:
     get:
       summary: List workflows
-      operationId: listWorkflows
       responses:
         "200":
           description: Workflow summaries.
@@ -72,7 +22,7 @@ paths:
                 $ref: "#/components/schemas/WorkflowList"
     post:
       summary: Save a workflow
-      operationId: saveWorkflow
+      description: Saves the workflow as `lightflow/workflows/<workflow_id>.rs`.
       requestBody:
         required: true
         content:
@@ -81,17 +31,14 @@ paths:
               $ref: "#/components/schemas/WorkflowSpec"
       responses:
         "201":
-          description: Workflow saved.
+          description: Saved workflow.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkflowSpec"
-        "400":
-          description: Workflow failed validation.
   /workflows/{workflow_id}:
     get:
       summary: Read a workflow
-      operationId: getWorkflow
       parameters:
         - name: workflow_id
           in: path
@@ -100,17 +47,30 @@ paths:
             type: string
       responses:
         "200":
-          description: Workflow spec.
+          description: Workflow.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkflowSpec"
-        "404":
-          description: Workflow not found.
+  /workflows/{workflow_id}/dependencies:
+    get:
+      summary: Resolve workflow dependencies
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recursive workflow dependency report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowDependencyReport"
   /workflows/validate:
     post:
       summary: Validate a workflow
-      operationId: validateWorkflow
       requestBody:
         required: true
         content:
@@ -124,6 +84,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkflowValidation"
+  /mcp:
+    get:
+      summary: MCP endpoint info
+      responses:
+        "200":
+          description: MCP transport information.
+    post:
+      summary: MCP JSON-RPC endpoint
+      responses:
+        "200":
+          description: JSON-RPC response.
 components:
   schemas:
     PortSpec:
@@ -134,12 +105,15 @@ components:
           type: string
         type:
           type: string
-    ComponentSpec:
+    WorkflowSpec:
       type: object
-      required: [id, name]
+      required: [id, version, name]
       properties:
         id:
           type: string
+        version:
+          type: string
+          default: 0.1.0
         name:
           type: string
         description:
@@ -153,47 +127,11 @@ components:
           items:
             $ref: "#/components/schemas/PortSpec"
         config_schema:
-          type:
-            - object
-            - "null"
-    ComponentList:
-      type: object
-      required: [components]
-      properties:
-        components:
+          description: Optional JSON schema for workflow configuration.
+        dependencies:
           type: array
           items:
-            $ref: "#/components/schemas/ComponentSummary"
-    ComponentSummary:
-      type: object
-      required: [id, name, inputs, outputs]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        inputs:
-          type: integer
-        outputs:
-          type: integer
-    WorkflowSpec:
-      type: object
-      required: [id, name]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        description:
-          type: string
-        inputs:
-          type: array
-          items:
-            $ref: "#/components/schemas/PortSpec"
-        outputs:
-          type: array
-          items:
-            $ref: "#/components/schemas/PortSpec"
+            $ref: "#/components/schemas/WorkflowDependencyRequirement"
         nodes:
           type: array
           items:
@@ -202,16 +140,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkflowEdge"
+    WorkflowDependencyRequirement:
+      type: object
+      required: [workflow_id]
+      properties:
+        workflow_id:
+          type: string
+        version:
+          type: string
     WorkflowNode:
       type: object
-      required: [id, uses]
+      required: [id, workflow_id]
       properties:
         id:
-          type: string
-        uses:
-          type: string
-          enum: [component, workflow]
-        component_id:
           type: string
         workflow_id:
           type: string
@@ -220,9 +161,7 @@ components:
         position:
           $ref: "#/components/schemas/WorkflowPosition"
         config:
-          type:
-            - object
-            - "null"
+          description: Node-specific configuration.
     WorkflowPosition:
       type: object
       properties:
@@ -256,15 +195,19 @@ components:
             $ref: "#/components/schemas/WorkflowSummary"
     WorkflowSummary:
       type: object
-      required: [id, name, inputs, outputs, nodes, edges]
+      required: [id, version, name, inputs, outputs, dependencies, nodes, edges]
       properties:
         id:
+          type: string
+        version:
           type: string
         name:
           type: string
         inputs:
           type: integer
         outputs:
+          type: integer
+        dependencies:
           type: integer
         nodes:
           type: integer
@@ -284,3 +227,65 @@ components:
           type: array
           items:
             type: string
+    WorkflowDependencyReport:
+      type: object
+      required:
+        - workflow_id
+        - complete
+        - workflows
+        - resolved
+        - workflow_order
+        - missing_workflows
+        - version_mismatches
+        - cycles
+      properties:
+        workflow_id:
+          type: string
+        complete:
+          type: boolean
+        workflows:
+          type: array
+          items:
+            type: string
+        resolved:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResolvedWorkflowDependency"
+        workflow_order:
+          type: array
+          items:
+            type: string
+        missing_workflows:
+          type: array
+          items:
+            type: string
+        version_mismatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowVersionMismatch"
+        cycles:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+    ResolvedWorkflowDependency:
+      type: object
+      required: [workflow_id, version]
+      properties:
+        workflow_id:
+          type: string
+        version:
+          type: string
+    WorkflowVersionMismatch:
+      type: object
+      required: [workflow_id, required, found, required_by]
+      properties:
+        workflow_id:
+          type: string
+        required:
+          type: string
+        found:
+          type: string
+        required_by:
+          type: string

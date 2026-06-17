@@ -1,4 +1,5 @@
 # Workflows
 
-Workflows are directed graphs. A workflow node uses either a component or
-another workflow, which is how nesting works.
+Each `.rs` file defines one workflow with embedded metadata and graph
+structure. Leaf workflows declare ports and no nodes. Composite workflows use
+`.node(..., workflow_id)` to nest other workflows.

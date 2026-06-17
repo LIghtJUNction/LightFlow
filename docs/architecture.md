@@ -1,53 +1,80 @@
 # Architecture
 
-LightFlow currently has two domain concepts.
-
-## Component
-
-A component is a reusable leaf building block. It declares:
-
-- stable `id`
-- display `name`
-- optional `description`
-- typed input ports
-- typed output ports
-- optional JSON config schema
-
-Components are stored as source-controlled specs under
-`lightflow/components/*.json`.
+LightFlow currently has one domain concept: workflow.
 
 ## Workflow
 
-A workflow is a directed graph. It declares:
+A workflow can be either:
+
+- a reusable leaf unit with typed input and output ports
+- a composite directed graph whose nodes reference other workflows
+
+A workflow declares:
 
 - stable `id`
+- semantic `version`
 - display `name`
 - optional `description`
 - public input ports
 - public output ports
+- optional explicit workflow dependencies
 - graph nodes
-- directed edges
+- directed edges between node ports
 
-Each workflow node uses either:
+There is no separate component concept. A leaf workflow is the replacement for
+what would otherwise become a component.
 
-- a component by `component_id`
-- another workflow by `workflow_id`
+## Workflow Files
 
-That is the only composition mechanism. There is no separate composition asset
-type.
+Workflows are source-controlled Rust files under `lightflow/workflows/*.rs`.
+Metadata and graph structure live in the same file:
+
+```rust
+use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("workflow.example")
+        .version("0.1.0")
+        .name("Example")
+        .input("value", "json")
+        .output("value", "json")
+        .build()
+}
+```
+
+The backend statically parses the supported builder DSL from the Rust AST. It
+does not compile or execute workflow files.
 
 ## Validation
 
 The backend validates:
 
 - id values are safe path segments
-- component and workflow names are present
+- workflow names and versions are present
 - port names are non-empty and unique per direction
-- referenced components exist
 - referenced workflows exist
 - a workflow does not directly nest itself
 - edge source and target ports exist
 - workflow graph edges are acyclic
+- declared dependency versions match local workflow versions
+
+## Dependency Resolution
+
+The backend resolves workflow dependencies recursively from a root workflow.
+The report includes:
+
+- reachable workflows, including the root workflow
+- resolved local workflow versions
+- dependency-first workflow order
+- missing workflow ids
+- version mismatches
+- workflow nesting cycles
+
+The command-line form is:
+
+```bash
+lfw deps workflow.text_plan
+```
 
 The current validation deliberately does not implement execution scheduling,
 provider routing, or agent behavior.
@@ -57,8 +84,8 @@ provider routing, or agent behavior.
 `src/api.rs` is the framework-independent service. CLI, HTTP, and MCP call this
 service instead of owning behavior.
 
+`src/workflow.rs` holds the public workflow domain types and Rust DSL builder.
+
 `src/server.rs` is only an HTTP adapter.
 
 `src/mcp.rs` is only a JSON-RPC/MCP adapter for external tools.
-
-`src/component.rs` and `src/workflow.rs` hold the public domain types.

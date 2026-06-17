@@ -7,46 +7,61 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
-fn cli_lists_components_and_validates_nested_workflows() -> Result<(), Box<dyn std::error::Error>> {
+fn cli_reads_rust_workflows_and_resolves_dependencies() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     write_project_specs(&root)?;
 
-    let components = lightflow(&root, ["components", "list"])?;
+    let list = lightflow(&root, ["workflows", "list"])?;
+    let ids = list["workflows"]
+        .as_array()
+        .expect("workflows list returns an array")
+        .iter()
+        .map(|workflow| workflow["id"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
     assert_eq!(
-        components["components"][0]["id"],
-        Value::String("component.echo".to_owned())
+        ids,
+        vec!["workflow.child", "workflow.parent", "workflow.sink"]
     );
 
     let child = lightflow(&root, ["workflows", "get", "workflow.child"])?;
     assert_eq!(child["id"], Value::String("workflow.child".to_owned()));
+    assert_eq!(child["version"], Value::String("0.1.0".to_owned()));
 
-    let parent = fs::read_to_string(root.join("lightflow/workflows/workflow.parent.json"))?;
-    let validation = lightflow(&root, ["workflows", "validate", &parent])?;
-    assert_eq!(validation["valid"], Value::Bool(true));
+    let deps = lfw(&root, ["deps", "workflow.parent"])?;
     assert_eq!(
-        validation["topological_order"],
-        serde_json::json!(["nested", "output"])
+        deps["workflow_id"],
+        Value::String("workflow.parent".to_owned())
+    );
+    assert_eq!(deps["complete"], Value::Bool(true));
+    assert_eq!(
+        deps["workflows"],
+        serde_json::json!(["workflow.child", "workflow.parent", "workflow.sink"])
+    );
+    assert_eq!(
+        deps["workflow_order"],
+        serde_json::json!(["workflow.child", "workflow.sink", "workflow.parent"])
     );
 
-    let invalid = serde_json::json!({
-        "id": "workflow.invalid",
-        "name": "Invalid",
-        "nodes": [
-            {
-                "id": "missing",
-                "uses": "component",
-                "component_id": "component.missing"
-            }
+    let validation = lightflow(
+        &root,
+        [
+            "workflows",
+            "validate",
+            r#"{
+              "id": "workflow.invalid",
+              "version": "0.1.0",
+              "name": "Invalid",
+              "nodes": [{ "id": "missing", "workflow_id": "workflow.missing" }],
+              "edges": []
+            }"#,
         ],
-        "edges": []
-    });
-    let invalid = lightflow(&root, ["workflows", "validate", &invalid.to_string()])?;
-    assert_eq!(invalid["valid"], Value::Bool(false));
+    )?;
+    assert_eq!(validation["valid"], Value::Bool(false));
     assert!(
-        invalid["issues"][0]
+        validation["issues"][0]
             .as_str()
             .unwrap()
-            .contains("missing component")
+            .contains("missing workflow")
     );
 
     let _ = fs::remove_dir_all(root);
@@ -54,7 +69,35 @@ fn cli_lists_components_and_validates_nested_workflows() -> Result<(), Box<dyn s
 }
 
 #[test]
-fn mcp_exposes_component_and_workflow_tools() -> Result<(), Box<dyn std::error::Error>> {
+fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+
+    let init = lfw(&root, ["init"])?;
+    assert!(
+        init["created"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str().unwrap().ends_with("workflow.example.rs"))
+    );
+
+    let added = lfw(&root, ["add", "workflow.extra", "--name", "Extra Workflow"])?;
+    assert_eq!(added["workflow_id"], "workflow.extra");
+    let path = root.join("lightflow/workflows/workflow.extra.rs");
+    let source = fs::read_to_string(path)?;
+    assert!(source.contains("workflow(\"workflow.extra\")"));
+    assert!(source.contains(".name(\"Extra Workflow\")"));
+
+    let workflow = lightflow(&root, ["workflows", "get", "workflow.extra"])?;
+    assert_eq!(workflow["id"], "workflow.extra");
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn mcp_exposes_workflow_only_tools() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     write_project_specs(&root)?;
     let service = ApiService::new(&root);
@@ -69,20 +112,16 @@ fn mcp_exposes_component_and_workflow_tools() -> Result<(), Box<dyn std::error::
         .iter()
         .map(|tool| tool["name"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    for required in [
-        "lightflow.component.list",
-        "lightflow.component.get",
-        "lightflow.component.save",
-        "lightflow.workflow.list",
-        "lightflow.workflow.get",
-        "lightflow.workflow.validate",
-        "lightflow.workflow.save",
-    ] {
-        assert!(
-            tool_names.contains(&required),
-            "missing MCP tool {required}"
-        );
-    }
+    assert_eq!(
+        tool_names,
+        vec![
+            "lightflow.workflow.list",
+            "lightflow.workflow.get",
+            "lightflow.workflow.dependencies",
+            "lightflow.workflow.validate",
+            "lightflow.workflow.save"
+        ]
+    );
 
     let workflow = mcp_tool(
         &service,
@@ -90,14 +129,14 @@ fn mcp_exposes_component_and_workflow_tools() -> Result<(), Box<dyn std::error::
         serde_json::json!({ "workflow_id": "workflow.parent" }),
     );
     assert_eq!(workflow["id"], "workflow.parent");
-    assert_eq!(workflow["nodes"][0]["uses"], "workflow");
+    assert_eq!(workflow["nodes"][0]["workflow_id"], "workflow.child");
 
-    let validation = mcp_tool(
+    let dependencies = mcp_tool(
         &service,
-        "lightflow.workflow.validate",
-        serde_json::json!({ "workflow": workflow }),
+        "lightflow.workflow.dependencies",
+        serde_json::json!({ "workflow_id": "workflow.parent" }),
     );
-    assert_eq!(validation["valid"], true);
+    assert_eq!(dependencies["complete"], true);
 
     let resources = mcp_result(
         &service,
@@ -109,14 +148,7 @@ fn mcp_exposes_component_and_workflow_tools() -> Result<(), Box<dyn std::error::
         .iter()
         .map(|resource| resource["uri"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    assert_eq!(
-        uris,
-        vec![
-            "lightflow://components",
-            "lightflow://workflows",
-            "lightflow://mcp"
-        ]
-    );
+    assert_eq!(uris, vec!["lightflow://workflows", "lightflow://mcp"]);
 
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -126,14 +158,19 @@ fn lightflow<const N: usize>(
     root: &Path,
     args: [&str; N],
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let output = Command::new(env!("CARGO_BIN_EXE_lightflow"))
-        .args(args)
-        .current_dir(root)
-        .output()?;
+    run_json(env!("CARGO_BIN_EXE_lightflow"), root, &args)
+}
+
+fn lfw<const N: usize>(root: &Path, args: [&str; N]) -> Result<Value, Box<dyn std::error::Error>> {
+    run_json(env!("CARGO_BIN_EXE_lfw"), root, &args)
+}
+
+fn run_json(binary: &str, root: &Path, args: &[&str]) -> Result<Value, Box<dyn std::error::Error>> {
+    let output = Command::new(binary).args(args).current_dir(root).output()?;
 
     if !output.status.success() {
         return Err(format!(
-            "lightflow failed with status {}\nstdout:\n{}\nstderr:\n{}",
+            "{binary} failed with status {}\nstdout:\n{}\nstderr:\n{}",
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
@@ -167,61 +204,49 @@ fn mcp_result(service: &ApiService, request: Value) -> Value {
 }
 
 fn write_project_specs(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    fs::create_dir_all(root.join("lightflow/components"))?;
     fs::create_dir_all(root.join("lightflow/workflows"))?;
     fs::write(
-        root.join("lightflow/components/component.echo.json"),
-        r#"{
-  "id": "component.echo",
-  "name": "Echo",
-  "inputs": [{ "name": "in", "type": "json" }],
-  "outputs": [{ "name": "out", "type": "json" }]
+        root.join("lightflow/workflows/workflow.child.rs"),
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("workflow.child")
+        .version("0.1.0")
+        .name("Child")
+        .input("in", "json")
+        .output("out", "json")
+        .build()
 }
 "#,
     )?;
     fs::write(
-        root.join("lightflow/workflows/workflow.child.json"),
-        r#"{
-  "id": "workflow.child",
-  "name": "Child",
-  "inputs": [{ "name": "in", "type": "json" }],
-  "outputs": [{ "name": "out", "type": "json" }],
-  "nodes": [
-    {
-      "id": "echo",
-      "uses": "component",
-      "component_id": "component.echo"
-    }
-  ],
-  "edges": []
+        root.join("lightflow/workflows/workflow.sink.rs"),
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("workflow.sink")
+        .version("0.1.0")
+        .name("Sink")
+        .input("in", "json")
+        .build()
 }
 "#,
     )?;
     fs::write(
-        root.join("lightflow/workflows/workflow.parent.json"),
-        r#"{
-  "id": "workflow.parent",
-  "name": "Parent",
-  "inputs": [{ "name": "in", "type": "json" }],
-  "outputs": [{ "name": "out", "type": "json" }],
-  "nodes": [
-    {
-      "id": "nested",
-      "uses": "workflow",
-      "workflow_id": "workflow.child"
-    },
-    {
-      "id": "output",
-      "uses": "component",
-      "component_id": "component.output"
-    }
-  ],
-  "edges": [
-    {
-      "from": { "node": "nested", "port": "out" },
-      "to": { "node": "output", "port": "value" }
-    }
-  ]
+        root.join("lightflow/workflows/workflow.parent.rs"),
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("workflow.parent")
+        .version("0.1.0")
+        .name("Parent")
+        .input("in", "json")
+        .output("out", "json")
+        .depends_on("workflow.child", "0.1.0")
+        .node("nested", "workflow.child")
+        .node("sink", "workflow.sink")
+        .edge("nested", "out", "sink", "in")
+        .build()
 }
 "#,
     )?;

@@ -1,7 +1,6 @@
 //! Axum HTTP gateway for LightFlow's backend API.
 
 use crate::api::{ApiError, ApiService};
-use crate::component::ComponentSpec;
 use crate::mcp;
 use crate::workflow::WorkflowSpec;
 use axum::extract::{Path, State};
@@ -33,10 +32,12 @@ pub async fn serve(service: ApiService, bind: &str) -> io::Result<()> {
 fn router(service: ApiService) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/components", get(list_components).post(save_component))
-        .route("/components/{component_id}", get(get_component))
         .route("/workflows", get(list_workflows).post(save_workflow))
         .route("/workflows/{workflow_id}", get(get_workflow))
+        .route(
+            "/workflows/{workflow_id}/dependencies",
+            get(workflow_dependencies),
+        )
         .route("/workflows/validate", post(validate_workflow))
         .route("/mcp", get(mcp_info).post(mcp_post).options(mcp_options))
         .fallback(not_found)
@@ -49,30 +50,19 @@ async fn health() -> Response {
     json_response(json!({ "status": "ok" }))
 }
 
-async fn list_components(State(state): State<AppState>) -> Response {
-    api_json(state.service.list_components())
-}
-
-async fn get_component(
-    State(state): State<AppState>,
-    Path(component_id): Path<String>,
-) -> Response {
-    api_json(state.service.get_component(&component_id))
-}
-
-async fn save_component(
-    State(state): State<AppState>,
-    Json(component): Json<ComponentSpec>,
-) -> Response {
-    api_json_with_status(StatusCode::CREATED, state.service.save_component(component))
-}
-
 async fn list_workflows(State(state): State<AppState>) -> Response {
     api_json(state.service.list_workflows())
 }
 
 async fn get_workflow(State(state): State<AppState>, Path(workflow_id): Path<String>) -> Response {
     api_json(state.service.get_workflow(&workflow_id))
+}
+
+async fn workflow_dependencies(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<String>,
+) -> Response {
+    api_json(state.service.workflow_dependencies(&workflow_id))
 }
 
 async fn save_workflow(
