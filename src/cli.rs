@@ -9,6 +9,7 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use toml_edit::{DocumentMut, InlineTable, Item, value};
 
 /// Run the LightFlow CLI from process arguments.
 pub async fn run_from_env() -> CliResult<()> {
@@ -40,6 +41,10 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 &workflow_id,
                 name.as_deref(),
             )?)?;
+        }
+        "add-dep" => {
+            let options = parse_add_dependency_options(args)?;
+            print_json(&add_dependency(Path::new("."), &options)?)?;
         }
         "list" | "ls" => {
             let mode = parse_list_mode(args)?;
@@ -179,6 +184,7 @@ fn usage() -> String {
         "usage:",
         "  lfw init [path]",
         "  lfw add <workflow_id> [--name <name>]",
+        "  lfw add-dep <crate_name> (--path <path>|--git <url>) [--package <package>]",
         "  lfw list [--brief|--detail]",
         "  lfw ls [--brief|--detail]",
         "  lfw workflows list",
@@ -191,6 +197,123 @@ fn usage() -> String {
         "  lfw serve [--host <host>] [--port <port>]",
     ]
     .join("\n")
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct AddDependencyOptions {
+    crate_name: String,
+    source: DependencySource,
+    package: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum DependencySource {
+    Path(String),
+    Git(String),
+}
+
+fn parse_add_dependency_options(args: &[String]) -> CliResult<AddDependencyOptions> {
+    let crate_name = required_arg(args, 0, "crate name")?.to_owned();
+    let mut source = None;
+    let mut package = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--path" => {
+                ensure_single_dependency_source(&source)?;
+                source = Some(DependencySource::Path(
+                    required_flag_value(args, index, "--path")?.to_owned(),
+                ));
+                index += 2;
+            }
+            "--git" => {
+                ensure_single_dependency_source(&source)?;
+                source = Some(DependencySource::Git(
+                    required_flag_value(args, index, "--git")?.to_owned(),
+                ));
+                index += 2;
+            }
+            "--package" => {
+                if package.is_some() {
+                    return Err(CliError::Usage("duplicate flag --package".to_owned()));
+                }
+                package = Some(required_flag_value(args, index, "--package")?.to_owned());
+                index += 2;
+            }
+            value => {
+                return Err(CliError::Usage(format!(
+                    "unexpected argument for add-dep: {value}"
+                )));
+            }
+        }
+    }
+    let source = source.ok_or_else(|| {
+        CliError::Usage("add-dep requires either --path <path> or --git <url>".to_owned())
+    })?;
+    Ok(AddDependencyOptions {
+        crate_name,
+        source,
+        package,
+    })
+}
+
+fn ensure_single_dependency_source(source: &Option<DependencySource>) -> CliResult<()> {
+    if source.is_some() {
+        Err(CliError::Usage(
+            "add-dep accepts only one dependency source".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn add_dependency(root: &Path, options: &AddDependencyOptions) -> CliResult<serde_json::Value> {
+    let manifest_path = root.join("Cargo.toml");
+    if !manifest_path.exists() {
+        fs::write(&manifest_path, workspace_manifest())?;
+    }
+    let source = fs::read_to_string(&manifest_path)?;
+    let mut document = source
+        .parse::<DocumentMut>()
+        .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
+    ensure_workspace_dependencies_table(&mut document);
+    let dependency = dependency_item(options);
+    document["workspace"]["dependencies"][&options.crate_name] = dependency;
+    fs::write(&manifest_path, document.to_string())?;
+    Ok(json!({
+        "manifest": manifest_path,
+        "dependency": options.crate_name,
+        "source": match &options.source {
+            DependencySource::Path(path) => json!({ "path": path }),
+            DependencySource::Git(git) => json!({ "git": git }),
+        },
+        "package": options.package,
+    }))
+}
+
+fn ensure_workspace_dependencies_table(document: &mut DocumentMut) {
+    if !document["workspace"].is_table() {
+        document["workspace"] = Item::Table(toml_edit::Table::new());
+    }
+    if !document["workspace"]["dependencies"].is_table() {
+        document["workspace"]["dependencies"] = Item::Table(toml_edit::Table::new());
+    }
+}
+
+fn dependency_item(options: &AddDependencyOptions) -> Item {
+    let mut table = InlineTable::new();
+    match &options.source {
+        DependencySource::Path(path) => {
+            table.insert("path", value(path).into_value().unwrap());
+        }
+        DependencySource::Git(git) => {
+            table.insert("git", value(git).into_value().unwrap());
+        }
+    }
+    if let Some(package) = &options.package {
+        table.insert("package", value(package).into_value().unwrap());
+    }
+    Item::Value(toml_edit::Value::InlineTable(table))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

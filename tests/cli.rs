@@ -282,11 +282,19 @@ members = ["lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
-lightflow-std = {{ path = "../lightflow-std" }}
 "#,
             env!("CARGO_MANIFEST_DIR")
         ),
     )?;
+    let added_dep = lfw(
+        &project,
+        ["add-dep", "lightflow-std", "--path", "../lightflow-std"],
+    )?;
+    assert_eq!(added_dep["dependency"], "lightflow-std");
+    assert_eq!(added_dep["source"]["path"], "../lightflow-std");
+    let manifest = fs::read_to_string(project.join("Cargo.toml"))?;
+    assert!(manifest.contains("lightflow-std = { path = \"../lightflow-std\" }"));
+
     write_workflow_crate(
         &project,
         "lightflow.image_prompt",
@@ -377,6 +385,39 @@ pub fn define() -> WorkflowSpec {
     );
 
     let _ = fs::remove_dir_all(base);
+    Ok(())
+}
+
+#[test]
+fn add_dep_writes_git_workflow_dependency() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    lfw(&root, ["init"])?;
+
+    let output = lfw(
+        &root,
+        [
+            "add-dep",
+            "lightflow-std",
+            "--git",
+            "https://github.com/lightjunction/LightFlow",
+            "--package",
+            "lightflow-std",
+        ],
+    )?;
+    assert_eq!(output["dependency"], "lightflow-std");
+    assert_eq!(
+        output["source"]["git"],
+        "https://github.com/lightjunction/LightFlow"
+    );
+    assert_eq!(output["package"], "lightflow-std");
+
+    let manifest = fs::read_to_string(root.join("Cargo.toml"))?;
+    assert!(manifest.contains(
+        "lightflow-std = { git = \"https://github.com/lightjunction/LightFlow\", package = \"lightflow-std\" }"
+    ));
+
+    let _ = fs::remove_dir_all(root);
     Ok(())
 }
 
