@@ -20,6 +20,7 @@ A workflow declares:
 - optional explicit workflow dependencies
 - graph nodes
 - directed edges between node ports
+- optional default-disabled nodes
 
 There is no separate component concept. A leaf workflow is the replacement for
 what would otherwise become a component.
@@ -96,8 +97,26 @@ The command-line form is:
 lfw deps lightflow.text_plan
 ```
 
-The current validation deliberately does not implement execution scheduling,
-provider routing, or agent behavior.
+## Execution
+
+The first execution engine is intentionally small. It validates the workflow,
+uses the graph topological order as the schedule, executes leaf workflows with
+passthrough semantics, and records each node as `completed` or `skipped`.
+
+Execution accepts temporary toggles:
+
+```bash
+lfwx lightflow.text_plan --input value=hello --disable prompt
+lfw run lightflow.text_plan --input value=hello --disable prompt --enable prompt
+```
+
+`--disable <node>` skips a node for that run only. `--enable <node>` cancels a
+temporary or author-time disable for that run. The same engine is exposed over
+HTTP at `POST /workflows/{workflow_id}/run` and through the MCP
+`lightflow.workflow.run` tool.
+
+The current runner deliberately does not implement provider routing, remote
+execution substrates, or agent behavior.
 
 ## Installation Model
 
@@ -106,8 +125,8 @@ workflow crates and Cargo `path` dependencies, then statically parses any
 dependency crate that exposes `pub fn define() -> WorkflowSpec` in `src/lib.rs`.
 This lets a project depend on `lightflow-std = { path = "..." }` and immediately
 use `lightflow.std` in `.depends_on(...)` or `.node(...)`. Remote git
-dependencies keep the same Cargo manifest shape; `lfw sync` will handle fetching
-and model/resource synchronization in a later iteration.
+dependencies keep the same Cargo manifest shape; `lfw sync` handles Cargo
+fetching and model/resource synchronization.
 
 ## Sync Model
 

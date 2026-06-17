@@ -140,6 +140,7 @@ fn mcp_exposes_workflow_only_tools() -> Result<(), Box<dyn std::error::Error>> {
             "lightflow.workflow.list",
             "lightflow.workflow.get",
             "lightflow.workflow.dependencies",
+            "lightflow.workflow.run",
             "lightflow.workflow.validate",
             "lightflow.workflow.save"
         ]
@@ -159,6 +160,18 @@ fn mcp_exposes_workflow_only_tools() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::json!({ "workflow_id": "lightflow.parent" }),
     );
     assert_eq!(dependencies["complete"], true);
+
+    let execution = mcp_tool(
+        &service,
+        "lightflow.workflow.run",
+        serde_json::json!({
+            "workflow_id": "lightflow.parent",
+            "inputs": { "in": "hello" },
+            "disabled_nodes": ["sink"]
+        }),
+    );
+    assert_eq!(execution["outputs"]["out"], "hello");
+    assert_eq!(execution["nodes"][1]["status"], "skipped");
 
     let resources = mcp_result(
         &service,
@@ -261,6 +274,90 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
         ])
     );
 
+    Ok(())
+}
+
+#[test]
+fn lfwx_runs_workflow_and_temporarily_toggles_nodes() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    write_project_specs(&root)?;
+
+    let run = lfwx(&root, ["lightflow.parent", "--input", "in=hello"])?;
+    assert_eq!(run["workflow_id"], "lightflow.parent");
+    assert_eq!(run["inputs"]["in"], "hello");
+    assert_eq!(run["outputs"]["out"], "hello");
+    assert_eq!(run["nodes"][0]["node_id"], "nested");
+    assert_eq!(run["nodes"][0]["status"], "completed");
+    assert_eq!(run["nodes"][1]["node_id"], "sink");
+    assert_eq!(run["nodes"][1]["status"], "completed");
+
+    let disabled = lfwx(
+        &root,
+        [
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--disable",
+            "nested",
+        ],
+    )?;
+    assert_eq!(disabled["nodes"][0]["node_id"], "nested");
+    assert_eq!(disabled["nodes"][0]["status"], "skipped");
+    assert_eq!(disabled["outputs"]["out"], Value::Null);
+
+    let enabled = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--disable",
+            "nested",
+            "--enable",
+            "nested",
+        ],
+    )?;
+    assert_eq!(enabled["nodes"][0]["status"], "completed");
+    assert_eq!(enabled["outputs"]["out"], "hello");
+
+    write_workflow_crate(
+        &root,
+        "lightflow.parent",
+        r#"use lightflow::workflow::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.parent")
+        .version("0.1.0")
+        .name("Parent")
+        .input("in", "json")
+        .output("out", "json")
+        .depends_on("lightflow.child", "0.1.0")
+        .disabled_node("nested", "lightflow.child")
+        .node("sink", "lightflow.sink")
+        .edge("nested", "out", "sink", "in")
+        .build()
+}
+"#,
+    )?;
+    let default_disabled = lfwx(&root, ["lightflow.parent", "--input", "in=hello"])?;
+    assert_eq!(default_disabled["nodes"][0]["status"], "skipped");
+    assert_eq!(default_disabled["outputs"]["out"], Value::Null);
+
+    let enabled_from_source = lfwx(
+        &root,
+        [
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--enable",
+            "nested",
+        ],
+    )?;
+    assert_eq!(enabled_from_source["nodes"][0]["status"], "completed");
+    assert_eq!(enabled_from_source["outputs"]["out"], "hello");
+
+    let _ = fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -492,6 +589,10 @@ fn lightflow<const N: usize>(
 
 fn lfw<const N: usize>(root: &Path, args: [&str; N]) -> Result<Value, Box<dyn std::error::Error>> {
     run_json(env!("CARGO_BIN_EXE_lfw"), root, &args)
+}
+
+fn lfwx<const N: usize>(root: &Path, args: [&str; N]) -> Result<Value, Box<dyn std::error::Error>> {
+    run_json(env!("CARGO_BIN_EXE_lfwx"), root, &args)
 }
 
 fn run_json(binary: &str, root: &Path, args: &[&str]) -> Result<Value, Box<dyn std::error::Error>> {

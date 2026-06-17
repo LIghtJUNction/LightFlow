@@ -1,6 +1,6 @@
 use crate::api::{ApiError, ApiService};
 use crate::server;
-use crate::workflow::{ModelProvider, ModelVariant, WorkflowSpec};
+use crate::workflow::{ModelProvider, ModelVariant, WorkflowExecutionOptions, WorkflowSpec};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -96,6 +96,10 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
         "sync" => {
             let options = parse_sync_options(args)?;
             print_json(&sync_project(&service, &options)?)?;
+        }
+        "run" => {
+            let options = parse_run_options(args)?;
+            print_json(&service.execute_workflow(&options.workflow_id, options.execution)?)?;
         }
         "serve" => {
             let bind = parse_bind_addr(args, command)?;
@@ -194,9 +198,90 @@ fn usage() -> String {
         "  lfw workflows save <json|-|@file>",
         "  lfw deps <workflow_id>",
         "  lfw sync [workflow_id] [--model <requirement=variant>] [--apply]",
+        "  lfw run <workflow_id> [--input <name=json>] [--disable <node>] [--enable <node>]",
         "  lfw serve [--host <host>] [--port <port>]",
     ]
     .join("\n")
+}
+
+/// Run the quick workflow executor from process arguments.
+pub async fn run_lfwx_from_env() -> CliResult<()> {
+    run_lfwx(env::args().skip(1).collect()).await
+}
+
+/// Run the quick workflow executor with explicit arguments.
+pub async fn run_lfwx(args: Vec<String>) -> CliResult<()> {
+    if args
+        .first()
+        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+    {
+        return Err(CliError::Usage(lfwx_usage()));
+    }
+    let service = ApiService::new(env::current_dir()?);
+    let options = parse_run_options(&args)?;
+    print_json(&service.execute_workflow(&options.workflow_id, options.execution)?)?;
+    Ok(())
+}
+
+fn lfwx_usage() -> String {
+    "usage:\n  lfwx <workflow_id> [--input <name=json>] [--disable <node>] [--enable <node>]"
+        .to_owned()
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RunOptions {
+    workflow_id: String,
+    execution: WorkflowExecutionOptions,
+}
+
+fn parse_run_options(args: &[String]) -> CliResult<RunOptions> {
+    let workflow_id = required_arg(args, 0, "workflow id")?.to_owned();
+    let mut execution = WorkflowExecutionOptions::default();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--input" | "-i" => {
+                let value = required_flag_value(args, index, "--input")?;
+                let Some((name, raw_value)) = value.split_once('=') else {
+                    return Err(CliError::Usage(
+                        "--input must use <name=json-or-text>".to_owned(),
+                    ));
+                };
+                if name.is_empty() {
+                    return Err(CliError::Usage("input name cannot be empty".to_owned()));
+                }
+                execution
+                    .inputs
+                    .insert(name.to_owned(), parse_input_value(raw_value));
+                index += 2;
+            }
+            "--disable" => {
+                execution
+                    .disabled_nodes
+                    .push(required_flag_value(args, index, "--disable")?.to_owned());
+                index += 2;
+            }
+            "--enable" => {
+                execution
+                    .enabled_nodes
+                    .push(required_flag_value(args, index, "--enable")?.to_owned());
+                index += 2;
+            }
+            value => {
+                return Err(CliError::Usage(format!(
+                    "unexpected argument for run: {value}"
+                )));
+            }
+        }
+    }
+    Ok(RunOptions {
+        workflow_id,
+        execution,
+    })
+}
+
+fn parse_input_value(value: &str) -> serde_json::Value {
+    serde_json::from_str(value).unwrap_or_else(|_| serde_json::Value::String(value.to_owned()))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

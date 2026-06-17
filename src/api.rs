@@ -1,10 +1,11 @@
 //! Framework-independent LightFlow backend service.
 
 use crate::workflow::{
-    ModelProvider, ModelRequirement, ModelVariant, PortSpec, ResolvedWorkflowDependency,
-    WorkflowDependencyReport, WorkflowDependencyRequirement, WorkflowEdge, WorkflowEndpoint,
-    WorkflowList, WorkflowNode, WorkflowPosition, WorkflowSpec, WorkflowSummary,
-    WorkflowValidation, WorkflowVersionMismatch,
+    ModelProvider, ModelRequirement, ModelVariant, NodeExecution, NodeExecutionStatus, PortSpec,
+    ResolvedWorkflowDependency, WorkflowDependencyReport, WorkflowDependencyRequirement,
+    WorkflowEdge, WorkflowEndpoint, WorkflowExecution, WorkflowExecutionOptions, WorkflowList,
+    WorkflowNode, WorkflowPosition, WorkflowSpec, WorkflowSummary, WorkflowValidation,
+    WorkflowVersionMismatch,
 };
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -96,6 +97,19 @@ impl ApiService {
             return Err(ApiError::NotFound(format!("workflow {workflow_id}")));
         }
         Ok(dependency_report(workflow_id, &workflows))
+    }
+
+    /// Execute a workflow using the current lightweight graph runner.
+    pub fn execute_workflow(
+        &self,
+        workflow_id: &str,
+        options: WorkflowExecutionOptions,
+    ) -> ApiResult<WorkflowExecution> {
+        let workflows = self.workflow_specs()?;
+        let workflow = workflows
+            .get(workflow_id)
+            .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))?;
+        execute_workflow_spec(workflow, &workflows, options)
     }
 
     fn workflow_specs(&self) -> ApiResult<BTreeMap<String, WorkflowSpec>> {
@@ -412,6 +426,18 @@ fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<Work
                         id: string_arg(&call.args, 0, &method, path)?,
                         workflow_id: string_arg(&call.args, 1, &method, path)?,
                         title: None,
+                        disabled: false,
+                        position: WorkflowPosition::default(),
+                        config: serde_json::Value::Null,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "disabled_node" => {
+                    workflow.nodes.push(WorkflowNode {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        workflow_id: string_arg(&call.args, 1, &method, path)?,
+                        title: None,
+                        disabled: true,
                         position: WorkflowPosition::default(),
                         config: serde_json::Value::Null,
                     });
@@ -699,6 +725,139 @@ fn validate_workflow_spec(
         issues,
         topological_order,
     }
+}
+
+fn execute_workflow_spec(
+    workflow: &WorkflowSpec,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+    options: WorkflowExecutionOptions,
+) -> ApiResult<WorkflowExecution> {
+    let validation = validate_workflow_spec(workflow, workflows);
+    if !validation.valid {
+        return Err(ApiError::InvalidRequest(validation.issues.join("; ")));
+    }
+
+    let disabled_nodes = options.disabled_nodes.into_iter().collect::<BTreeSet<_>>();
+    let enabled_nodes = options.enabled_nodes.into_iter().collect::<BTreeSet<_>>();
+    let nodes_by_id = workflow
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut node_outputs = BTreeMap::<String, serde_json::Map<String, serde_json::Value>>::new();
+    let mut executions = Vec::new();
+
+    for node_id in validation.topological_order {
+        let Some(node) = nodes_by_id.get(node_id.as_str()) else {
+            continue;
+        };
+        let node_inputs =
+            collect_node_inputs(node, workflow, workflows, &options.inputs, &node_outputs);
+        let is_disabled = (node.disabled || disabled_nodes.contains(&node.id))
+            && !enabled_nodes.contains(&node.id);
+        if is_disabled {
+            executions.push(NodeExecution {
+                node_id: node.id.clone(),
+                workflow_id: node.workflow_id.clone(),
+                status: NodeExecutionStatus::Skipped,
+                inputs: node_inputs,
+                outputs: serde_json::Map::new(),
+            });
+            continue;
+        }
+
+        let outputs = execute_passthrough_node(node, workflows, &node_inputs);
+        node_outputs.insert(node.id.clone(), outputs.clone());
+        executions.push(NodeExecution {
+            node_id: node.id.clone(),
+            workflow_id: node.workflow_id.clone(),
+            status: NodeExecutionStatus::Completed,
+            inputs: node_inputs,
+            outputs,
+        });
+    }
+
+    let outputs = collect_workflow_outputs(workflow, &options.inputs, &node_outputs);
+    Ok(WorkflowExecution {
+        workflow_id: workflow.id.clone(),
+        version: workflow.version.clone(),
+        inputs: options.inputs,
+        outputs,
+        nodes: executions,
+    })
+}
+
+fn collect_node_inputs(
+    node: &WorkflowNode,
+    workflow: &WorkflowSpec,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+    workflow_inputs: &serde_json::Map<String, serde_json::Value>,
+    node_outputs: &BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut inputs = serde_json::Map::new();
+    for input in node_inputs(node, workflows) {
+        if let Some(value) = workflow_inputs.get(&input.name) {
+            inputs.insert(input.name.clone(), value.clone());
+        }
+    }
+    for edge in workflow.edges.iter().filter(|edge| edge.to.node == node.id) {
+        if let Some(value) = node_outputs
+            .get(&edge.from.node)
+            .and_then(|outputs| outputs.get(&edge.from.port))
+        {
+            inputs.insert(edge.to.port.clone(), value.clone());
+        }
+    }
+    inputs
+}
+
+fn execute_passthrough_node(
+    node: &WorkflowNode,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let output_ports = node_outputs(node, workflows);
+    let mut outputs = serde_json::Map::new();
+    let first_input = inputs.values().next().cloned();
+    for output in output_ports {
+        let value = inputs
+            .get(&output.name)
+            .cloned()
+            .or_else(|| {
+                if inputs.len() == 1 {
+                    first_input.clone()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(serde_json::Value::Null);
+        outputs.insert(output.name, value);
+    }
+    outputs
+}
+
+fn collect_workflow_outputs(
+    workflow: &WorkflowSpec,
+    workflow_inputs: &serde_json::Map<String, serde_json::Value>,
+    node_outputs: &BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut outputs = serde_json::Map::new();
+    for output in &workflow.outputs {
+        let value = workflow_inputs
+            .get(&output.name)
+            .cloned()
+            .or_else(|| {
+                workflow
+                    .nodes
+                    .iter()
+                    .rev()
+                    .filter_map(|node| node_outputs.get(&node.id))
+                    .find_map(|outputs| outputs.get(&output.name).cloned())
+            })
+            .unwrap_or(serde_json::Value::Null);
+        outputs.insert(output.name.clone(), value);
+    }
+    outputs
 }
 
 fn dependency_report(
@@ -989,8 +1148,13 @@ fn workflow_source(workflow: &WorkflowSpec) -> String {
         }
     }
     for node in &workflow.nodes {
+        let method = if node.disabled {
+            "disabled_node"
+        } else {
+            "node"
+        };
         source.push_str(&format!(
-            "        .node({}, {})\n",
+            "        .{method}({}, {})\n",
             rust_string(&node.id),
             rust_string(&node.workflow_id)
         ));

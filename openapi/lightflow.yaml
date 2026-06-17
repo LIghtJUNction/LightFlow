@@ -68,6 +68,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkflowDependencyReport"
+  /workflows/{workflow_id}/run:
+    post:
+      summary: Execute a workflow
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowExecutionOptions"
+      responses:
+        "200":
+          description: Workflow execution result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowExecution"
   /workflows/validate:
     post:
       summary: Validate a workflow
@@ -162,6 +184,9 @@ components:
           type: string
         title:
           type: string
+        disabled:
+          type: boolean
+          default: false
         position:
           $ref: "#/components/schemas/WorkflowPosition"
         config:
@@ -322,3 +347,52 @@ components:
           type: string
         required_by:
           type: string
+    WorkflowExecutionOptions:
+      type: object
+      properties:
+        inputs:
+          type: object
+          additionalProperties: true
+        disabled_nodes:
+          type: array
+          items:
+            type: string
+        enabled_nodes:
+          type: array
+          items:
+            type: string
+    WorkflowExecution:
+      type: object
+      required: [workflow_id, version, inputs, outputs, nodes]
+      properties:
+        workflow_id:
+          type: string
+        version:
+          type: string
+        inputs:
+          type: object
+          additionalProperties: true
+        outputs:
+          type: object
+          additionalProperties: true
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeExecution"
+    NodeExecution:
+      type: object
+      required: [node_id, workflow_id, status, inputs, outputs]
+      properties:
+        node_id:
+          type: string
+        workflow_id:
+          type: string
+        status:
+          type: string
+          enum: [completed, skipped]
+        inputs:
+          type: object
+          additionalProperties: true
+        outputs:
+          type: object
+          additionalProperties: true

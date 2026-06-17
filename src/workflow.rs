@@ -96,10 +96,16 @@ pub struct WorkflowNode {
     pub workflow_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
     #[serde(default)]
     pub position: WorkflowPosition,
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub config: serde_json::Value,
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Canvas position stored with the workflow as authoring metadata.
@@ -178,6 +184,47 @@ pub struct WorkflowDependencyReport {
     pub missing_workflows: Vec<String>,
     pub version_mismatches: Vec<WorkflowVersionMismatch>,
     pub cycles: Vec<Vec<String>>,
+}
+
+/// Runtime inputs and node toggles for one workflow execution.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowExecutionOptions {
+    #[serde(default)]
+    pub inputs: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub disabled_nodes: Vec<String>,
+    #[serde(default)]
+    pub enabled_nodes: Vec<String>,
+}
+
+/// Execution result for one workflow run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowExecution {
+    pub workflow_id: String,
+    pub version: String,
+    pub inputs: serde_json::Map<String, serde_json::Value>,
+    pub outputs: serde_json::Map<String, serde_json::Value>,
+    pub nodes: Vec<NodeExecution>,
+}
+
+/// Runtime result for one node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeExecution {
+    pub node_id: String,
+    pub workflow_id: String,
+    pub status: NodeExecutionStatus,
+    #[serde(default)]
+    pub inputs: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub outputs: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Runtime state of one node.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeExecutionStatus {
+    Completed,
+    Skipped,
 }
 
 /// One resolved local workflow dependency with the currently available version.
@@ -325,6 +372,20 @@ impl WorkflowBuilder {
             id: id.into(),
             workflow_id: workflow_id.into(),
             title: None,
+            disabled: false,
+            position: WorkflowPosition::default(),
+            config: serde_json::Value::Null,
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn disabled_node(mut self, id: impl Into<String>, workflow_id: impl Into<String>) -> Self {
+        self.spec.nodes.push(WorkflowNode {
+            id: id.into(),
+            workflow_id: workflow_id.into(),
+            title: None,
+            disabled: true,
             position: WorkflowPosition::default(),
             config: serde_json::Value::Null,
         });

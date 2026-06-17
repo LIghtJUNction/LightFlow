@@ -46,6 +46,10 @@ pub fn define() -> WorkflowSpec {
 }
 ```
 
+Nodes can be marked disabled in source with `.disabled_node(...)`. Execution
+commands can temporarily override node state with `--disable <node>` and
+`--enable <node>` without editing the workflow file.
+
 Reusable workflows do not include `src/main.rs`. If a workflow crate has no
 `main.rs`, it is imported or nested by other workflows instead of used as an
 executable entrypoint.
@@ -75,8 +79,14 @@ Git dependencies use the same manifest shape:
 lightflow-std = { git = "https://github.com/lightjunction/LightFlow", package = "lightflow-std" }
 ```
 
-The first implemented discovery path is local `path` dependencies. Remote git
-dependencies will be made local by `lfw sync` in the next installation pass.
+`lfw add-dep` writes these dependencies into the workspace manifest:
+
+```bash
+lfw add-dep lightflow-std --path lightflow/workflows/lightflow.std
+lfw add-dep lightflow-std --git https://github.com/lightjunction/LightFlow --package lightflow-std
+```
+
+`lfw sync` delegates Rust module fetching to Cargo.
 
 ## Versioning
 
@@ -128,6 +138,19 @@ image_model=<variant>` selection it reports the unresolved model requirement.
 With a selection it builds an `hf download ...` command and, when `--apply` is
 used, executes it through the Hugging Face CLI so the artifact is managed by
 the global HF cache.
+
+## Execution Inputs
+
+`lfwx` is the short workflow executor:
+
+```bash
+lfwx lightflow.image_prompt --input positive="a quiet lake" --input negative=blur
+lfwx lightflow.image_prompt --input positive="a quiet lake" --disable render
+```
+
+Input values are parsed as JSON when possible and otherwise treated as strings.
+The execution result records workflow inputs, workflow outputs, and per-node
+status, inputs, and outputs.
 
 ## Not Stored Here
 

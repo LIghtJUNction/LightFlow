@@ -2,7 +2,7 @@
 
 use crate::api::{ApiError, ApiService};
 use crate::mcp;
-use crate::workflow::WorkflowSpec;
+use crate::workflow::{WorkflowExecutionOptions, WorkflowSpec};
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -38,6 +38,7 @@ fn router(service: ApiService) -> Router {
             "/workflows/{workflow_id}/dependencies",
             get(workflow_dependencies),
         )
+        .route("/workflows/{workflow_id}/run", post(run_workflow))
         .route("/workflows/validate", post(validate_workflow))
         .route("/mcp", get(mcp_info).post(mcp_post).options(mcp_options))
         .fallback(not_found)
@@ -63,6 +64,14 @@ async fn workflow_dependencies(
     Path(workflow_id): Path<String>,
 ) -> Response {
     api_json(state.service.workflow_dependencies(&workflow_id))
+}
+
+async fn run_workflow(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<String>,
+    Json(options): Json<WorkflowExecutionOptions>,
+) -> Response {
+    api_json(state.service.execute_workflow(&workflow_id, options))
 }
 
 async fn save_workflow(

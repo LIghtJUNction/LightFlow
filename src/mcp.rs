@@ -1,7 +1,7 @@
 //! Minimal MCP surface for external editors and agents.
 
 use crate::api::{ApiError, ApiService};
-use crate::workflow::WorkflowSpec;
+use crate::workflow::{WorkflowExecutionOptions, WorkflowSpec};
 use serde_json::{Value, json};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -66,6 +66,11 @@ fn tools() -> Value {
             id_schema("workflow_id")
         ),
         tool(
+            "lightflow.workflow.run",
+            "Execute one LightFlow workflow with optional inputs and node toggles.",
+            run_schema()
+        ),
+        tool(
             "lightflow.workflow.validate",
             "Validate one LightFlow workflow.",
             workflow_schema()
@@ -106,6 +111,19 @@ fn workflow_schema() -> Value {
     })
 }
 
+fn run_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["workflow_id"],
+        "properties": {
+            "workflow_id": { "type": "string" },
+            "inputs": { "type": "object", "additionalProperties": true },
+            "disabled_nodes": { "type": "array", "items": { "type": "string" } },
+            "enabled_nodes": { "type": "array", "items": { "type": "string" } }
+        }
+    })
+}
+
 fn resources() -> Value {
     json!([
         resource("lightflow://workflows", "Workflows", "application/json"),
@@ -138,6 +156,10 @@ fn call_tool(service: &ApiService, params: &Value) -> Result<Value, McpError> {
         "lightflow.workflow.dependencies" => serde_json::to_value(
             service.workflow_dependencies(required_str(&arguments, "workflow_id")?)?,
         )?,
+        "lightflow.workflow.run" => serde_json::to_value(service.execute_workflow(
+            required_str(&arguments, "workflow_id")?,
+            execution_options_arg(&arguments)?,
+        )?)?,
         "lightflow.workflow.validate" => {
             serde_json::to_value(service.validate_workflow(&workflow_arg(&arguments)?))?
         }
@@ -185,6 +207,15 @@ fn workflow_arg(arguments: &Value) -> Result<WorkflowSpec, McpError> {
         .get("workflow")
         .ok_or_else(|| McpError::new(-32602, "missing object argument: workflow"))?;
     serde_json::from_value(workflow.clone()).map_err(McpError::from)
+}
+
+fn execution_options_arg(arguments: &Value) -> Result<WorkflowExecutionOptions, McpError> {
+    let value = json!({
+        "inputs": arguments.get("inputs").cloned().unwrap_or_else(|| json!({})),
+        "disabled_nodes": arguments.get("disabled_nodes").cloned().unwrap_or_else(|| json!([])),
+        "enabled_nodes": arguments.get("enabled_nodes").cloned().unwrap_or_else(|| json!([])),
+    });
+    serde_json::from_value(value).map_err(McpError::from)
 }
 
 fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str, McpError> {
@@ -249,6 +280,7 @@ fn mcp_resource() -> Value {
             "lightflow.workflow.list",
             "lightflow.workflow.get",
             "lightflow.workflow.dependencies",
+            "lightflow.workflow.run",
             "lightflow.workflow.validate",
             "lightflow.workflow.save"
         ],

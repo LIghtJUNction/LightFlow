@@ -14,6 +14,7 @@ repository so normal coding tools, including Codex, can edit and review them.
 - Rust workflow crates under `lightflow/workflows/`
 - workflow validation, including nested workflow references and DAG cycle checks
 - recursive workflow dependency resolution
+- lightweight workflow execution plans with temporary node toggles
 - CLI, HTTP, and MCP surfaces over the same backend service
 
 ## Out Of Scope
@@ -22,7 +23,6 @@ repository so normal coding tools, including Codex, can edit and review them.
 - component/model/node/composition as separate top-level concepts
 - built-in agent planning
 - frontend implementation
-- workflow execution engine
 
 ## Layout
 
@@ -74,9 +74,25 @@ cargo run --bin lfw -- ls --detail
 cargo run -- workflows list
 cargo run -- workflows get lightflow.text_plan
 cargo run --bin lfw -- deps lightflow.text_plan
+cargo run --bin lfw -- run lightflow.text_plan --input value='{"topic":"demo"}'
+cargo run --bin lfwx -- lightflow.text_plan --input value='{"topic":"demo"}' --disable prompt
 cargo run -- workflows validate '{"id":"lightflow.example","version":"0.1.0","name":"Example"}'
 cargo run -- serve --port 5174
 ```
+
+`lfwx` is the short executor. It accepts `--input <name=json-or-text>` and
+temporary node toggles:
+
+```bash
+lfwx lightflow.text_plan --input value=hello
+lfwx lightflow.text_plan --input value=hello --disable prompt
+lfwx lightflow.text_plan --input value=hello --disable prompt --enable prompt
+```
+
+The current runner validates the workflow graph, executes nodes in topological
+order, and uses passthrough semantics for leaf workflows. This gives the CLI,
+HTTP, and MCP surfaces a stable execution contract before provider-specific
+runtime adapters are added.
 
 ## Installing Workflows
 
@@ -138,4 +154,7 @@ model artifact.
 curl http://127.0.0.1:5174/workflows
 curl http://127.0.0.1:5174/workflows/lightflow.text_plan
 curl http://127.0.0.1:5174/workflows/lightflow.text_plan/dependencies
+curl -X POST http://127.0.0.1:5174/workflows/lightflow.text_plan/run \
+  -H 'content-type: application/json' \
+  -d '{"inputs":{"value":"hello"},"disabled_nodes":["prompt"]}'
 ```
