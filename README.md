@@ -6,13 +6,12 @@ keeps the domain model small:
 - Workflow: a reusable leaf unit or a directed graph that nests other workflows.
 
 There is no built-in agent loop, no CortexFS runtime dependency, and no
-visual-editor-owned workflow format. Workflow files are Rust source files in
-the repository so normal coding tools, including Codex, can edit and review
-them.
+visual-editor-owned workflow format. Workflows are Rust library crates in the
+repository so normal coding tools, including Codex, can edit and review them.
 
 ## Current Scope
 
-- Rust workflow files under `lightflow/workflows/`
+- Rust workflow crates under `lightflow/workflows/`
 - workflow validation, including nested workflow references and DAG cycle checks
 - recursive workflow dependency resolution
 - CLI, HTTP, and MCP surfaces over the same backend service
@@ -35,40 +34,44 @@ src/
   mcp.rs         # MCP JSON-RPC adapter
   server.rs      # HTTP adapter
 lightflow/
-  workflows/     # source-controlled Rust workflow files
+  workflows/     # source-controlled Rust workflow crates
 openapi/
   lightflow.yaml # API contract
 ```
 
-## Rust Workflow Files
+## Rust Workflow Crates
+
+Reusable workflows are library crates with `src/lib.rs` and no `src/main.rs`:
 
 ```rust
 use lightflow::workflow::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("workflow.text_plan")
+    workflow("lightflow.text_plan")
         .version("0.1.0")
         .name("Text Plan")
         .input("value", "json")
         .output("result", "text")
-        .depends_on("workflow.text_prompt", "0.1.0")
-        .node("prompt", "workflow.text_prompt")
+        .depends_on("lightflow.text_prompt", "0.1.0")
+        .node("prompt", "lightflow.text_prompt")
         .build()
 }
 ```
 
-The backend parses this DSL statically from Rust ASTs; it does not execute
-workflow source files.
+The backend parses this DSL statically from Rust ASTs; it does not execute or
+compile workflow source files.
 
 ## CLI
 
 ```bash
 cargo run --bin lfw -- init
-cargo run --bin lfw -- add workflow.my_flow --name "My Flow"
+cargo run --bin lfw -- add my_flow --name "My Flow"
+cargo run --bin lfw -- list
+cargo run --bin lfw -- ls --detail
 cargo run -- workflows list
-cargo run -- workflows get workflow.text_plan
-cargo run --bin lfw -- deps workflow.text_plan
-cargo run -- workflows validate '{"id":"workflow.example","version":"0.1.0","name":"Example"}'
+cargo run -- workflows get lightflow.text_plan
+cargo run --bin lfw -- deps lightflow.text_plan
+cargo run -- workflows validate '{"id":"lightflow.example","version":"0.1.0","name":"Example"}'
 cargo run -- serve --port 5174
 ```
 
@@ -76,6 +79,6 @@ cargo run -- serve --port 5174
 
 ```bash
 curl http://127.0.0.1:5174/workflows
-curl http://127.0.0.1:5174/workflows/workflow.text_plan
-curl http://127.0.0.1:5174/workflows/workflow.text_plan/dependencies
+curl http://127.0.0.1:5174/workflows/lightflow.text_plan
+curl http://127.0.0.1:5174/workflows/lightflow.text_plan/dependencies
 ```

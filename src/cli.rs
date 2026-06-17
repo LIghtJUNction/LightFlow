@@ -31,9 +31,17 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             print_json(&init_project(&root)?)?;
         }
         "add" => {
-            let workflow_id = required_arg(args, 0, "workflow id")?;
+            let workflow_id = normalize_workflow_id(required_arg(args, 0, "workflow id")?);
             let name = optional_name(args, 1, "add")?;
-            print_json(&add_workflow(Path::new("."), workflow_id, name.as_deref())?)?;
+            print_json(&add_workflow(
+                Path::new("."),
+                &workflow_id,
+                name.as_deref(),
+            )?)?;
+        }
+        "list" | "ls" => {
+            let mode = parse_list_mode(args)?;
+            print_json(&list_workflows(&service, mode)?)?;
         }
         "workflows" => {
             let action = required_arg(args, 0, "workflow action")?;
@@ -165,6 +173,8 @@ fn usage() -> String {
         "usage:",
         "  lfw init [path]",
         "  lfw add <workflow_id> [--name <name>]",
+        "  lfw list [--brief|--detail]",
+        "  lfw ls [--brief|--detail]",
         "  lfw workflows list",
         "  lfw workflows get <workflow_id>",
         "  lfw workflows deps <workflow_id>",
@@ -174,6 +184,43 @@ fn usage() -> String {
         "  lfw serve [--host <host>] [--port <port>]",
     ]
     .join("\n")
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ListMode {
+    Brief,
+    Detail,
+}
+
+fn parse_list_mode(args: &[String]) -> CliResult<ListMode> {
+    let mut mode = ListMode::Brief;
+    for arg in args {
+        match arg.as_str() {
+            "--brief" | "--short" => mode = ListMode::Brief,
+            "--detail" | "--detailed" | "-l" => mode = ListMode::Detail,
+            _ => {
+                return Err(CliError::Usage(format!(
+                    "unexpected argument for list: {arg}"
+                )));
+            }
+        }
+    }
+    Ok(mode)
+}
+
+fn list_workflows(service: &ApiService, mode: ListMode) -> CliResult<serde_json::Value> {
+    match mode {
+        ListMode::Brief => Ok(serde_json::to_value(service.list_workflows()?)?),
+        ListMode::Detail => {
+            let workflows = service
+                .list_workflows()?
+                .workflows
+                .into_iter()
+                .map(|summary| service.get_workflow(&summary.id))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(json!({ "workflows": workflows }))
+        }
+    }
 }
 
 /// CLI result type.
@@ -260,18 +307,28 @@ fn init_project(root: &Path) -> CliResult<serde_json::Value> {
 
     let mut created = Vec::new();
     write_new_text(
+        &root.join("Cargo.toml"),
+        &workspace_manifest(),
+        &mut created,
+    )?;
+    write_new_text(
         &lightflow.join("README.md"),
-        "# LightFlow Project\n\nThis directory contains source-controlled Rust workflow files.\n",
+        "# LightFlow Project\n\nThis repository is a Cargo workspace for source-controlled Rust workflow crates.\n",
         &mut created,
     )?;
     write_new_text(
         &workflows.join("README.md"),
-        "# Workflows\n\nEach `.rs` file defines one workflow with `pub fn define() -> WorkflowSpec`.\n",
+        "# Workflows\n\nEach directory is one workflow crate. The workflow definition lives in `src/lib.rs`.\n",
         &mut created,
     )?;
     write_new_text(
-        &workflows.join("workflow.example.rs"),
-        &example_workflow_source("workflow.example", "Example Workflow"),
+        &workflow_manifest_path(root, "lightflow.example"),
+        &workflow_manifest("lightflow.example"),
+        &mut created,
+    )?;
+    write_new_text(
+        &workflow_source_path(root, "lightflow.example"),
+        &example_workflow_source("lightflow.example", "Example Workflow"),
         &mut created,
     )?;
 
@@ -287,19 +344,60 @@ fn add_workflow(
     name: Option<&str>,
 ) -> CliResult<serde_json::Value> {
     validate_spec_id(workflow_id, "workflow id")?;
-    let path = root
-        .join("lightflow")
-        .join("workflows")
-        .join(format!("{workflow_id}.rs"));
+    let mut created = Vec::new();
+    ensure_workspace_manifest(root, &mut created)?;
+    let manifest_path = workflow_manifest_path(root, workflow_id);
+    let source_path = workflow_source_path(root, workflow_id);
     let workflow_source =
         example_workflow_source(workflow_id, name.unwrap_or(&title_from_id(workflow_id)));
-    let mut created = Vec::new();
-    write_new_text(&path, &workflow_source, &mut created)?;
+    write_new_text(
+        &manifest_path,
+        &workflow_manifest(workflow_id),
+        &mut created,
+    )?;
+    write_new_text(&source_path, &workflow_source, &mut created)?;
     Ok(json!({
         "workflow_id": workflow_id,
-        "path": path,
+        "crate_dir": workflow_crate_dir(root, workflow_id),
+        "path": source_path,
         "created": created
     }))
+}
+
+fn ensure_workspace_manifest(root: &Path, created: &mut Vec<String>) -> CliResult<()> {
+    let manifest_path = root.join("Cargo.toml");
+    if manifest_path.exists() {
+        return Ok(());
+    }
+    write_new_text(&manifest_path, &workspace_manifest(), created)
+}
+
+fn workspace_manifest() -> String {
+    format!(
+        "[workspace]\nresolver = \"3\"\nmembers = [\"lightflow/workflows/*\"]\n\n[workspace.dependencies]\nlightflow = {{ git = {:?} }}\n",
+        env!("CARGO_PKG_REPOSITORY")
+    )
+}
+
+fn workflow_manifest(workflow_id: &str) -> String {
+    format!(
+        "[package]\nname = {:?}\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n[dependencies]\nlightflow = {{ workspace = true }}\n",
+        package_name_from_id(workflow_id)
+    )
+}
+
+fn workflow_crate_dir(root: &Path, workflow_id: &str) -> PathBuf {
+    root.join("lightflow").join("workflows").join(workflow_id)
+}
+
+fn workflow_manifest_path(root: &Path, workflow_id: &str) -> PathBuf {
+    workflow_crate_dir(root, workflow_id).join("Cargo.toml")
+}
+
+fn workflow_source_path(root: &Path, workflow_id: &str) -> PathBuf {
+    workflow_crate_dir(root, workflow_id)
+        .join("src")
+        .join("lib.rs")
 }
 
 fn example_workflow_source(workflow_id: &str, name: &str) -> String {
@@ -322,6 +420,15 @@ fn validate_spec_id(value: &str, label: &str) -> CliResult<()> {
     Ok(())
 }
 
+fn normalize_workflow_id(value: &str) -> String {
+    let value = value.strip_suffix(".rs").unwrap_or(value);
+    if value.starts_with("lightflow.") {
+        value.to_owned()
+    } else {
+        format!("lightflow.{value}")
+    }
+}
+
 fn write_new_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResult<()> {
     if path.exists() {
         return Err(CliError::Usage(format!(
@@ -339,6 +446,26 @@ fn write_new_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResu
 
 fn rust_string(value: &str) -> String {
     format!("{value:?}")
+}
+
+fn package_name_from_id(id: &str) -> String {
+    let mut name = String::new();
+    let mut previous_dash = false;
+    for character in id.chars() {
+        if character.is_ascii_alphanumeric() {
+            name.push(character.to_ascii_lowercase());
+            previous_dash = false;
+        } else if !previous_dash {
+            name.push('-');
+            previous_dash = true;
+        }
+    }
+    let name = name.trim_matches('-');
+    if name.is_empty() {
+        "workflow".to_owned()
+    } else {
+        name.to_owned()
+    }
 }
 
 fn title_from_id(id: &str) -> String {

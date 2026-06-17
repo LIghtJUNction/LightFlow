@@ -1,5 +1,5 @@
 # Workflows
 
-Each `.rs` file defines one workflow with embedded metadata and graph
-structure. Leaf workflows declare ports and no nodes. Composite workflows use
-`.node(..., workflow_id)` to nest other workflows.
+Each directory is one workflow crate. Reusable workflows define `src/lib.rs`
+and do not define `src/main.rs`. Leaf workflows declare ports and no nodes.
+Composite workflows use `.node(..., workflow_id)` to nest other workflows.

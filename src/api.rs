@@ -54,7 +54,7 @@ impl ApiService {
             .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))
     }
 
-    /// Save one workflow spec under `lightflow/workflows/<id>.rs`.
+    /// Save one workflow spec under `lightflow/workflows/<id>/src/lib.rs`.
     pub fn save_workflow(&self, workflow: WorkflowSpec) -> ApiResult<WorkflowSpec> {
         let validation = self.validate_workflow(&workflow);
         if !validation.valid {
@@ -110,7 +110,9 @@ impl ApiService {
             .repo_root
             .join(LIGHTFLOW_DIR)
             .join(WORKFLOW_DIR)
-            .join(format!("{workflow_id}.rs")))
+            .join(workflow_id)
+            .join("src")
+            .join("lib.rs"))
     }
 }
 
@@ -166,6 +168,12 @@ fn read_workflow_sources(root: &Path) -> ApiResult<Vec<WorkflowSpec>> {
             for entry in entries {
                 let path = entry.map_err(ApiError::from)?.path();
                 if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                    if path.is_dir() {
+                        let lib = path.join("src").join("lib.rs");
+                        if lib.exists() {
+                            workflows.push(read_workflow_source(&lib)?);
+                        }
+                    }
                     continue;
                 }
                 workflows.push(read_workflow_source(&path)?);

@@ -1,0 +1,6 @@
+[workspace]
+resolver = "3"
+members = ["lightflow/workflows/*"]
+
+[workspace.dependencies]
+lightflow = { path = ".." }

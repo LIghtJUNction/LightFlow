@@ -1,7 +1,7 @@
 use lightflow::workflow::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("workflow.text_prompt")
+    workflow("lightflow.text_prompt")
         .version("0.1.0")
         .name("Text Prompt")
         .description("Build a text prompt from structured input.")

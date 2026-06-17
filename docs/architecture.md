@@ -24,16 +24,17 @@ A workflow declares:
 There is no separate component concept. A leaf workflow is the replacement for
 what would otherwise become a component.
 
-## Workflow Files
+## Workflow Crates
 
-Workflows are source-controlled Rust files under `lightflow/workflows/*.rs`.
-Metadata and graph structure live in the same file:
+Workflows are source-controlled Rust library crates under `lightflow/workflows/`.
+Reusable workflows define `src/lib.rs` and do not define `src/main.rs`.
+Metadata and graph structure live in the library entrypoint:
 
 ```rust
 use lightflow::workflow::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("workflow.example")
+    workflow("lightflow.example")
         .version("0.1.0")
         .name("Example")
         .input("value", "json")
@@ -44,6 +45,9 @@ pub fn define() -> WorkflowSpec {
 
 The backend statically parses the supported builder DSL from the Rust AST. It
 does not compile or execute workflow files.
+
+A future executable workflow entrypoint can be marked by adding `src/main.rs`.
+Until then, `lfw init` and `lfw add` generate reusable library workflows only.
 
 ## Validation
 
@@ -73,7 +77,7 @@ The report includes:
 The command-line form is:
 
 ```bash
-lfw deps workflow.text_plan
+lfw deps lightflow.text_plan
 ```
 
 The current validation deliberately does not implement execution scheduling,

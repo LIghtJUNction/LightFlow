@@ -5,18 +5,22 @@ LightFlow project files are ordinary source-controlled files under `lightflow/`.
 ```text
 lightflow/
   workflows/
-    <workflow_id>.rs
+    <workflow_id>/
+      Cargo.toml
+      src/
+        lib.rs
 ```
 
-## Workflow Files
+## Workflow Crates
 
-Each workflow file is Rust source code with embedded metadata and definition:
+Each workflow is a Rust library crate with embedded metadata and definition in
+`src/lib.rs`:
 
 ```rust
 use lightflow::workflow::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("workflow.example")
+    workflow("lightflow.example")
         .version("0.1.0")
         .name("Example")
         .description("Reusable workflow definition.")
@@ -33,14 +37,18 @@ with `.edge()`:
 use lightflow::workflow::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("workflow.parent")
+    workflow("lightflow.parent")
         .version("0.1.0")
         .name("Parent")
-        .depends_on("workflow.child", "0.1.0")
-        .node("child", "workflow.child")
+        .depends_on("lightflow.child", "0.1.0")
+        .node("child", "lightflow.child")
         .build()
 }
 ```
+
+Reusable workflows do not include `src/main.rs`. If a workflow crate has no
+`main.rs`, it is imported or nested by other workflows instead of used as an
+executable entrypoint.
 
 The backend accepts `WorkflowSpec` JSON over HTTP/MCP/CLI for tool integration,
 but the source-controlled project format is Rust.
