@@ -58,6 +58,9 @@ helpers, and basic type adapters when they are broadly useful. It must not
 contain agent behavior, provider integrations, model download logic, or
 business templates.
 
+The repository dogfoods this model: `lightflow.text_plan` declares an exact
+dependency on `lightflow.std` and includes a `lightflow.std` node in its graph.
+
 ## Validation
 
 The backend validates:
