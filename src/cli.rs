@@ -11,6 +11,7 @@ use std::process::Command;
 mod add;
 mod batch;
 mod history;
+mod info;
 mod install;
 mod list;
 pub mod mcp;
@@ -22,6 +23,7 @@ mod run;
 mod runtime;
 mod sync;
 mod upgrade;
+mod workflow_help;
 
 use add::{add_dependency, parse_add_dependency_options};
 use batch::{execute_batch, parse_batch_options};
@@ -29,6 +31,7 @@ use history::{
     manage_runs, now_ms, parse_replay_run_id, read_manifest, record_failed_run, record_run,
     trace_run,
 };
+use info::architecture_info;
 use install::{install_workflow_repo, parse_install_options};
 use list::{list_workflows, parse_list_options};
 use models::manage_models;
@@ -44,6 +47,7 @@ use sync::{parse_sync_options, sync_project};
 use upgrade::{
     cargo_workspace_root, parse_cargo_workspace_options, update_index, upgrade_workspace,
 };
+use workflow_help::workflow_help;
 
 /// Run the LightFlow CLI from process arguments.
 pub async fn run_from_env() -> CliResult<()> {
@@ -155,6 +159,9 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 "lfw_path": runtime.lfw_path,
             }))?;
         }
+        "info" | "arch" | "architecture" => {
+            print_json(&architecture_info(&service, &runtime, args)?)?;
+        }
         "list" | "ls" => {
             let options = parse_list_options(args)?;
             print_json(&list_workflows(&service, &options)?)?;
@@ -176,6 +183,9 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                     ensure_no_extra_args(args, 2, "workflows deps")?;
                     print_json(&service.workflow_dependencies(workflow_id)?)?;
                 }
+                "help" => {
+                    print_json(&workflow_help(&service, &args[1..], "workflows help")?)?;
+                }
                 "validate" => {
                     let workflow: WorkflowSpec = serde_json::from_value(request_json(
                         required_arg(args, 1, "workflow json")?,
@@ -192,7 +202,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 }
                 _ => {
                     return Err(CliError::Usage(
-                        "workflow action must be list|get|deps|validate|save".to_owned(),
+                        "workflow action must be list|get|help|deps|validate|save".to_owned(),
                     ));
                 }
             }
@@ -201,6 +211,12 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let workflow_id = required_arg(args, 0, "workflow id")?;
             ensure_no_extra_args(args, 1, "deps")?;
             print_json(&service.workflow_dependencies(workflow_id)?)?;
+        }
+        "help" => {
+            if args.is_empty() {
+                return Err(CliError::Usage(usage()));
+            }
+            print_json(&workflow_help(&service, args, "help")?)?;
         }
         "sync" => {
             let options = parse_sync_options(args)?;
@@ -257,7 +273,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let bind = parse_bind_addr(args, command)?;
             server::serve(service, &bind).await?;
         }
-        "-h" | "--help" | "help" => return Err(CliError::Usage(usage())),
+        "-h" | "--help" => return Err(CliError::Usage(usage())),
         _ => return Err(CliError::Usage(usage())),
     }
 
@@ -445,6 +461,7 @@ fn usage() -> String {
     [
         "usage:",
         "  lfw init [--workflow|--plugin] [path]",
+        "  lfw info",
         "  lfw home",
         "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
         "  lfw install <path-or-git-url> [--git] [--name <name>] [--global|-g]",
@@ -454,10 +471,12 @@ fn usage() -> String {
         "  lfw ls [--brief|--detail] [--category <name>]",
         "  lfw workflows list",
         "  lfw workflows get <workflow_id>",
+        "  lfw workflows help <workflow_id>",
         "  lfw workflows deps <workflow_id>",
         "  lfw workflows validate <json|-|@file>",
         "  lfw workflows save <json|-|@file>",
         "  lfw deps <workflow_id>",
+        "  lfw help <workflow_id>",
         "  lfw update [--global|-g]",
         "  lfw upgrade [--global|-g]",
         "  lfw sync [workflow_id] [--model <requirement=variant>] [--hf-model <requirement=format:repo[:file]>] [--hf-url <requirement=url>] [--auto-model|--select-model] [--locked] [--apply]",

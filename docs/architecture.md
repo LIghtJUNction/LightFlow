@@ -251,6 +251,24 @@ automatically; users must select a variant with `--model image_model=<variant>`.
 This keeps large model artifacts out of the repository and lets HF manage
 deduplication, sharding, compression, and cache placement.
 
+## Architecture Info
+
+`lfw info` reports the architecture visible to the current process. It includes
+the LightFlow package version, enabled build features, project root, workflow
+search paths, workflow counts by category, declared runtime capabilities, model
+requirement count, and known executors. Executor availability is build- and
+environment-sensitive: built-in passthrough, preview image generation, and image
+invert are always available; the external FLUX runner is available when
+`LIGHTFLOW_FLUX_RUNNER` is set; native FLUX and RIG executors depend on the
+`flux-native` and `rig` features. `lfw arch` and `lfw architecture` are aliases.
+
+`lfw help <workflow_id>` reports the contract for one workflow. It returns
+workflow metadata, input and output ports, dependency status, model and runtime
+requirements, graph structure, and runnable input examples. `lfw workflows help
+<workflow_id>` is the namespaced form. Current workflow metadata records port
+names and types; richer required/default constraints are not represented in the
+DSL yet.
+
 ## Boundaries
 
 `src/api.rs` is the framework-independent service. CLI, HTTP, and MCP call this

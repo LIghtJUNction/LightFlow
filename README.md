@@ -70,6 +70,7 @@ cargo run --bin lfw -- init --workflow
 cargo run --bin lfw -- init --plugin
 cargo run --bin lfw -- new my_flow --category std --name "My Flow"
 cargo run --bin lfw -- new my_global_flow --category std --global
+cargo run --bin lfw -- info
 cargo run --bin lfw -- home
 cargo run --bin lfw -- add lightflow-std --version 0.1.1
 cargo run --bin lfw -- add lightflow-std --path ../lightflow-std --editable
@@ -80,6 +81,8 @@ cargo run --bin lfw -- list --categories
 cargo run --bin lfw -- ls --detail
 cargo run --bin lfw -- workflows list
 cargo run --bin lfw -- workflows get lightflow.text_plan
+cargo run --bin lfw -- help lightflow.text_plan
+cargo run --bin lfw -- workflows help lightflow.text_plan
 cargo run --bin lfw -- deps lightflow.text_plan
 cargo run --bin lfw -- run lightflow.text_plan --input value='{"topic":"demo"}'
 cargo run --bin lfw -- run lightflow.text_plan --input value='{"topic":"demo"}' --patch @patch.json
@@ -123,6 +126,17 @@ temperature, max token count, and extra provider parameters supplied as workflow
 inputs or environment defaults. The runtime currently supports OpenAI-compatible
 chat APIs, OpenAI Responses, Anthropic, Ollama, OpenRouter, DeepSeek, xAI, and
 a local `mock` provider for tests.
+
+Use `lfw info` to inspect the current LightFlow build and project architecture:
+package version, enabled build features, project workflow search paths,
+workflow counts by category, declared runtime capabilities, model requirement
+count, and available executors. `lfw arch` and `lfw architecture` are aliases.
+
+Use `lfw help <workflow_id>` when you know a workflow id but not its contract.
+It returns the workflow metadata, input and output ports, dependency status,
+model requirements, runtime capabilities, graph nodes and edges, plus example
+`lfw run` input flags and a JSON input shape. `lfw workflows help <workflow_id>`
+is the equivalent namespaced form.
 
 Every `lfw run` and `lfx` execution is recorded under
 `.lightflow/runs/<run_id>/`:

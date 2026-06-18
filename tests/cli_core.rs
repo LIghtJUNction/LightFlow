@@ -62,6 +62,61 @@ fn cli_reads_rust_workflows_and_resolves_dependencies() -> Result<(), Box<dyn st
     assert_eq!(detail["workflows"][1]["nodes"][0]["id"], "nested");
     assert_eq!(detail["workflows"][1]["edges"][0]["from"]["node"], "nested");
 
+    let info = lfw(&root, ["info"])?;
+    assert_eq!(info["package"]["name"], "lightflow");
+    assert_eq!(info["workflows"]["total"], 3);
+    assert_eq!(info["workflows"]["leaf"], 2);
+    assert_eq!(info["workflows"]["composite"], 1);
+    assert_eq!(
+        info["workflows"]["categories"],
+        serde_json::json!([{ "category": "tests", "workflows": 3 }])
+    );
+    assert!(
+        info["executors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|executor| executor["id"] == "passthrough" && executor["available"] == true)
+    );
+    let arch = lfw(&root, ["arch"])?;
+    assert_eq!(arch["workflows"]["total"], 3);
+
+    let workflow_help = lfw(&root, ["help", "lightflow.parent"])?;
+    assert_eq!(workflow_help["workflow"]["id"], "lightflow.parent");
+    assert_eq!(workflow_help["workflow"]["kind"], "composite");
+    assert_eq!(
+        workflow_help["ports"]["inputs"],
+        serde_json::json!([
+            {
+                "name": "in",
+                "type": "json",
+                "cli_flag": "-i in={}",
+                "value_hint": "{}"
+            }
+        ])
+    );
+    assert_eq!(
+        workflow_help["ports"]["outputs"][0],
+        serde_json::json!({
+            "name": "out",
+            "type": "json",
+            "value_hint": "{}"
+        })
+    );
+    assert_eq!(workflow_help["dependencies"]["complete"], true);
+    assert_eq!(
+        workflow_help["usage"]["command"],
+        serde_json::json!(["lfw", "run", "lightflow.parent", "-i in={}"])
+    );
+    assert_eq!(
+        workflow_help["usage"]["inputs_json_shape"],
+        serde_json::json!({ "in": {} })
+    );
+
+    let workflows_help = lfw(&root, ["workflows", "help", "lightflow.child"])?;
+    assert_eq!(workflows_help["workflow"]["id"], "lightflow.child");
+    assert_eq!(workflows_help["workflow"]["kind"], "leaf");
+
     let validation = lightflow(
         &root,
         [
