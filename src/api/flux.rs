@@ -1,0 +1,699 @@
+use super::{ApiError, ApiResult};
+use crate::api::model_manager::ModelManager;
+use crate::api::plan::{
+    IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY, IMAGE_INPAINT_CAPABILITY,
+};
+use crate::api::util::{XdgUserDirectory, lightflow_xdg_user_dir};
+use crate::workflow::{WorkflowArtifact, WorkflowSpec};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+const FLUX_RUNNER_ENV: &str = "LIGHTFLOW_FLUX_RUNNER";
+const FLUX_BACKEND_ENV: &str = "LIGHTFLOW_FLUX_BACKEND";
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct FluxExecution {
+    pub(super) outputs: serde_json::Map<String, serde_json::Value>,
+    pub(super) artifacts: Vec<WorkflowArtifact>,
+}
+
+#[derive(Debug, Clone)]
+struct FluxModelHandles {
+    diffusion_model: PathBuf,
+    llm: PathBuf,
+    vae: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FluxTask {
+    TextToImage,
+    ImageEdit,
+    Inpaint,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FluxBackend {
+    Native,
+    ExternalRunner,
+}
+
+impl FluxBackend {
+    fn engine(self) -> &'static str {
+        match self {
+            Self::Native => "diffusion-rs.native.v1",
+            Self::ExternalRunner => "flux2-klein.gguf.runner.v1",
+        }
+    }
+}
+
+impl FluxTask {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::TextToImage => "text-to-image",
+            Self::ImageEdit => "image-edit",
+            Self::Inpaint => "inpaint",
+        }
+    }
+
+    fn default_strength(self) -> f32 {
+        match self {
+            Self::TextToImage => 0.0,
+            Self::ImageEdit => 0.75,
+            Self::Inpaint => 0.85,
+        }
+    }
+
+    fn capability(self) -> &'static str {
+        match self {
+            Self::TextToImage => IMAGE_GENERATE_CAPABILITY,
+            Self::ImageEdit => IMAGE_EDIT_CAPABILITY,
+            Self::Inpaint => IMAGE_INPAINT_CAPABILITY,
+        }
+    }
+}
+
+pub(super) fn workflow_declares_flux_assets(workflow: &WorkflowSpec) -> bool {
+    has_model_requirement(workflow, "flux_model")
+        && has_model_requirement(workflow, "llm_model")
+        && has_model_requirement(workflow, "vae_model")
+}
+
+fn has_model_requirement(workflow: &WorkflowSpec, id: &str) -> bool {
+    workflow.models.iter().any(|model| model.id == id)
+}
+
+pub(super) fn execute_flux_text_to_image(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    model_manager: &mut ModelManager,
+) -> ApiResult<FluxExecution> {
+    let models = load_flux_models(&workflow.id, model_manager)?;
+    execute_flux_with_models(root, workflow, inputs, models, FluxTask::TextToImage)
+}
+
+pub(super) fn execute_flux_image_edit(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    model_manager: &mut ModelManager,
+) -> ApiResult<FluxExecution> {
+    let models = load_flux_models(&workflow.id, model_manager)?;
+    execute_flux_with_models(root, workflow, inputs, models, FluxTask::ImageEdit)
+}
+
+pub(super) fn execute_flux_inpaint(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    model_manager: &mut ModelManager,
+) -> ApiResult<FluxExecution> {
+    let models = load_flux_models(&workflow.id, model_manager)?;
+    execute_flux_with_models(root, workflow, inputs, models, FluxTask::Inpaint)
+}
+
+fn execute_flux_with_models(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    models: FluxModelHandles,
+    task: FluxTask,
+) -> ApiResult<FluxExecution> {
+    let prompt = input_string(inputs, "prompt")
+        .or_else(|| input_string(inputs, "text"))
+        .ok_or_else(|| {
+            ApiError::InvalidRequest("prompt is required for FLUX generation".to_owned())
+        })?;
+    let negative = input_string(inputs, "negative").unwrap_or_default();
+    let width = input_i32(inputs, "width").unwrap_or(512).clamp(64, 2048);
+    let height = input_i32(inputs, "height").unwrap_or(512).clamp(64, 2048);
+    let steps = input_i32(inputs, "steps").unwrap_or(4).clamp(1, 64);
+    let seed = input_i64(inputs, "seed").unwrap_or(42);
+    let count = input_count(inputs);
+    let guidance = input_f32(inputs, "guidance").unwrap_or(3.5);
+    let cfg_scale = input_f32(inputs, "cfg_scale").unwrap_or(1.0);
+    let strength = input_f32(inputs, "strength").unwrap_or(task.default_strength());
+    let image_path = match task {
+        FluxTask::TextToImage => None,
+        FluxTask::ImageEdit | FluxTask::Inpaint => Some(required_input_path(inputs, "image_path")?),
+    };
+    let mask_path = match task {
+        FluxTask::Inpaint => Some(required_input_path(inputs, "mask_path")?),
+        FluxTask::TextToImage | FluxTask::ImageEdit => None,
+    };
+    let output_paths = output_paths(root, workflow, inputs, seed as u64, count);
+    let mut artifacts = Vec::with_capacity(output_paths.len());
+
+    for (offset, output_path) in output_paths.iter().enumerate() {
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(ApiError::from)?;
+        }
+        let image_seed = seed.saturating_add(offset as i64);
+        let backend = run_flux_backend(
+            task,
+            &prompt,
+            &negative,
+            width,
+            height,
+            image_seed,
+            steps,
+            guidance,
+            cfg_scale,
+            strength,
+            image_path.as_deref(),
+            mask_path.as_deref(),
+            output_path,
+            &models,
+        )?;
+        artifacts.push(flux_artifact(
+            workflow,
+            output_path,
+            &prompt,
+            width,
+            height,
+            image_seed,
+            steps,
+            guidance,
+            strength,
+            backend,
+            task,
+            offset + 1,
+            count,
+            image_path.as_deref(),
+            mask_path.as_deref(),
+            &models,
+        ));
+    }
+
+    let mut outputs = serde_json::Map::new();
+    let first_artifact = artifacts.first().cloned().ok_or_else(|| {
+        ApiError::InvalidRequest("FLUX generation produced no artifacts".to_owned())
+    })?;
+    outputs.insert(
+        "image".to_owned(),
+        serde_json::to_value(&first_artifact).unwrap(),
+    );
+    outputs.insert("image_path".to_owned(), first_artifact.path.clone().into());
+    outputs.insert(
+        "images".to_owned(),
+        serde_json::to_value(&artifacts).unwrap(),
+    );
+    outputs.insert(
+        "image_paths".to_owned(),
+        serde_json::Value::Array(
+            artifacts
+                .iter()
+                .map(|artifact| artifact.path.clone().into())
+                .collect(),
+        ),
+    );
+
+    Ok(FluxExecution { outputs, artifacts })
+}
+
+fn load_flux_models(
+    workflow_id: &str,
+    model_manager: &mut ModelManager,
+) -> ApiResult<FluxModelHandles> {
+    Ok(FluxModelHandles {
+        diffusion_model: model_manager.locked_path(workflow_id, "flux_model")?,
+        llm: model_manager.locked_path(workflow_id, "llm_model")?,
+        vae: model_manager.locked_path(workflow_id, "vae_model")?,
+    })
+}
+
+fn run_flux_backend(
+    task: FluxTask,
+    prompt: &str,
+    negative: &str,
+    width: i32,
+    height: i32,
+    seed: i64,
+    steps: i32,
+    guidance: f32,
+    cfg_scale: f32,
+    strength: f32,
+    image_path: Option<&Path>,
+    mask_path: Option<&Path>,
+    output_path: &Path,
+    models: &FluxModelHandles,
+) -> ApiResult<FluxBackend> {
+    match std::env::var(FLUX_BACKEND_ENV).as_deref() {
+        Ok("external") | Ok("runner") => {
+            run_flux_runner(
+                task,
+                prompt,
+                negative,
+                width,
+                height,
+                seed,
+                steps,
+                guidance,
+                cfg_scale,
+                strength,
+                image_path,
+                mask_path,
+                output_path,
+                models,
+            )?;
+            Ok(FluxBackend::ExternalRunner)
+        }
+        Ok("native") => {
+            run_flux_native(
+                task,
+                prompt,
+                negative,
+                width,
+                height,
+                seed,
+                steps,
+                guidance,
+                cfg_scale,
+                strength,
+                image_path,
+                mask_path,
+                output_path,
+                models,
+            )?;
+            Ok(FluxBackend::Native)
+        }
+        Ok(other) => Err(ApiError::InvalidRequest(format!(
+            "{FLUX_BACKEND_ENV} must be native, external, or unset; got {other}"
+        ))),
+        Err(_) => {
+            if native_flux_runtime_enabled() {
+                run_flux_native(
+                    task,
+                    prompt,
+                    negative,
+                    width,
+                    height,
+                    seed,
+                    steps,
+                    guidance,
+                    cfg_scale,
+                    strength,
+                    image_path,
+                    mask_path,
+                    output_path,
+                    models,
+                )?;
+                Ok(FluxBackend::Native)
+            } else {
+                run_flux_runner(
+                    task,
+                    prompt,
+                    negative,
+                    width,
+                    height,
+                    seed,
+                    steps,
+                    guidance,
+                    cfg_scale,
+                    strength,
+                    image_path,
+                    mask_path,
+                    output_path,
+                    models,
+                )?;
+                Ok(FluxBackend::ExternalRunner)
+            }
+        }
+    }
+}
+
+fn native_flux_runtime_enabled() -> bool {
+    cfg!(feature = "flux-native")
+}
+
+#[cfg(feature = "flux-native")]
+fn run_flux_native(
+    task: FluxTask,
+    prompt: &str,
+    negative: &str,
+    width: i32,
+    height: i32,
+    seed: i64,
+    steps: i32,
+    guidance: f32,
+    cfg_scale: f32,
+    strength: f32,
+    image_path: Option<&Path>,
+    mask_path: Option<&Path>,
+    output_path: &Path,
+    models: &FluxModelHandles,
+) -> ApiResult<()> {
+    let request = super::flux_native::NativeFluxRequest {
+        task: task.as_str(),
+        prompt,
+        negative,
+        width,
+        height,
+        seed,
+        steps,
+        guidance,
+        cfg_scale,
+        strength,
+        image_path,
+        mask_path,
+        output_path,
+        diffusion_model: &models.diffusion_model,
+        llm_model: &models.llm,
+        vae_model: &models.vae,
+    };
+    super::flux_native::generate(request)
+}
+
+#[cfg(not(feature = "flux-native"))]
+fn run_flux_native(
+    _task: FluxTask,
+    _prompt: &str,
+    _negative: &str,
+    _width: i32,
+    _height: i32,
+    _seed: i64,
+    _steps: i32,
+    _guidance: f32,
+    _cfg_scale: f32,
+    _strength: f32,
+    _image_path: Option<&Path>,
+    _mask_path: Option<&Path>,
+    _output_path: &Path,
+    _models: &FluxModelHandles,
+) -> ApiResult<()> {
+    Err(ApiError::InvalidRequest(
+        "native FLUX backend requested, but this LightFlow binary was not built with --features flux-native".to_owned(),
+    ))
+}
+
+fn run_flux_runner(
+    task: FluxTask,
+    prompt: &str,
+    negative: &str,
+    width: i32,
+    height: i32,
+    seed: i64,
+    steps: i32,
+    guidance: f32,
+    cfg_scale: f32,
+    strength: f32,
+    image_path: Option<&Path>,
+    mask_path: Option<&Path>,
+    output_path: &Path,
+    models: &FluxModelHandles,
+) -> ApiResult<()> {
+    let runner = std::env::var_os(FLUX_RUNNER_ENV).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
+            "workflow requires a FLUX runner; set {FLUX_RUNNER_ENV} to an executable that accepts LightFlow FLUX runner arguments"
+        ))
+    })?;
+    let runner = PathBuf::from(runner);
+    if !runner.is_file() {
+        return Err(ApiError::InvalidRequest(format!(
+            "{FLUX_RUNNER_ENV} does not point to a file: {}",
+            runner.display()
+        )));
+    }
+
+    let mut command = Command::new(&runner);
+    command
+        .arg("--task")
+        .arg(task.as_str())
+        .arg("--prompt")
+        .arg(prompt)
+        .arg("--negative")
+        .arg(negative)
+        .arg("--width")
+        .arg(width.to_string())
+        .arg("--height")
+        .arg(height.to_string())
+        .arg("--seed")
+        .arg(seed.to_string())
+        .arg("--steps")
+        .arg(steps.to_string())
+        .arg("--guidance")
+        .arg(guidance.to_string())
+        .arg("--cfg-scale")
+        .arg(cfg_scale.to_string())
+        .arg("--strength")
+        .arg(strength.to_string())
+        .arg("--output")
+        .arg(output_path)
+        .arg("--flux-model")
+        .arg(&models.diffusion_model)
+        .arg("--llm-model")
+        .arg(&models.llm)
+        .arg("--vae-model")
+        .arg(&models.vae);
+    if let Some(image_path) = image_path {
+        command.arg("--image").arg(image_path);
+    }
+    if let Some(mask_path) = mask_path {
+        command.arg("--mask").arg(mask_path);
+    }
+    let output = command.output().map_err(ApiError::from)?;
+    if !output.status.success() {
+        return Err(ApiError::InvalidRequest(format!(
+            "FLUX runner {} failed with status {}\nstdout:\n{}\nstderr:\n{}",
+            runner.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    let bytes = fs::read(output_path).map_err(ApiError::from)?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(ApiError::InvalidRequest(format!(
+            "FLUX generation completed but did not write a PNG: {}",
+            output_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn required_input_path(
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) -> ApiResult<PathBuf> {
+    let path = input_string(inputs, name)
+        .map(|path| expand_tilde(PathBuf::from(path)))
+        .ok_or_else(|| {
+            ApiError::InvalidRequest(format!("{name} is required for FLUX generation"))
+        })?;
+    if !path.is_file() {
+        return Err(ApiError::InvalidRequest(format!(
+            "{name} does not point to a file: {}",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
+fn input_string(inputs: &serde_json::Map<String, serde_json::Value>, name: &str) -> Option<String> {
+    inputs.get(name).and_then(|value| match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        value if !value.is_null() => Some(value.to_string()),
+        _ => None,
+    })
+}
+
+fn input_i32(inputs: &serde_json::Map<String, serde_json::Value>, name: &str) -> Option<i32> {
+    inputs
+        .get(name)
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+}
+
+fn input_i64(inputs: &serde_json::Map<String, serde_json::Value>, name: &str) -> Option<i64> {
+    inputs.get(name).and_then(serde_json::Value::as_i64)
+}
+
+fn input_count(inputs: &serde_json::Map<String, serde_json::Value>) -> usize {
+    ["count", "num_images", "batch_count"]
+        .into_iter()
+        .find_map(|name| input_i32(inputs, name))
+        .unwrap_or(1)
+        .clamp(1, 256) as usize
+}
+
+fn input_f32(inputs: &serde_json::Map<String, serde_json::Value>, name: &str) -> Option<f32> {
+    inputs
+        .get(name)
+        .and_then(serde_json::Value::as_f64)
+        .map(|value| value as f32)
+}
+
+fn output_paths(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    seed: u64,
+    count: usize,
+) -> Vec<PathBuf> {
+    if let Some(template) = input_string(inputs, "output_template")
+        .or_else(|| input_string(inputs, "output_path").filter(|path| path_contains_template(path)))
+    {
+        return (1..=count)
+            .map(|index| {
+                expand_tilde(PathBuf::from(render_output_template(
+                    &template,
+                    workflow,
+                    index,
+                    seed.saturating_add(index as u64 - 1),
+                )))
+            })
+            .collect();
+    }
+
+    if let Some(path) = input_string(inputs, "output_path").map(PathBuf::from) {
+        let path = expand_tilde(path);
+        if count == 1 {
+            return vec![path];
+        }
+        return (1..=count)
+            .map(|index| indexed_output_path(&path, index))
+            .collect();
+    }
+
+    let base = default_lightflow_picture_dir(root)
+        .join(workflow.id.replace('.', "_"))
+        .join(if count == 1 {
+            format!("{seed}.png")
+        } else {
+            "{seed}-{index:03}.png".to_owned()
+        });
+    output_paths(
+        root,
+        workflow,
+        &serde_json::Map::from_iter([(
+            "output_template".to_owned(),
+            base.display().to_string().into(),
+        )]),
+        seed,
+        count,
+    )
+}
+
+fn path_contains_template(path: &str) -> bool {
+    path.contains("{index") || path.contains("{seed}") || path.contains("{workflow_id}")
+}
+
+fn render_output_template(
+    template: &str,
+    workflow: &WorkflowSpec,
+    index: usize,
+    seed: u64,
+) -> String {
+    let mut output = template
+        .replace("{index}", &index.to_string())
+        .replace("{index0}", &(index - 1).to_string())
+        .replace("{seed}", &seed.to_string())
+        .replace("{workflow_id}", &workflow.id);
+    for width in 1..=9 {
+        let placeholder = format!("{{index:0{width}}}");
+        let value = format!("{index:0width$}");
+        output = output.replace(&placeholder, &value);
+    }
+    output
+}
+
+fn indexed_output_path(path: &Path, index: usize) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("image");
+    let extension = path
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("png");
+    parent.join(format!("{stem}-{index:03}.{extension}"))
+}
+
+fn default_lightflow_picture_dir(root: &Path) -> PathBuf {
+    lightflow_xdg_user_dir(root, XdgUserDirectory::Pictures)
+}
+
+fn expand_tilde(path: PathBuf) -> PathBuf {
+    let Some(path_text) = path.to_str() else {
+        return path;
+    };
+    if path_text == "~" {
+        return std::env::var_os("HOME").map(PathBuf::from).unwrap_or(path);
+    }
+    if let Some(rest) = path_text.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    path
+}
+
+fn flux_artifact(
+    workflow: &WorkflowSpec,
+    output_path: &Path,
+    prompt: &str,
+    width: i32,
+    height: i32,
+    seed: i64,
+    steps: i32,
+    guidance: f32,
+    strength: f32,
+    backend: FluxBackend,
+    task: FluxTask,
+    index: usize,
+    count: usize,
+    image_path: Option<&Path>,
+    mask_path: Option<&Path>,
+    models: &FluxModelHandles,
+) -> WorkflowArtifact {
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("capability".to_owned(), task.capability().into());
+    metadata.insert("engine".to_owned(), backend.engine().into());
+    metadata.insert("task".to_owned(), task.as_str().into());
+    metadata.insert("workflow_id".to_owned(), workflow.id.clone().into());
+    metadata.insert("prompt".to_owned(), prompt.to_owned().into());
+    metadata.insert("width".to_owned(), width.into());
+    metadata.insert("height".to_owned(), height.into());
+    metadata.insert("seed".to_owned(), seed.into());
+    metadata.insert("index".to_owned(), index.into());
+    metadata.insert("count".to_owned(), count.into());
+    metadata.insert("steps".to_owned(), steps.into());
+    metadata.insert("guidance".to_owned(), guidance.into());
+    metadata.insert("strength".to_owned(), strength.into());
+    if let Some(image_path) = image_path {
+        metadata.insert(
+            "source_image_path".to_owned(),
+            image_path.display().to_string().into(),
+        );
+    }
+    if let Some(mask_path) = mask_path {
+        metadata.insert(
+            "mask_path".to_owned(),
+            mask_path.display().to_string().into(),
+        );
+    }
+    metadata.insert(
+        "flux_model".to_owned(),
+        models.diffusion_model.display().to_string().into(),
+    );
+    metadata.insert(
+        "llm_model".to_owned(),
+        models.llm.display().to_string().into(),
+    );
+    metadata.insert(
+        "vae_model".to_owned(),
+        models.vae.display().to_string().into(),
+    );
+
+    WorkflowArtifact {
+        id: "image".to_owned(),
+        kind: "image".to_owned(),
+        path: output_path.display().to_string(),
+        mime_type: "image/png".to_owned(),
+        metadata,
+    }
+}

@@ -1,7 +1,7 @@
 //! Axum HTTP gateway for LightFlow's backend API.
 
 use crate::api::{ApiError, ApiService};
-use crate::mcp;
+use crate::cli::mcp;
 use crate::workflow::{WorkflowExecutionOptions, WorkflowSpec};
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};

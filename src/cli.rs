@@ -1,22 +1,65 @@
 use crate::api::{ApiError, ApiService};
 use crate::server;
-use crate::workflow::{
-    CargoDependency, CargoDependencySource, ModelProvider, ModelVariant, WorkflowExecutionOptions,
-    WorkflowSpec,
-};
+use crate::workflow::{WorkflowArtifact, WorkflowExecution, WorkflowSpec};
 use serde::Serialize;
 use serde_json::json;
-use std::collections::BTreeMap;
 use std::env;
-use std::fs;
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use toml_edit::{DocumentMut, InlineTable, Item, value};
+
+mod add;
+mod batch;
+mod list;
+pub mod mcp;
+mod models;
+mod project;
+mod publish;
+mod run;
+mod runtime;
+mod sync;
+mod upgrade;
+
+use add::{add_dependency, parse_add_dependency_options};
+use batch::{execute_batch, parse_batch_options};
+use list::{list_workflows, parse_list_options};
+use models::manage_models;
+use project::{
+    InitMode, add_workflow, init_plugin_project, init_workflow_project, normalize_workflow_id,
+    parse_add_workflow_options, parse_init_options,
+};
+use publish::{parse_publish_options, publish_crate};
+use run::{RunOptions, lfx_usage, parse_run_options};
+use runtime::{RuntimeConfig, ensure_lfw_shell_setup};
+use sync::{parse_sync_options, sync_project};
+use upgrade::{
+    cargo_workspace_root, parse_cargo_workspace_options, update_index, upgrade_workspace,
+};
 
 /// Run the LightFlow CLI from process arguments.
 pub async fn run_from_env() -> CliResult<()> {
     run(env::args().skip(1).collect()).await
+}
+
+/// Run the quick workflow executor from process arguments.
+pub async fn run_lfx_from_env() -> CliResult<()> {
+    run_lfx(env::args().skip(1).collect()).await
+}
+
+/// Run the quick workflow executor with explicit arguments.
+pub async fn run_lfx(args: Vec<String>) -> CliResult<()> {
+    if args
+        .first()
+        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+    {
+        return Err(CliError::Usage(lfx_usage()));
+    }
+    let runtime = RuntimeConfig::load()?;
+    let service =
+        ApiService::new(env::current_dir()?).with_workflow_paths(runtime.workflow_paths.clone());
+    let options = parse_run_options(&args)?;
+    print_json(&execute_run_options(&service, options)?)?;
+    Ok(())
 }
 
 /// Run the LightFlow CLI with explicit arguments.
@@ -31,40 +74,58 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
 
     match command {
         "init" => {
-            let root = args
-                .first()
-                .map(PathBuf::from)
-                .unwrap_or(env::current_dir()?);
-            ensure_no_extra_args(args, 1, "init")?;
-            let shell_setup = ensure_lfw_shell_setup(&runtime)?;
-            let mut output = init_project(&root)?;
-            output["config"] = json!({
-                "rc": runtime.rc_path,
-                "lfw_path": runtime.lfw_path,
-                "rc_created": shell_setup.rc_created,
-                "shell": shell_setup.shell,
-                "shell_config": shell_setup.shell_config,
-                "source_line": shell_setup.source_line,
-                "source_installed": shell_setup.source_installed,
-            });
+            let options = parse_init_options(args)?;
+            let output = match options.mode {
+                InitMode::Workflow => {
+                    let shell_setup = ensure_lfw_shell_setup(&runtime)?;
+                    let mut output = init_workflow_project(&options.root)?;
+                    output["config"] = json!({
+                        "rc": runtime.rc_path,
+                        "lfw_path": runtime.lfw_path,
+                        "rc_created": shell_setup.rc_created,
+                        "workflow_workspace_manifest": shell_setup.workspace_manifest,
+                        "workflow_workspace_created": shell_setup.workspace_created,
+                        "shell": shell_setup.shell,
+                        "shell_config": shell_setup.shell_config,
+                        "source_line": shell_setup.source_line,
+                        "source_installed": shell_setup.source_installed,
+                    });
+                    output
+                }
+                InitMode::Plugin => init_plugin_project(&options.root)?,
+            };
             print_json(&output)?;
         }
-        "add" => {
-            let workflow_id = normalize_workflow_id(required_arg(args, 0, "workflow id")?);
-            let name = optional_name(args, 1, "add")?;
+        "new" => {
+            let options = parse_add_workflow_options(args)?;
+            let workflow_id = normalize_workflow_id(&options.workflow_id);
+            let root = if options.global {
+                ensure_lfw_shell_setup(&runtime)?;
+                runtime.default_workflow_path.as_path()
+            } else {
+                Path::new(".")
+            };
             print_json(&add_workflow(
-                Path::new("."),
+                root,
                 &workflow_id,
-                name.as_deref(),
+                options.name.as_deref(),
+                options.category.as_deref(),
+                options.global,
             )?)?;
         }
-        "add-dep" => {
+        "add" => {
             let options = parse_add_dependency_options(args)?;
-            print_json(&add_dependency(Path::new("."), &options)?)?;
+            let root = if options.global {
+                ensure_lfw_shell_setup(&runtime)?;
+                runtime.default_workflow_path.as_path()
+            } else {
+                Path::new(".")
+            };
+            print_json(&add_dependency(root, &options, options.global)?)?;
         }
         "list" | "ls" => {
-            let mode = parse_list_mode(args)?;
-            print_json(&list_workflows(&service, mode)?)?;
+            let options = parse_list_options(args)?;
+            print_json(&list_workflows(&service, &options)?)?;
         }
         "workflows" => {
             let action = required_arg(args, 0, "workflow action")?;
@@ -113,13 +174,41 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let options = parse_sync_options(args)?;
             print_json(&sync_project(&service, &options)?)?;
         }
+        "update" => {
+            let options = parse_cargo_workspace_options(args, command)?;
+            let root = cargo_workspace_root(
+                &env::current_dir()?,
+                &runtime.default_workflow_path,
+                &options,
+            );
+            print_json(&update_index(&root)?)?;
+        }
+        "upgrade" => {
+            let options = parse_cargo_workspace_options(args, command)?;
+            let root = cargo_workspace_root(
+                &env::current_dir()?,
+                &runtime.default_workflow_path,
+                &options,
+            );
+            print_json(&upgrade_workspace(&root)?)?;
+        }
+        "models" => {
+            print_json(&manage_models(args)?)?;
+        }
+        "mcp" => {
+            print_json(&mcp::execute_mcp_request(&service, args)?)?;
+        }
+        "batch" => {
+            let options = parse_batch_options(args)?;
+            print_json(&execute_batch(&service, &options)?)?;
+        }
         "publish" => {
             let options = parse_publish_options(args)?;
             print_json(&publish_crate(Path::new("."), &options)?)?;
         }
         "run" => {
             let options = parse_run_options(args)?;
-            print_json(&service.execute_workflow(&options.workflow_id, options.execution)?)?;
+            print_json(&execute_run_options(&service, options)?)?;
         }
         "serve" => {
             let bind = parse_bind_addr(args, command)?;
@@ -138,6 +227,54 @@ fn print_json(value: &impl Serialize) -> CliResult<()> {
     serde_json::to_writer_pretty(&mut handle, value)?;
     println!();
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+enum RunOutput {
+    Single(WorkflowExecution),
+    Pipeline(PipelineExecution),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct PipelineExecution {
+    pipeline: bool,
+    stages: Vec<WorkflowExecution>,
+    outputs: serde_json::Map<String, serde_json::Value>,
+    artifacts: Vec<WorkflowArtifact>,
+}
+
+fn execute_run_options(service: &ApiService, options: RunOptions) -> CliResult<RunOutput> {
+    let mut previous_outputs = serde_json::Map::new();
+    let mut executions = Vec::new();
+    let mut artifacts = Vec::new();
+    let stage_count = options.stages.len();
+
+    for (index, mut stage) in options.stages.into_iter().enumerate() {
+        if index > 0 {
+            let explicit_inputs = std::mem::take(&mut stage.execution.inputs);
+            stage.execution.inputs = previous_outputs.clone();
+            stage.execution.inputs.extend(explicit_inputs);
+        }
+        let execution = service.execute_workflow(&stage.workflow_id, stage.execution)?;
+        previous_outputs = execution.outputs.clone();
+        artifacts.extend(execution.artifacts.clone());
+        executions.push(execution);
+    }
+
+    if stage_count == 1 {
+        let execution = executions
+            .pop()
+            .ok_or_else(|| CliError::Usage("missing workflow id".to_owned()))?;
+        return Ok(RunOutput::Single(execution));
+    }
+
+    Ok(RunOutput::Pipeline(PipelineExecution {
+        pipeline: true,
+        stages: executions,
+        outputs: previous_outputs,
+        artifacts,
+    }))
 }
 
 fn request_body(argument: &str) -> CliResult<String> {
@@ -206,943 +343,30 @@ fn ensure_no_extra_args(args: &[String], max_len: usize, command: &str) -> CliRe
 fn usage() -> String {
     [
         "usage:",
-        "  lfw init [path]",
-        "  lfw add <workflow_id> [--name <name>]",
-        "  lfw add-dep <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>]",
-        "  lfw list [--brief|--detail]",
-        "  lfw ls [--brief|--detail]",
+        "  lfw init [--workflow|--plugin] [path]",
+        "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
+        "  lfw new <workflow_id> --category <name> [--name <name>] [--global|-g]",
+        "  lfw list [--brief|--detail] [--category <name>]",
+        "  lfw list --categories",
+        "  lfw ls [--brief|--detail] [--category <name>]",
         "  lfw workflows list",
         "  lfw workflows get <workflow_id>",
         "  lfw workflows deps <workflow_id>",
         "  lfw workflows validate <json|-|@file>",
         "  lfw workflows save <json|-|@file>",
         "  lfw deps <workflow_id>",
-        "  lfw sync [workflow_id] [--model <requirement=variant>] [--apply]",
+        "  lfw update [--global|-g]",
+        "  lfw upgrade [--global|-g]",
+        "  lfw sync [workflow_id] [--model <requirement=variant>] [--hf-model <requirement=format:repo[:file]>] [--hf-url <requirement=url>] [--auto-model|--select-model] [--locked] [--apply]",
+        "  lfw models list|download|rm|prune",
+        "  lfw mcp [<json|-|@file>]",
+        "  lfw batch run <jobs.jsonl> [--workflow <workflow_id>] [--run-id <id>] [--max-gpu-jobs <n|auto>] [--max-cpu-jobs <n|auto>] [--batch-size <n|auto>] [--retries <n>] [--reserve-mem <size>] [--reserve-vram <size>] [--max-load <n>]",
+        "  lfw batch resume <run_id> [--max-gpu-jobs <n|auto>]",
         "  lfw publish [workflow_id|--crate <path>] [--apply]",
-        "  lfw run <workflow_id> [--input <name=json>] [--disable <node>] [--enable <node>]",
+        "  lfw run <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] ['|' <workflow_id> ...]",
         "  lfw serve [--host <host>] [--port <port>]",
     ]
     .join("\n")
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct PublishOptions {
-    target: PublishTarget,
-    apply: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum PublishTarget {
-    Root,
-    Workflow(String),
-    Crate(PathBuf),
-}
-
-fn parse_publish_options(args: &[String]) -> CliResult<PublishOptions> {
-    let mut target = None;
-    let mut apply = false;
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--apply" => {
-                apply = true;
-                index += 1;
-            }
-            "--dry-run" => {
-                apply = false;
-                index += 1;
-            }
-            "--crate" => {
-                if target.is_some() {
-                    return Err(CliError::Usage(
-                        "publish accepts only one target".to_owned(),
-                    ));
-                }
-                target = Some(PublishTarget::Crate(PathBuf::from(required_flag_value(
-                    args, index, "--crate",
-                )?)));
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for publish: {value}"
-                )));
-            }
-            value => {
-                if target.is_some() {
-                    return Err(CliError::Usage(
-                        "publish accepts only one target".to_owned(),
-                    ));
-                }
-                target = Some(PublishTarget::Workflow(normalize_workflow_id(value)));
-                index += 1;
-            }
-        }
-    }
-    Ok(PublishOptions {
-        target: target.unwrap_or(PublishTarget::Root),
-        apply,
-    })
-}
-
-fn publish_crate(root: &Path, options: &PublishOptions) -> CliResult<serde_json::Value> {
-    let manifest_path = publish_manifest_path(root, &options.target);
-    if !manifest_path.exists() {
-        return Err(CliError::Usage(format!(
-            "publish manifest does not exist: {}",
-            manifest_path.display()
-        )));
-    }
-    let source = fs::read_to_string(&manifest_path)?;
-    let document = source
-        .parse::<DocumentMut>()
-        .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
-    let package = package_field(&document, "name")?;
-    let version = package_field(&document, "version")?;
-    let issues = publish_issues(&document);
-    let mut command = vec![
-        "cargo".to_owned(),
-        "publish".to_owned(),
-        "--manifest-path".to_owned(),
-        display_path(&manifest_path),
-    ];
-    if !options.apply {
-        command.push("--dry-run".to_owned());
-    }
-
-    if options.apply {
-        if !issues.is_empty() {
-            return Err(CliError::Usage(format!(
-                "crate is not publishable: {}",
-                issues.join("; ")
-            )));
-        }
-        let mut process = Command::new("cargo");
-        for arg in &command[1..] {
-            process.arg(arg);
-        }
-        run_status(&mut process)?;
-    }
-
-    Ok(json!({
-        "dry_run": !options.apply,
-        "target": publish_target_json(&options.target),
-        "manifest": manifest_path,
-        "package": package,
-        "version": version,
-        "publishable": issues.is_empty(),
-        "issues": issues,
-        "command": command,
-        "executed": if options.apply { vec![command] } else { Vec::<Vec<String>>::new() },
-    }))
-}
-
-fn display_path(path: &Path) -> String {
-    path.strip_prefix(".").unwrap_or(path).display().to_string()
-}
-
-fn publish_manifest_path(root: &Path, target: &PublishTarget) -> PathBuf {
-    match target {
-        PublishTarget::Root => root.join("Cargo.toml"),
-        PublishTarget::Workflow(workflow_id) => workflow_manifest_path(root, workflow_id),
-        PublishTarget::Crate(path) => {
-            if path.ends_with("Cargo.toml") {
-                root.join(path)
-            } else {
-                root.join(path).join("Cargo.toml")
-            }
-        }
-    }
-}
-
-fn publish_target_json(target: &PublishTarget) -> serde_json::Value {
-    match target {
-        PublishTarget::Root => json!({ "kind": "root" }),
-        PublishTarget::Workflow(workflow_id) => {
-            json!({ "kind": "workflow", "workflow_id": workflow_id })
-        }
-        PublishTarget::Crate(path) => json!({ "kind": "crate", "path": path }),
-    }
-}
-
-fn package_field(document: &DocumentMut, field: &str) -> CliResult<String> {
-    document
-        .get("package")
-        .and_then(|package| package.get(field))
-        .and_then(Item::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| CliError::Usage(format!("Cargo manifest is missing package.{field}")))
-}
-
-fn publish_issues(document: &DocumentMut) -> Vec<String> {
-    let mut issues = Vec::new();
-    let package = document.get("package");
-    if package
-        .and_then(|package| package.get("publish"))
-        .and_then(Item::as_bool)
-        == Some(false)
-    {
-        issues.push("package.publish is false".to_owned());
-    }
-    match package
-        .and_then(|package| package.get("version"))
-        .and_then(Item::as_str)
-    {
-        Some(version) if semver::Version::parse(version).is_err() => {
-            issues.push(format!("package.version {version} is not semantic version"));
-        }
-        Some(_) => {}
-        None => issues.push("package.version is missing".to_owned()),
-    }
-    if package
-        .and_then(|package| package.get("description"))
-        .and_then(Item::as_str)
-        .is_none_or(str::is_empty)
-    {
-        issues.push("package.description is missing".to_owned());
-    }
-    let has_license = package
-        .and_then(|package| package.get("license"))
-        .and_then(Item::as_str)
-        .is_some_and(|license| !license.is_empty())
-        || package
-            .and_then(|package| package.get("license-file"))
-            .and_then(Item::as_str)
-            .is_some_and(|license_file| !license_file.is_empty());
-    if !has_license {
-        issues.push("package.license or package.license-file is missing".to_owned());
-    }
-    collect_publish_dependency_issues(document.get("dependencies"), &mut issues);
-    collect_publish_dependency_issues(
-        document
-            .get("workspace")
-            .and_then(|workspace| workspace.get("dependencies")),
-        &mut issues,
-    );
-    issues
-}
-
-fn collect_publish_dependency_issues(dependencies: Option<&Item>, issues: &mut Vec<String>) {
-    let Some(dependencies) = dependencies.and_then(Item::as_table_like) else {
-        return;
-    };
-    for (name, dependency) in dependencies.iter() {
-        if dependency.get("git").is_some() {
-            issues.push(format!(
-                "dependency {name} uses git, which cannot be published to crates.io"
-            ));
-        }
-        if dependency.get("path").is_some() && dependency.get("version").is_none() {
-            issues.push(format!(
-                "dependency {name} uses path without a crates.io version"
-            ));
-        }
-    }
-}
-
-/// Run the quick workflow executor from process arguments.
-pub async fn run_lfwx_from_env() -> CliResult<()> {
-    run_lfwx(env::args().skip(1).collect()).await
-}
-
-/// Run the quick workflow executor with explicit arguments.
-pub async fn run_lfwx(args: Vec<String>) -> CliResult<()> {
-    if args
-        .first()
-        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-    {
-        return Err(CliError::Usage(lfwx_usage()));
-    }
-    let runtime = RuntimeConfig::load()?;
-    let service =
-        ApiService::new(env::current_dir()?).with_workflow_paths(runtime.workflow_paths.clone());
-    let options = parse_run_options(&args)?;
-    print_json(&service.execute_workflow(&options.workflow_id, options.execution)?)?;
-    Ok(())
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct RuntimeConfig {
-    rc_path: PathBuf,
-    lfw_path: String,
-    workflow_paths: Vec<PathBuf>,
-    default_workflow_path: PathBuf,
-}
-
-impl RuntimeConfig {
-    fn load() -> CliResult<Self> {
-        let config_home = xdg_config_home()?;
-        let data_home = xdg_data_home()?;
-        let rc_path = config_home.join("lightflow").join(".lfwrc");
-        let default_workflow_path = data_home.join("lightflow").join("workflows");
-        let lfw_path = env::var("LFW_PATH")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| default_workflow_path.display().to_string());
-        let workflow_paths = env::split_paths(&lfw_path).collect::<Vec<_>>();
-        Ok(Self {
-            rc_path,
-            lfw_path,
-            workflow_paths,
-            default_workflow_path,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct ShellSetup {
-    rc_created: bool,
-    shell: Option<&'static str>,
-    shell_config: Option<PathBuf>,
-    source_line: Option<String>,
-    source_installed: bool,
-}
-
-fn ensure_lfw_shell_setup(runtime: &RuntimeConfig) -> CliResult<ShellSetup> {
-    fs::create_dir_all(&runtime.default_workflow_path)?;
-    let parent = runtime
-        .rc_path
-        .parent()
-        .ok_or_else(|| CliError::Usage("invalid LightFlow rc path".to_owned()))?;
-    fs::create_dir_all(parent)?;
-
-    let shell = detect_shell();
-    let rc_created = if runtime.rc_path.exists() {
-        false
-    } else {
-        fs::write(&runtime.rc_path, lfwrc_body(shell, runtime))?;
-        true
-    };
-    let Some(shell) = shell else {
-        return Ok(ShellSetup {
-            rc_created,
-            shell: None,
-            shell_config: None,
-            source_line: None,
-            source_installed: false,
-        });
-    };
-    let Some(shell_config) = shell_config_path(shell)? else {
-        return Ok(ShellSetup {
-            rc_created,
-            shell: Some(shell),
-            shell_config: None,
-            source_line: None,
-            source_installed: false,
-        });
-    };
-    let source_line = source_line(shell, &runtime.rc_path);
-    let source_installed = ensure_source_line(&shell_config, &source_line)?;
-    Ok(ShellSetup {
-        rc_created,
-        shell: Some(shell),
-        shell_config: Some(shell_config),
-        source_line: Some(source_line),
-        source_installed,
-    })
-}
-
-fn lfwrc_body(shell: Option<&str>, runtime: &RuntimeConfig) -> String {
-    let value = runtime.default_workflow_path.display().to_string();
-    if shell == Some("fish") {
-        format!(
-            "# LightFlow CLI configuration\nset -gx LFW_PATH {}\n",
-            fish_quote(&value)
-        )
-    } else {
-        format!(
-            "# LightFlow CLI configuration\nexport LFW_PATH={}\n",
-            shell_quote(&value)
-        )
-    }
-}
-
-fn detect_shell() -> Option<&'static str> {
-    let shell = env::var("SHELL").ok()?;
-    let name = Path::new(&shell).file_name()?.to_str()?;
-    match name {
-        "bash" => Some("bash"),
-        "zsh" => Some("zsh"),
-        "fish" => Some("fish"),
-        _ => None,
-    }
-}
-
-fn shell_config_path(shell: &str) -> CliResult<Option<PathBuf>> {
-    match shell {
-        "bash" => Ok(env::var_os("HOME").map(|home| PathBuf::from(home).join(".bashrc"))),
-        "zsh" => {
-            if let Some(zdotdir) = env::var_os("ZDOTDIR") {
-                Ok(Some(PathBuf::from(zdotdir).join(".zshrc")))
-            } else {
-                Ok(env::var_os("HOME").map(|home| PathBuf::from(home).join(".zshrc")))
-            }
-        }
-        "fish" => Ok(Some(xdg_config_home()?.join("fish").join("config.fish"))),
-        _ => Ok(None),
-    }
-}
-
-fn source_line(shell: &str, rc_path: &Path) -> String {
-    let rc = rc_path.display().to_string();
-    match shell {
-        "fish" => format!("source {}", fish_quote(&rc)),
-        _ => format!("source {}", shell_quote(&rc)),
-    }
-}
-
-fn ensure_source_line(path: &Path, source_line: &str) -> CliResult<bool> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let existing = match fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(CliError::Io(error)),
-    };
-    if existing.lines().any(|line| line.trim() == source_line) {
-        return Ok(false);
-    }
-    let mut next = existing;
-    if !next.is_empty() && !next.ends_with('\n') {
-        next.push('\n');
-    }
-    next.push_str("\n# LightFlow\n");
-    next.push_str(source_line);
-    next.push('\n');
-    fs::write(path, next)?;
-    Ok(true)
-}
-
-fn xdg_config_home() -> CliResult<PathBuf> {
-    env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .ok_or_else(|| CliError::Usage("HOME is required to locate XDG_CONFIG_HOME".to_owned()))
-}
-
-fn xdg_data_home() -> CliResult<PathBuf> {
-    env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .ok_or_else(|| CliError::Usage("HOME is required to locate XDG_DATA_HOME".to_owned()))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn fish_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
-}
-
-fn lfwx_usage() -> String {
-    "usage:\n  lfwx <workflow_id> [--input <name=json>] [--disable <node>] [--enable <node>]"
-        .to_owned()
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct RunOptions {
-    workflow_id: String,
-    execution: WorkflowExecutionOptions,
-}
-
-fn parse_run_options(args: &[String]) -> CliResult<RunOptions> {
-    let workflow_id = required_arg(args, 0, "workflow id")?.to_owned();
-    let mut execution = WorkflowExecutionOptions::default();
-    let mut index = 1;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--input" | "-i" => {
-                let value = required_flag_value(args, index, "--input")?;
-                let Some((name, raw_value)) = value.split_once('=') else {
-                    return Err(CliError::Usage(
-                        "--input must use <name=json-or-text>".to_owned(),
-                    ));
-                };
-                if name.is_empty() {
-                    return Err(CliError::Usage("input name cannot be empty".to_owned()));
-                }
-                execution
-                    .inputs
-                    .insert(name.to_owned(), parse_input_value(raw_value));
-                index += 2;
-            }
-            "--disable" => {
-                execution
-                    .disabled_nodes
-                    .push(required_flag_value(args, index, "--disable")?.to_owned());
-                index += 2;
-            }
-            "--enable" => {
-                execution
-                    .enabled_nodes
-                    .push(required_flag_value(args, index, "--enable")?.to_owned());
-                index += 2;
-            }
-            value => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for run: {value}"
-                )));
-            }
-        }
-    }
-    Ok(RunOptions {
-        workflow_id,
-        execution,
-    })
-}
-
-fn parse_input_value(value: &str) -> serde_json::Value {
-    serde_json::from_str(value).unwrap_or_else(|_| serde_json::Value::String(value.to_owned()))
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct AddDependencyOptions {
-    crate_name: String,
-    source: DependencySource,
-    version: Option<String>,
-    package: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum DependencySource {
-    Registry,
-    Path(String),
-    Git(String),
-}
-
-fn parse_add_dependency_options(args: &[String]) -> CliResult<AddDependencyOptions> {
-    let crate_name = required_arg(args, 0, "crate name")?.to_owned();
-    let mut source = None;
-    let mut version = None;
-    let mut package = None;
-    let mut index = 1;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--version" => {
-                if version.is_some() {
-                    return Err(CliError::Usage("duplicate flag --version".to_owned()));
-                }
-                version = Some(required_flag_value(args, index, "--version")?.to_owned());
-                index += 2;
-            }
-            "--path" => {
-                ensure_single_dependency_source(&source)?;
-                source = Some(DependencySource::Path(
-                    required_flag_value(args, index, "--path")?.to_owned(),
-                ));
-                index += 2;
-            }
-            "--git" => {
-                ensure_single_dependency_source(&source)?;
-                source = Some(DependencySource::Git(
-                    required_flag_value(args, index, "--git")?.to_owned(),
-                ));
-                index += 2;
-            }
-            "--package" => {
-                if package.is_some() {
-                    return Err(CliError::Usage("duplicate flag --package".to_owned()));
-                }
-                package = Some(required_flag_value(args, index, "--package")?.to_owned());
-                index += 2;
-            }
-            value => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for add-dep: {value}"
-                )));
-            }
-        }
-    }
-    let source = source.unwrap_or(DependencySource::Registry);
-    if source == DependencySource::Registry && version.is_none() {
-        return Err(CliError::Usage(
-            "registry add-dep requires --version <version>".to_owned(),
-        ));
-    }
-    Ok(AddDependencyOptions {
-        crate_name,
-        source,
-        version,
-        package,
-    })
-}
-
-fn ensure_single_dependency_source(source: &Option<DependencySource>) -> CliResult<()> {
-    if source.is_some() {
-        Err(CliError::Usage(
-            "add-dep accepts only one dependency source".to_owned(),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn add_dependency(root: &Path, options: &AddDependencyOptions) -> CliResult<serde_json::Value> {
-    let manifest_path = root.join("Cargo.toml");
-    if !manifest_path.exists() {
-        fs::write(&manifest_path, workspace_manifest())?;
-    }
-    let source = fs::read_to_string(&manifest_path)?;
-    let mut document = source
-        .parse::<DocumentMut>()
-        .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
-    ensure_workspace_dependencies_table(&mut document);
-    let dependency = dependency_item(options);
-    document["workspace"]["dependencies"][&options.crate_name] = dependency;
-    fs::write(&manifest_path, document.to_string())?;
-    Ok(json!({
-        "manifest": manifest_path,
-        "dependency": options.crate_name,
-        "source": match &options.source {
-            DependencySource::Registry => json!({ "registry": "crates.io" }),
-            DependencySource::Path(path) => json!({ "path": path }),
-            DependencySource::Git(git) => json!({ "git": git }),
-        },
-        "version": options.version,
-        "package": options.package,
-    }))
-}
-
-fn ensure_workspace_dependencies_table(document: &mut DocumentMut) {
-    if !document["workspace"].is_table() {
-        document["workspace"] = Item::Table(toml_edit::Table::new());
-    }
-    if !document["workspace"]["dependencies"].is_table() {
-        document["workspace"]["dependencies"] = Item::Table(toml_edit::Table::new());
-    }
-}
-
-fn dependency_item(options: &AddDependencyOptions) -> Item {
-    let mut table = InlineTable::new();
-    if let Some(version) = &options.version {
-        table.insert("version", value(version).into_value().unwrap());
-    }
-    match &options.source {
-        DependencySource::Registry => {}
-        DependencySource::Path(path) => {
-            table.insert("path", value(path).into_value().unwrap());
-        }
-        DependencySource::Git(git) => {
-            table.insert("git", value(git).into_value().unwrap());
-        }
-    }
-    if let Some(package) = &options.package {
-        table.insert("package", value(package).into_value().unwrap());
-    }
-    Item::Value(toml_edit::Value::InlineTable(table))
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct SyncOptions {
-    workflow_id: Option<String>,
-    model_selections: BTreeMap<String, String>,
-    apply: bool,
-}
-
-fn parse_sync_options(args: &[String]) -> CliResult<SyncOptions> {
-    let mut workflow_id = None;
-    let mut model_selections = BTreeMap::new();
-    let mut apply = false;
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--apply" => {
-                apply = true;
-                index += 1;
-            }
-            "--dry-run" => {
-                apply = false;
-                index += 1;
-            }
-            "--model" => {
-                let value = required_flag_value(args, index, "--model")?;
-                let Some((requirement, variant)) = value.split_once('=') else {
-                    return Err(CliError::Usage(
-                        "--model must use <requirement=variant>".to_owned(),
-                    ));
-                };
-                if requirement.is_empty() || variant.is_empty() {
-                    return Err(CliError::Usage(
-                        "--model must use <requirement=variant>".to_owned(),
-                    ));
-                }
-                model_selections.insert(requirement.to_owned(), variant.to_owned());
-                index += 2;
-            }
-            value if value.starts_with("--") => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for sync: {value}"
-                )));
-            }
-            value => {
-                if workflow_id.is_some() {
-                    return Err(CliError::Usage(format!(
-                        "unexpected argument for sync: {value}"
-                    )));
-                }
-                workflow_id = Some(value.to_owned());
-                index += 1;
-            }
-        }
-    }
-    Ok(SyncOptions {
-        workflow_id,
-        model_selections,
-        apply,
-    })
-}
-
-fn sync_project(service: &ApiService, options: &SyncOptions) -> CliResult<serde_json::Value> {
-    let workflows = if let Some(workflow_id) = &options.workflow_id {
-        let deps = service.workflow_dependencies(workflow_id)?;
-        deps.workflows
-            .into_iter()
-            .map(|workflow_id| service.get_workflow(&workflow_id))
-            .collect::<Result<Vec<_>, _>>()?
-    } else {
-        service
-            .list_workflows()?
-            .workflows
-            .into_iter()
-            .map(|summary| service.get_workflow(&summary.id))
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    let module_installs = module_install_plans(service.repo_root(), &workflows)?;
-    let model_requirements = workflows
-        .iter()
-        .flat_map(|workflow| {
-            workflow.models.iter().map(|model| {
-                json!({
-                    "workflow_id": workflow.id,
-                    "id": model.id,
-                    "capability": model.capability,
-                    "variants": model.variants.iter().map(model_variant_json).collect::<Vec<_>>()
-                })
-            })
-        })
-        .collect::<Vec<_>>();
-    let selected_models = select_model_variants(&workflows, &options.model_selections)?;
-    let hf_downloads = selected_models
-        .iter()
-        .filter(|selection| selection.variant.provider == ModelProvider::HuggingFace)
-        .map(|selection| hf_download_plan(selection))
-        .collect::<Vec<_>>();
-    let unresolved_models = workflows
-        .iter()
-        .flat_map(|workflow| {
-            workflow.models.iter().filter_map(|model| {
-                if options.model_selections.contains_key(&model.id) {
-                    return None;
-                }
-                Some(json!({
-                    "workflow_id": workflow.id,
-                    "id": model.id,
-                    "capability": model.capability,
-                    "variants": model.variants.iter().map(model_variant_json).collect::<Vec<_>>(),
-                    "reason": if model.variants.is_empty() { "no concrete variants declared" } else { "model variant not selected" }
-                }))
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let mut executed = Vec::new();
-    if options.apply {
-        for module in &module_installs {
-            add_dependency(service.repo_root(), &module.options)?;
-            executed.push(json!({
-                "command": ["lfw", "add-dep"],
-                "dependency": module.options.crate_name,
-            }));
-        }
-        run_status(Command::new("cargo").arg("fetch"))?;
-        executed.push(json!({ "command": ["cargo", "fetch"] }));
-        for download in &hf_downloads {
-            let command = download["command"].as_array().unwrap();
-            let mut process = Command::new(command[0].as_str().unwrap());
-            for arg in &command[1..] {
-                process.arg(arg.as_str().unwrap());
-            }
-            run_status(&mut process)?;
-            executed.push(download.clone());
-        }
-    }
-
-    Ok(json!({
-        "dry_run": !options.apply,
-        "workflow_scope": options.workflow_id,
-        "module_dependencies": {
-            "manager": "cargo",
-            "command": ["cargo", "fetch"],
-            "installs": module_installs.iter().map(module_install_json).collect::<Vec<_>>(),
-            "note": "Cargo resolves Rust workflow module dependencies."
-        },
-        "model_requirements": model_requirements,
-        "unresolved_models": unresolved_models,
-        "hf_downloads": hf_downloads,
-        "executed": executed
-    }))
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct ModuleInstallPlan {
-    workflow_id: String,
-    required_by: String,
-    options: AddDependencyOptions,
-}
-
-fn module_install_plans(
-    root: &Path,
-    workflows: &[WorkflowSpec],
-) -> CliResult<Vec<ModuleInstallPlan>> {
-    let installed = installed_dependency_names(root)?;
-    let mut plans = BTreeMap::<String, ModuleInstallPlan>::new();
-    for workflow in workflows {
-        for dependency in &workflow.dependencies {
-            let Some(install) = &dependency.install else {
-                continue;
-            };
-            if installed.contains_key(&install.crate_name)
-                || plans.contains_key(&install.crate_name)
-            {
-                continue;
-            }
-            plans.insert(
-                install.crate_name.clone(),
-                ModuleInstallPlan {
-                    workflow_id: dependency.workflow_id.clone(),
-                    required_by: workflow.id.clone(),
-                    options: install_to_add_dependency(install),
-                },
-            );
-        }
-    }
-    Ok(plans.into_values().collect())
-}
-
-fn installed_dependency_names(root: &Path) -> CliResult<BTreeMap<String, ()>> {
-    let manifest_path = root.join("Cargo.toml");
-    if !manifest_path.exists() {
-        return Ok(BTreeMap::new());
-    }
-    let source = fs::read_to_string(&manifest_path)?;
-    let document = source
-        .parse::<DocumentMut>()
-        .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
-    let mut installed = BTreeMap::new();
-    collect_dependency_names(document.get("dependencies"), &mut installed);
-    collect_dependency_names(
-        document
-            .get("workspace")
-            .and_then(|workspace| workspace.get("dependencies")),
-        &mut installed,
-    );
-    Ok(installed)
-}
-
-fn collect_dependency_names(dependencies: Option<&Item>, installed: &mut BTreeMap<String, ()>) {
-    let Some(dependencies) = dependencies.and_then(Item::as_table_like) else {
-        return;
-    };
-    for (name, _dependency) in dependencies.iter() {
-        installed.insert(name.to_owned(), ());
-    }
-}
-
-fn install_to_add_dependency(install: &CargoDependency) -> AddDependencyOptions {
-    AddDependencyOptions {
-        crate_name: install.crate_name.clone(),
-        source: match &install.source {
-            Some(CargoDependencySource::Path(path)) => DependencySource::Path(path.clone()),
-            Some(CargoDependencySource::Git(git)) => DependencySource::Git(git.clone()),
-            None => DependencySource::Registry,
-        },
-        version: install.version.clone(),
-        package: install.package.clone(),
-    }
-}
-
-fn module_install_json(module: &ModuleInstallPlan) -> serde_json::Value {
-    json!({
-        "workflow_id": module.workflow_id,
-        "required_by": module.required_by,
-        "dependency": module.options.crate_name,
-        "version": module.options.version,
-        "source": match &module.options.source {
-            DependencySource::Registry => json!({ "registry": "crates.io" }),
-            DependencySource::Path(path) => json!({ "path": path }),
-            DependencySource::Git(git) => json!({ "git": git }),
-        },
-        "package": module.options.package,
-    })
-}
-
-struct SelectedModel<'a> {
-    requirement_id: &'a str,
-    variant: &'a ModelVariant,
-}
-
-fn select_model_variants<'a>(
-    workflows: &'a [WorkflowSpec],
-    selections: &BTreeMap<String, String>,
-) -> CliResult<Vec<SelectedModel<'a>>> {
-    let mut selected = Vec::new();
-    for (requirement_id, variant_id) in selections {
-        let Some(model) = workflows
-            .iter()
-            .flat_map(|workflow| workflow.models.iter())
-            .find(|model| model.id == *requirement_id)
-        else {
-            return Err(CliError::Usage(format!(
-                "unknown model requirement: {requirement_id}"
-            )));
-        };
-        let Some(variant) = model
-            .variants
-            .iter()
-            .find(|variant| variant.id == *variant_id)
-        else {
-            return Err(CliError::Usage(format!(
-                "unknown variant {variant_id} for model requirement {requirement_id}"
-            )));
-        };
-        selected.push(SelectedModel {
-            requirement_id: &model.id,
-            variant,
-        });
-    }
-    Ok(selected)
-}
-
-fn model_variant_json(variant: &ModelVariant) -> serde_json::Value {
-    json!({
-        "id": variant.id,
-        "provider": variant.provider.as_str(),
-        "format": variant.format,
-        "repo": variant.repo,
-        "file": variant.file,
-    })
-}
-
-fn hf_download_plan(selection: &SelectedModel<'_>) -> serde_json::Value {
-    let mut command = vec![
-        "hf".to_owned(),
-        "download".to_owned(),
-        selection.variant.repo.clone(),
-    ];
-    if let Some(file) = &selection.variant.file {
-        command.push(file.clone());
-    }
-    json!({
-        "requirement_id": selection.requirement_id,
-        "variant_id": selection.variant.id,
-        "provider": selection.variant.provider.as_str(),
-        "format": selection.variant.format,
-        "repo": selection.variant.repo,
-        "file": selection.variant.file,
-        "command": command,
-    })
 }
 
 fn run_status(command: &mut Command) -> CliResult<()> {
@@ -1153,43 +377,6 @@ fn run_status(command: &mut Command) -> CliResult<()> {
         Err(CliError::Usage(format!(
             "command failed with status {status}"
         )))
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum ListMode {
-    Brief,
-    Detail,
-}
-
-fn parse_list_mode(args: &[String]) -> CliResult<ListMode> {
-    let mut mode = ListMode::Brief;
-    for arg in args {
-        match arg.as_str() {
-            "--brief" | "--short" => mode = ListMode::Brief,
-            "--detail" | "--detailed" | "-l" => mode = ListMode::Detail,
-            _ => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for list: {arg}"
-                )));
-            }
-        }
-    }
-    Ok(mode)
-}
-
-fn list_workflows(service: &ApiService, mode: ListMode) -> CliResult<serde_json::Value> {
-    match mode {
-        ListMode::Brief => Ok(serde_json::to_value(service.list_workflows()?)?),
-        ListMode::Detail => {
-            let workflows = service
-                .list_workflows()?
-                .workflows
-                .into_iter()
-                .map(|summary| service.get_workflow(&summary.id))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(json!({ "workflows": workflows }))
-        }
     }
 }
 
@@ -1245,230 +432,6 @@ impl From<serde_json::Error> for CliError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
     }
-}
-
-fn optional_name(args: &[String], start: usize, command: &str) -> CliResult<Option<String>> {
-    let mut name = None;
-    let mut index = start;
-    while index < args.len() {
-        let flag = args[index].as_str();
-        match flag {
-            "--name" => {
-                if name.is_some() {
-                    return Err(CliError::Usage("duplicate flag --name".to_owned()));
-                }
-                name = Some(required_flag_value(args, index, flag)?.to_owned());
-            }
-            _ => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for {command}: {flag}"
-                )));
-            }
-        }
-        index += 2;
-    }
-    Ok(name)
-}
-
-fn init_project(root: &Path) -> CliResult<serde_json::Value> {
-    let lightflow = root.join("lightflow");
-    let workflows = lightflow.join("workflows");
-    let create_example = !root.join("Cargo.toml").exists();
-    fs::create_dir_all(&workflows)?;
-
-    let mut created = Vec::new();
-    write_init_text(
-        &root.join("Cargo.toml"),
-        &workspace_manifest(),
-        &mut created,
-    )?;
-    write_init_text(
-        &lightflow.join("README.md"),
-        "# LightFlow Project\n\nThis repository is a Cargo workspace for source-controlled Rust workflow crates.\n",
-        &mut created,
-    )?;
-    write_init_text(
-        &workflows.join("README.md"),
-        "# Workflows\n\nEach directory is one workflow crate. The workflow definition lives in `src/lib.rs`.\n",
-        &mut created,
-    )?;
-    if create_example {
-        write_init_text(
-            &workflow_manifest_path(root, "lightflow.example"),
-            &workflow_manifest("lightflow.example"),
-            &mut created,
-        )?;
-        write_init_text(
-            &workflow_source_path(root, "lightflow.example"),
-            &example_workflow_source("lightflow.example", "Example Workflow"),
-            &mut created,
-        )?;
-    }
-
-    Ok(json!({
-        "project_root": root,
-        "created": created
-    }))
-}
-
-fn add_workflow(
-    root: &Path,
-    workflow_id: &str,
-    name: Option<&str>,
-) -> CliResult<serde_json::Value> {
-    validate_spec_id(workflow_id, "workflow id")?;
-    let mut created = Vec::new();
-    ensure_workspace_manifest(root, &mut created)?;
-    let manifest_path = workflow_manifest_path(root, workflow_id);
-    let source_path = workflow_source_path(root, workflow_id);
-    let workflow_source =
-        example_workflow_source(workflow_id, name.unwrap_or(&title_from_id(workflow_id)));
-    write_new_text(
-        &manifest_path,
-        &workflow_manifest(workflow_id),
-        &mut created,
-    )?;
-    write_new_text(&source_path, &workflow_source, &mut created)?;
-    Ok(json!({
-        "workflow_id": workflow_id,
-        "crate_dir": workflow_crate_dir(root, workflow_id),
-        "path": source_path,
-        "created": created
-    }))
-}
-
-fn ensure_workspace_manifest(root: &Path, created: &mut Vec<String>) -> CliResult<()> {
-    let manifest_path = root.join("Cargo.toml");
-    if manifest_path.exists() {
-        return Ok(());
-    }
-    write_new_text(&manifest_path, &workspace_manifest(), created)
-}
-
-fn workspace_manifest() -> String {
-    format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\"lightflow/workflows/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
-        env!("CARGO_PKG_VERSION")
-    )
-}
-
-fn workflow_manifest(workflow_id: &str) -> String {
-    format!(
-        "[package]\nname = {:?}\nversion = \"0.1.0\"\nedition = \"2024\"\ndescription = {:?}\nlicense = \"MIT OR Apache-2.0\"\nrepository = {:?}\n\n[dependencies]\nlightflow = {{ workspace = true }}\n",
-        package_name_from_id(workflow_id),
-        format!("LightFlow workflow {}", workflow_id),
-        env!("CARGO_PKG_REPOSITORY")
-    )
-}
-
-fn workflow_crate_dir(root: &Path, workflow_id: &str) -> PathBuf {
-    root.join("lightflow").join("workflows").join(workflow_id)
-}
-
-fn workflow_manifest_path(root: &Path, workflow_id: &str) -> PathBuf {
-    workflow_crate_dir(root, workflow_id).join("Cargo.toml")
-}
-
-fn workflow_source_path(root: &Path, workflow_id: &str) -> PathBuf {
-    workflow_crate_dir(root, workflow_id)
-        .join("src")
-        .join("lib.rs")
-}
-
-fn example_workflow_source(workflow_id: &str, name: &str) -> String {
-    format!(
-        "use lightflow::workflow::*;\n\npub fn define() -> WorkflowSpec {{\n    workflow({})\n        .version(\"0.1.0\")\n        .name({})\n        .description(\"TODO: describe this workflow.\")\n        .input(\"value\", \"json\")\n        .output(\"value\", \"json\")\n        .build()\n}}\n",
-        rust_string(workflow_id),
-        rust_string(name)
-    )
-}
-
-fn validate_spec_id(value: &str, label: &str) -> CliResult<()> {
-    if value.is_empty()
-        || value == "."
-        || value == ".."
-        || value.contains('/')
-        || value.contains('\\')
-    {
-        return Err(CliError::Usage(format!("invalid {label}: {value}")));
-    }
-    Ok(())
-}
-
-fn normalize_workflow_id(value: &str) -> String {
-    let value = value.strip_suffix(".rs").unwrap_or(value);
-    if value.starts_with("lightflow.") {
-        value.to_owned()
-    } else {
-        format!("lightflow.{value}")
-    }
-}
-
-fn write_new_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResult<()> {
-    if path.exists() {
-        return Err(CliError::Usage(format!(
-            "{} already exists; refusing to overwrite",
-            path.display()
-        )));
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, body)?;
-    created.push(path.to_string_lossy().into_owned());
-    Ok(())
-}
-
-fn write_init_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResult<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, body)?;
-    created.push(path.to_string_lossy().into_owned());
-    Ok(())
-}
-
-fn rust_string(value: &str) -> String {
-    format!("{value:?}")
-}
-
-fn package_name_from_id(id: &str) -> String {
-    let mut name = String::new();
-    let mut previous_dash = false;
-    for character in id.chars() {
-        if character.is_ascii_alphanumeric() {
-            name.push(character.to_ascii_lowercase());
-            previous_dash = false;
-        } else if !previous_dash {
-            name.push('-');
-            previous_dash = true;
-        }
-    }
-    let name = name.trim_matches('-');
-    if name.is_empty() {
-        "workflow".to_owned()
-    } else {
-        name.to_owned()
-    }
-}
-
-fn title_from_id(id: &str) -> String {
-    let suffix = id.rsplit('.').next().unwrap_or(id);
-    suffix
-        .split(['_', '-'])
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 #[cfg(test)]

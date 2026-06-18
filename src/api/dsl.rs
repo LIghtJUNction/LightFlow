@@ -1,0 +1,408 @@
+use super::{ApiError, ApiResult};
+use crate::workflow::{
+    CargoDependency, CargoDependencySource, ModelProvider, ModelRequirement, ModelVariant,
+    PortSpec, RuntimeRequirement, WorkflowCondition, WorkflowDependencyRequirement, WorkflowEdge,
+    WorkflowEndpoint, WorkflowNode, WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
+};
+use std::fs;
+use std::path::Path;
+
+pub(super) fn read_optional_workflow_source(path: &Path) -> ApiResult<Option<WorkflowSpec>> {
+    let source = fs::read_to_string(path).map_err(ApiError::from)?;
+    let file = syn::parse_file(&source).map_err(|error| {
+        ApiError::InvalidRequest(format!(
+            "invalid Rust workflow source in {:?}: {error}",
+            path
+        ))
+    })?;
+    let Some(define) = file.items.iter().find_map(|item| match item {
+        syn::Item::Fn(function) if function.sig.ident == "define" => Some(function),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    let expression = define_expression(define).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
+            "workflow source {:?} must return a workflow(...) builder expression",
+            path
+        ))
+    })?;
+    parse_workflow_builder(expression, path).map(Some)
+}
+
+pub(super) fn read_workflow_source(path: &Path) -> ApiResult<WorkflowSpec> {
+    let source = fs::read_to_string(path).map_err(ApiError::from)?;
+    let file = syn::parse_file(&source).map_err(|error| {
+        ApiError::InvalidRequest(format!(
+            "invalid Rust workflow source in {:?}: {error}",
+            path
+        ))
+    })?;
+    let define = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Fn(function) if function.sig.ident == "define" => Some(function),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            ApiError::InvalidRequest(format!(
+                "workflow source {:?} must define pub fn define() -> WorkflowSpec",
+                path
+            ))
+        })?;
+    let expression = define_expression(define).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
+            "workflow source {:?} must return a workflow(...) builder expression",
+            path
+        ))
+    })?;
+    parse_workflow_builder(expression, path)
+}
+
+fn define_expression(function: &syn::ItemFn) -> Option<&syn::Expr> {
+    function
+        .block
+        .stmts
+        .iter()
+        .rev()
+        .find_map(|statement| match statement {
+            syn::Stmt::Expr(syn::Expr::Return(return_expr), _) => return_expr.expr.as_deref(),
+            syn::Stmt::Expr(expression, _) => Some(expression),
+            _ => None,
+        })
+}
+
+fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<WorkflowSpec> {
+    match expression {
+        syn::Expr::MethodCall(call) => {
+            let mut workflow = parse_workflow_builder(&call.receiver, path)?;
+            let method = call.method.to_string();
+            match method.as_str() {
+                "build" => expect_arg_len(&call.args, 0, &method, path)?,
+                "version" => {
+                    workflow.version = string_arg(&call.args, 0, &method, path)?;
+                    expect_arg_len(&call.args, 1, &method, path)?;
+                }
+                "name" => {
+                    workflow.name = string_arg(&call.args, 0, &method, path)?;
+                    expect_arg_len(&call.args, 1, &method, path)?;
+                }
+                "description" => {
+                    workflow.description = Some(string_arg(&call.args, 0, &method, path)?);
+                    expect_arg_len(&call.args, 1, &method, path)?;
+                }
+                "input" => {
+                    workflow.inputs.push(PortSpec {
+                        name: string_arg(&call.args, 0, &method, path)?,
+                        ty: string_arg(&call.args, 1, &method, path)?,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "output" => {
+                    workflow.outputs.push(PortSpec {
+                        name: string_arg(&call.args, 0, &method, path)?,
+                        ty: string_arg(&call.args, 1, &method, path)?,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "depends_on" => {
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id: string_arg(&call.args, 0, &method, path)?,
+                        version: Some(string_arg(&call.args, 1, &method, path)?),
+                        install: None,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "depends_on_crate" => {
+                    let workflow_id = string_arg(&call.args, 0, &method, path)?;
+                    let version = string_arg(&call.args, 1, &method, path)?;
+                    let crate_name = string_arg(&call.args, 2, &method, path)?;
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id,
+                        version: Some(version.clone()),
+                        install: Some(CargoDependency {
+                            crate_name,
+                            version: Some(version),
+                            source: None,
+                            package: None,
+                        }),
+                    });
+                    expect_arg_len(&call.args, 3, &method, path)?;
+                }
+                "depends_on_path" => {
+                    let workflow_id = string_arg(&call.args, 0, &method, path)?;
+                    let version = string_arg(&call.args, 1, &method, path)?;
+                    let crate_name = string_arg(&call.args, 2, &method, path)?;
+                    let dependency_path = string_arg(&call.args, 3, &method, path)?;
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id,
+                        version: Some(version.clone()),
+                        install: Some(CargoDependency {
+                            crate_name,
+                            version: Some(version),
+                            source: Some(CargoDependencySource::Path(dependency_path)),
+                            package: None,
+                        }),
+                    });
+                    expect_arg_len(&call.args, 4, &method, path)?;
+                }
+                "depends_on_git" => {
+                    let workflow_id = string_arg(&call.args, 0, &method, path)?;
+                    let version = string_arg(&call.args, 1, &method, path)?;
+                    let crate_name = string_arg(&call.args, 2, &method, path)?;
+                    let git = string_arg(&call.args, 3, &method, path)?;
+                    let package = string_arg(&call.args, 4, &method, path)?;
+                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                        workflow_id,
+                        version: Some(version.clone()),
+                        install: Some(CargoDependency {
+                            crate_name,
+                            version: Some(version),
+                            source: Some(CargoDependencySource::Git(git)),
+                            package: Some(package).filter(|package| !package.is_empty()),
+                        }),
+                    });
+                    expect_arg_len(&call.args, 5, &method, path)?;
+                }
+                "model" => {
+                    workflow.models.push(ModelRequirement {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        capability: string_arg(&call.args, 1, &method, path)?,
+                        variants: Vec::new(),
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "hf_model" => {
+                    push_hf_model_variant(
+                        &mut workflow,
+                        string_arg(&call.args, 0, &method, path)?,
+                        string_arg(&call.args, 1, &method, path)?,
+                        string_arg(&call.args, 2, &method, path)?,
+                        string_arg(&call.args, 3, &method, path)?,
+                        string_arg(&call.args, 4, &method, path)?,
+                        string_arg(&call.args, 5, &method, path)?,
+                    );
+                    expect_arg_len(&call.args, 6, &method, path)?;
+                }
+                "runtime" => {
+                    workflow.runtimes.push(RuntimeRequirement {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        capability: string_arg(&call.args, 1, &method, path)?,
+                        engine: None,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "builtin_runtime" => {
+                    workflow.runtimes.push(RuntimeRequirement {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        capability: string_arg(&call.args, 1, &method, path)?,
+                        engine: Some(string_arg(&call.args, 2, &method, path)?),
+                    });
+                    expect_arg_len(&call.args, 3, &method, path)?;
+                }
+                "node" => {
+                    workflow.nodes.push(WorkflowNode {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        kind: WorkflowNodeKind::Workflow,
+                        workflow_id: string_arg(&call.args, 1, &method, path)?,
+                        condition: None,
+                        then_workflow_id: None,
+                        else_workflow_id: None,
+                        title: None,
+                        disabled: false,
+                        position: WorkflowPosition::default(),
+                        config: serde_json::Value::Null,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "disabled_node" => {
+                    workflow.nodes.push(WorkflowNode {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        kind: WorkflowNodeKind::Workflow,
+                        workflow_id: string_arg(&call.args, 1, &method, path)?,
+                        condition: None,
+                        then_workflow_id: None,
+                        else_workflow_id: None,
+                        title: None,
+                        disabled: true,
+                        position: WorkflowPosition::default(),
+                        config: serde_json::Value::Null,
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "if_node" => {
+                    workflow.nodes.push(WorkflowNode {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        kind: WorkflowNodeKind::If,
+                        workflow_id: String::new(),
+                        condition: Some(WorkflowCondition::InputEquals {
+                            input: string_arg(&call.args, 1, &method, path)?,
+                            value: serde_json::Value::Bool(bool_arg(&call.args, 2, &method, path)?),
+                        }),
+                        then_workflow_id: Some(string_arg(&call.args, 3, &method, path)?),
+                        else_workflow_id: Some(string_arg(&call.args, 4, &method, path)?),
+                        title: None,
+                        disabled: false,
+                        position: WorkflowPosition::default(),
+                        config: serde_json::Value::Null,
+                    });
+                    expect_arg_len(&call.args, 5, &method, path)?;
+                }
+                "edge" => {
+                    workflow.edges.push(WorkflowEdge {
+                        from: WorkflowEndpoint {
+                            node: string_arg(&call.args, 0, &method, path)?,
+                            port: string_arg(&call.args, 1, &method, path)?,
+                        },
+                        to: WorkflowEndpoint {
+                            node: string_arg(&call.args, 2, &method, path)?,
+                            port: string_arg(&call.args, 3, &method, path)?,
+                        },
+                    });
+                    expect_arg_len(&call.args, 4, &method, path)?;
+                }
+                _ => {
+                    return Err(ApiError::InvalidRequest(format!(
+                        "unsupported workflow builder method .{method}(...) in {:?}",
+                        path
+                    )));
+                }
+            }
+            Ok(workflow)
+        }
+        syn::Expr::Call(call) if is_workflow_constructor(call) => {
+            expect_arg_len(&call.args, 1, "workflow", path)?;
+            Ok(WorkflowSpec {
+                id: string_arg(&call.args, 0, "workflow", path)?,
+                version: "0.1.0".to_owned(),
+                name: String::new(),
+                category: None,
+                description: None,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                config_schema: serde_json::Value::Null,
+                dependencies: Vec::new(),
+                models: Vec::new(),
+                runtimes: Vec::new(),
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            })
+        }
+        _ => Err(ApiError::InvalidRequest(format!(
+            "unsupported workflow definition expression in {:?}",
+            path
+        ))),
+    }
+}
+
+fn push_hf_model_variant(
+    workflow: &mut WorkflowSpec,
+    requirement_id: String,
+    variant_id: String,
+    capability: String,
+    format: String,
+    repo: String,
+    file: String,
+) {
+    let variant = ModelVariant {
+        id: variant_id,
+        provider: ModelProvider::HuggingFace,
+        format,
+        repo,
+        file: Some(file).filter(|file| !file.is_empty()),
+    };
+    if let Some(requirement) = workflow
+        .models
+        .iter_mut()
+        .find(|requirement| requirement.id == requirement_id)
+    {
+        requirement.variants.push(variant);
+    } else {
+        workflow.models.push(ModelRequirement {
+            id: requirement_id,
+            capability,
+            variants: vec![variant],
+        });
+    }
+}
+
+fn is_workflow_constructor(call: &syn::ExprCall) -> bool {
+    match call.func.as_ref() {
+        syn::Expr::Path(path) => path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "workflow"),
+        _ => false,
+    }
+}
+
+fn string_arg(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    index: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<String> {
+    let Some(argument) = args.iter().nth(index) else {
+        return Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) in {:?} is missing argument {}",
+            path,
+            index + 1
+        )));
+    };
+    match argument {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(value),
+            ..
+        }) => Ok(value.value()),
+        _ => Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) argument {} in {:?} must be a string literal",
+            index + 1,
+            path
+        ))),
+    }
+}
+
+fn bool_arg(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    index: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<bool> {
+    let Some(argument) = args.iter().nth(index) else {
+        return Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) in {:?} is missing argument {}",
+            path,
+            index + 1
+        )));
+    };
+    match argument {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Bool(value),
+            ..
+        }) => Ok(value.value),
+        _ => Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) argument {} in {:?} must be a boolean literal",
+            index + 1,
+            path
+        ))),
+    }
+}
+
+fn expect_arg_len(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    expected: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<()> {
+    if args.len() == expected {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) in {:?} expects {expected} arguments, got {}",
+            path,
+            args.len()
+        )))
+    }
+}

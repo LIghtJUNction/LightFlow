@@ -1,0 +1,160 @@
+use super::{ApiError, ApiResult};
+use crate::workflow::{
+    CargoDependencySource, ModelProvider, WorkflowCondition, WorkflowNodeKind, WorkflowSpec,
+};
+use std::fs;
+use std::path::Path;
+
+pub(super) fn write_text_atomic(path: &Path, body: &str) -> ApiResult<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| ApiError::InvalidRequest("workflow path has no parent".to_owned()))?;
+    fs::create_dir_all(parent).map_err(ApiError::from)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| ApiError::InvalidRequest("workflow path has no file name".to_owned()))?;
+    let temp_path = parent.join(format!("{file_name}.tmp"));
+    fs::write(&temp_path, body).map_err(ApiError::from)?;
+    fs::rename(temp_path, path).map_err(ApiError::from)
+}
+
+pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
+    let mut source = String::from("use lightflow::preload::*;\n\n");
+    source.push_str("pub fn define() -> WorkflowSpec {\n");
+    source.push_str(&format!("    workflow({})\n", rust_string(&workflow.id)));
+    source.push_str(&format!(
+        "        .version({})\n",
+        rust_string(&workflow.version)
+    ));
+    source.push_str(&format!("        .name({})\n", rust_string(&workflow.name)));
+    if let Some(description) = &workflow.description {
+        source.push_str(&format!(
+            "        .description({})\n",
+            rust_string(description)
+        ));
+    }
+    for input in &workflow.inputs {
+        source.push_str(&format!(
+            "        .input({}, {})\n",
+            rust_string(&input.name),
+            rust_string(&input.ty)
+        ));
+    }
+    for output in &workflow.outputs {
+        source.push_str(&format!(
+            "        .output({}, {})\n",
+            rust_string(&output.name),
+            rust_string(&output.ty)
+        ));
+    }
+    for dependency in &workflow.dependencies {
+        if let Some(install) = &dependency.install {
+            match &install.source {
+                Some(CargoDependencySource::Path(path)) => {
+                    source.push_str(&format!(
+                        "        .depends_on_path({}, {}, {}, {})\n",
+                        rust_string(&dependency.workflow_id),
+                        rust_string(dependency.version.as_deref().unwrap_or("*")),
+                        rust_string(&install.crate_name),
+                        rust_string(path)
+                    ));
+                }
+                Some(CargoDependencySource::Git(git)) => {
+                    source.push_str(&format!(
+                        "        .depends_on_git({}, {}, {}, {}, {})\n",
+                        rust_string(&dependency.workflow_id),
+                        rust_string(dependency.version.as_deref().unwrap_or("*")),
+                        rust_string(&install.crate_name),
+                        rust_string(git),
+                        rust_string(install.package.as_deref().unwrap_or(""))
+                    ));
+                }
+                None => {
+                    source.push_str(&format!(
+                        "        .depends_on_crate({}, {}, {})\n",
+                        rust_string(&dependency.workflow_id),
+                        rust_string(dependency.version.as_deref().unwrap_or("*")),
+                        rust_string(&install.crate_name)
+                    ));
+                }
+            }
+        } else {
+            source.push_str(&format!(
+                "        .depends_on({}, {})\n",
+                rust_string(&dependency.workflow_id),
+                rust_string(dependency.version.as_deref().unwrap_or("*"))
+            ));
+        }
+    }
+    for model in &workflow.models {
+        if model.variants.is_empty() {
+            source.push_str(&format!(
+                "        .model({}, {})\n",
+                rust_string(&model.id),
+                rust_string(&model.capability)
+            ));
+        } else {
+            for variant in &model.variants {
+                if variant.provider != ModelProvider::HuggingFace {
+                    continue;
+                }
+                source.push_str(&format!(
+                    "        .hf_model({}, {}, {}, {}, {}, {})\n",
+                    rust_string(&model.id),
+                    rust_string(&variant.id),
+                    rust_string(&model.capability),
+                    rust_string(&variant.format),
+                    rust_string(&variant.repo),
+                    rust_string(variant.file.as_deref().unwrap_or(""))
+                ));
+            }
+        }
+    }
+    for node in &workflow.nodes {
+        match node.kind {
+            WorkflowNodeKind::Workflow => {
+                let method = if node.disabled {
+                    "disabled_node"
+                } else {
+                    "node"
+                };
+                source.push_str(&format!(
+                    "        .{method}({}, {})\n",
+                    rust_string(&node.id),
+                    rust_string(&node.workflow_id)
+                ));
+            }
+            WorkflowNodeKind::If => {
+                if let Some(WorkflowCondition::InputEquals { input, value }) = &node.condition {
+                    if let Some(expected) = value.as_bool() {
+                        source.push_str(&format!(
+                            "        .if_node({}, {}, {}, {}, {})\n",
+                            rust_string(&node.id),
+                            rust_string(input),
+                            expected,
+                            rust_string(node.then_workflow_id.as_deref().unwrap_or("")),
+                            rust_string(node.else_workflow_id.as_deref().unwrap_or(""))
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    for edge in &workflow.edges {
+        source.push_str(&format!(
+            "        .edge({}, {}, {}, {})\n",
+            rust_string(&edge.from.node),
+            rust_string(&edge.from.port),
+            rust_string(&edge.to.node),
+            rust_string(&edge.to.port)
+        ));
+    }
+    source.push_str("        .build()\n");
+    source.push_str("}\n");
+    source
+}
+
+fn rust_string(value: &str) -> String {
+    format!("{value:?}")
+}

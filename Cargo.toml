@@ -1,6 +1,6 @@
 [package]
 name = "lightflow"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 description = "Lightweight AI pipelines built by agents and directed by humans."
 license = "MIT OR Apache-2.0"
@@ -10,13 +10,36 @@ categories = ["web-programming", "development-tools"]
 
 [dependencies]
 axum = "0.8.9"
+candle-core = { version = "0.10.2", optional = true, default-features = false }
+candle-transformers = { version = "0.10.2", optional = true, default-features = false }
+diffusion-rs = { version = "0.1.20", optional = true, default-features = false }
 petgraph = "0.8.3"
+png = "0.18.1"
+rig-core = { version = "0.38.2", optional = true }
 semver = "1.0.27"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sha2 = "0.10.9"
 syn = { version = "2.0.111", features = ["full"] }
 tokio = { version = "1.52.3", features = ["full"] }
 toml_edit = "0.22.27"
 
+[features]
+default = ["flux", "gguf"]
+flux = []
+flux-native = ["flux", "dep:diffusion-rs"]
+flux-native-cuda = ["flux-native", "diffusion-rs/cuda"]
+flux-native-vulkan = ["flux-native", "diffusion-rs/vulkan"]
+gguf = ["dep:candle-core", "dep:candle-transformers"]
+gguf-cuda = ["gguf", "candle-core/cuda", "candle-transformers/cuda"]
+gguf-metal = ["gguf", "candle-core/metal", "candle-transformers/metal"]
+gguf-mkl = ["gguf", "candle-core/mkl", "candle-transformers/mkl"]
+flux-cuda = ["flux", "gguf-cuda"]
+flux-metal = ["flux", "gguf-metal"]
+rig = ["dep:rig-core"]
+
 [dev-dependencies]
 tower = "0.5.3"
+
+[patch.crates-io]
+diffusion-rs-sys = { path = "vendor/diffusion-rs-sys" }

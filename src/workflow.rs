@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+mod builder;
+pub use builder::WorkflowBuilder;
 fn default_version() -> String {
     "0.1.0".to_owned()
 }
@@ -16,6 +18,8 @@ pub struct WorkflowSpec {
     pub version: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default)]
     pub inputs: Vec<PortSpec>,
@@ -28,13 +32,15 @@ pub struct WorkflowSpec {
     #[serde(default)]
     pub models: Vec<ModelRequirement>,
     #[serde(default)]
+    pub runtimes: Vec<RuntimeRequirement>,
+    #[serde(default)]
     pub nodes: Vec<WorkflowNode>,
     #[serde(default)]
     pub edges: Vec<WorkflowEdge>,
 }
 
 /// A named typed input or output.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PortSpec {
     pub name: String,
     #[serde(rename = "type")]
@@ -111,11 +117,29 @@ impl ModelProvider {
     }
 }
 
+/// Runtime capability needed to execute a leaf workflow.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeRequirement {
+    pub id: String,
+    pub capability: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+}
+
 /// One node in a composite workflow graph.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "is_workflow_node_kind")]
+    pub kind: WorkflowNodeKind,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub workflow_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<WorkflowCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub then_workflow_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub else_workflow_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -124,6 +148,29 @@ pub struct WorkflowNode {
     pub position: WorkflowPosition,
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub config: serde_json::Value,
+}
+
+/// Kind of workflow graph node.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowNodeKind {
+    #[default]
+    Workflow,
+    If,
+}
+
+const fn is_workflow_node_kind(value: &WorkflowNodeKind) -> bool {
+    matches!(value, WorkflowNodeKind::Workflow)
+}
+
+/// Runtime condition used by a control-flow node.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "op")]
+pub enum WorkflowCondition {
+    InputEquals {
+        input: String,
+        value: serde_json::Value,
+    },
 }
 
 const fn is_false(value: &bool) -> bool {
@@ -163,10 +210,13 @@ pub struct WorkflowSummary {
     pub id: String,
     pub version: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     pub inputs: usize,
     pub outputs: usize,
     pub dependencies: usize,
     pub models: usize,
+    pub runtimes: usize,
     pub nodes: usize,
     pub edges: usize,
 }
@@ -177,10 +227,12 @@ impl From<WorkflowSpec> for WorkflowSummary {
             id: workflow.id,
             version: workflow.version,
             name: workflow.name,
+            category: workflow.category,
             inputs: workflow.inputs.len(),
             outputs: workflow.outputs.len(),
             dependencies: workflow.dependencies.len(),
             models: workflow.models.len(),
+            runtimes: workflow.runtimes.len(),
             nodes: workflow.nodes.len(),
             edges: workflow.edges.len(),
         }
@@ -226,7 +278,20 @@ pub struct WorkflowExecution {
     pub version: String,
     pub inputs: serde_json::Map<String, serde_json::Value>,
     pub outputs: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub artifacts: Vec<WorkflowArtifact>,
     pub nodes: Vec<NodeExecution>,
+}
+
+/// Materialized file produced by a workflow run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowArtifact {
+    pub id: String,
+    pub kind: String,
+    pub path: String,
+    pub mime_type: String,
+    #[serde(default)]
+    pub metadata: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Runtime result for one node.
@@ -234,11 +299,15 @@ pub struct WorkflowExecution {
 pub struct NodeExecution {
     pub node_id: String,
     pub workflow_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_workflow_id: Option<String>,
     pub status: NodeExecutionStatus,
     #[serde(default)]
     pub inputs: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub outputs: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub artifacts: Vec<WorkflowArtifact>,
 }
 
 /// Runtime state of one node.
@@ -273,244 +342,16 @@ pub fn workflow(id: impl Into<String>) -> WorkflowBuilder {
             id: id.into(),
             version: default_version(),
             name: String::new(),
+            category: None,
             description: None,
             inputs: Vec::new(),
             outputs: Vec::new(),
             config_schema: serde_json::Value::Null,
             dependencies: Vec::new(),
             models: Vec::new(),
+            runtimes: Vec::new(),
             nodes: Vec::new(),
             edges: Vec::new(),
         },
-    }
-}
-
-/// Builder used by source-controlled Rust workflow files.
-#[derive(Debug, Clone)]
-pub struct WorkflowBuilder {
-    spec: WorkflowSpec,
-}
-
-impl WorkflowBuilder {
-    #[must_use]
-    pub fn version(mut self, version: impl Into<String>) -> Self {
-        self.spec.version = version.into();
-        self
-    }
-
-    #[must_use]
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.spec.name = name.into();
-        self
-    }
-
-    #[must_use]
-    pub fn description(mut self, description: impl Into<String>) -> Self {
-        self.spec.description = Some(description.into());
-        self
-    }
-
-    #[must_use]
-    pub fn input(mut self, name: impl Into<String>, ty: impl Into<String>) -> Self {
-        self.spec.inputs.push(PortSpec {
-            name: name.into(),
-            ty: ty.into(),
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn output(mut self, name: impl Into<String>, ty: impl Into<String>) -> Self {
-        self.spec.outputs.push(PortSpec {
-            name: name.into(),
-            ty: ty.into(),
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn depends_on(
-        mut self,
-        workflow_id: impl Into<String>,
-        version: impl Into<String>,
-    ) -> Self {
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.into()),
-            install: None,
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn depends_on_crate(
-        mut self,
-        workflow_id: impl Into<String>,
-        version: impl Into<String>,
-        crate_name: impl Into<String>,
-    ) -> Self {
-        let version = version.into();
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.clone()),
-            install: Some(CargoDependency {
-                crate_name: crate_name.into(),
-                version: Some(version),
-                source: None,
-                package: None,
-            }),
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn depends_on_path(
-        mut self,
-        workflow_id: impl Into<String>,
-        version: impl Into<String>,
-        crate_name: impl Into<String>,
-        path: impl Into<String>,
-    ) -> Self {
-        let version = version.into();
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.clone()),
-            install: Some(CargoDependency {
-                crate_name: crate_name.into(),
-                version: Some(version),
-                source: Some(CargoDependencySource::Path(path.into())),
-                package: None,
-            }),
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn depends_on_git(
-        mut self,
-        workflow_id: impl Into<String>,
-        version: impl Into<String>,
-        crate_name: impl Into<String>,
-        git: impl Into<String>,
-        package: impl Into<String>,
-    ) -> Self {
-        let version = version.into();
-        let package = package.into();
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.clone()),
-            install: Some(CargoDependency {
-                crate_name: crate_name.into(),
-                version: Some(version),
-                source: Some(CargoDependencySource::Git(git.into())),
-                package: Some(package).filter(|package| !package.is_empty()),
-            }),
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn model(mut self, id: impl Into<String>, capability: impl Into<String>) -> Self {
-        self.spec.models.push(ModelRequirement {
-            id: id.into(),
-            capability: capability.into(),
-            variants: Vec::new(),
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn hf_model(
-        mut self,
-        requirement_id: impl Into<String>,
-        variant_id: impl Into<String>,
-        capability: impl Into<String>,
-        format: impl Into<String>,
-        repo: impl Into<String>,
-        file: impl Into<String>,
-    ) -> Self {
-        let requirement_id = requirement_id.into();
-        let capability = capability.into();
-        let variant = ModelVariant {
-            id: variant_id.into(),
-            provider: ModelProvider::HuggingFace,
-            format: format.into(),
-            repo: repo.into(),
-            file: Some(file.into()).filter(|file| !file.is_empty()),
-        };
-
-        if let Some(requirement) = self
-            .spec
-            .models
-            .iter_mut()
-            .find(|requirement| requirement.id == requirement_id)
-        {
-            requirement.variants.push(variant);
-        } else {
-            self.spec.models.push(ModelRequirement {
-                id: requirement_id,
-                capability,
-                variants: vec![variant],
-            });
-        }
-        self
-    }
-
-    #[must_use]
-    pub fn node(mut self, id: impl Into<String>, workflow_id: impl Into<String>) -> Self {
-        self.spec.nodes.push(WorkflowNode {
-            id: id.into(),
-            workflow_id: workflow_id.into(),
-            title: None,
-            disabled: false,
-            position: WorkflowPosition::default(),
-            config: serde_json::Value::Null,
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn disabled_node(mut self, id: impl Into<String>, workflow_id: impl Into<String>) -> Self {
-        self.spec.nodes.push(WorkflowNode {
-            id: id.into(),
-            workflow_id: workflow_id.into(),
-            title: None,
-            disabled: true,
-            position: WorkflowPosition::default(),
-            config: serde_json::Value::Null,
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn edge(
-        mut self,
-        from_node: impl Into<String>,
-        from_port: impl Into<String>,
-        to_node: impl Into<String>,
-        to_port: impl Into<String>,
-    ) -> Self {
-        self.spec.edges.push(WorkflowEdge {
-            from: WorkflowEndpoint {
-                node: from_node.into(),
-                port: from_port.into(),
-            },
-            to: WorkflowEndpoint {
-                node: to_node.into(),
-                port: to_port.into(),
-            },
-        });
-        self
-    }
-
-    #[must_use]
-    pub fn build(self) -> WorkflowSpec {
-        self.spec
-    }
-}
-
-impl From<WorkflowBuilder> for WorkflowSpec {
-    fn from(builder: WorkflowBuilder) -> Self {
-        builder.spec
     }
 }
