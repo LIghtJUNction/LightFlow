@@ -381,11 +381,20 @@ versions, git dependencies, and path dependencies without a version.
 lfw publish                  # root lightflow crate plan
 lfw publish lightflow.std    # workflow crate plan
 lfw publish --crate path/to/crate
+lfw publish --workflows      # all workflow crate plans in dependency order
 lfw publish lightflow.std --apply
+lfw publish --workflows --apply --allow-dirty
 ```
 
 `--apply` runs `cargo publish --manifest-path ...`. Without `--apply`, no
 network publish is attempted and the generated command includes `--dry-run`.
+`--workflows` scans workflow crates under `workflows/*/*`, orders local path
+dependencies before dependents, and refuses to upload anything unless every
+workflow crate passes the static publish checks. With `--apply`, it first runs
+the dry-run publish commands for every workflow crate, then runs the real
+publish commands.
+`--allow-dirty` forwards Cargo's explicit dirty-worktree override to both
+preflight and upload commands.
 
 ## Sync
 

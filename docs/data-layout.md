@@ -472,11 +472,18 @@ packages once their metadata is ready.
 ```bash
 lfw publish lightflow.example
 lfw publish lightflow.example --apply
+lfw publish --workflows
+lfw publish --workflows --apply
+lfw publish --workflows --apply --allow-dirty
 ```
 
 Repository-internal examples can still opt out with `publish = false`.
 `lfw publish` reports those as non-publishable instead of trying to upload
-them.
+them. `lfw publish --workflows` publishes a workflow workspace by publishing
+each workflow crate individually. The plan is dependency ordered for local
+workflow `path` dependencies, and `--apply` requires every workflow crate to
+pass publish checks before any upload is attempted. `--allow-dirty` is an
+explicit opt-in for publishing uncommitted working tree changes through Cargo.
 
 ## Versioning
 

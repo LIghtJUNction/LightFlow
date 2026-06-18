@@ -416,6 +416,83 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
         ])
     );
 
+    let workflows_plan = lfw(&root, ["publish", "--workflows"])?;
+    assert_eq!(workflows_plan["dry_run"], true);
+    assert_eq!(workflows_plan["target"]["kind"], "workflows");
+    assert_eq!(workflows_plan["publishable"], true);
+    assert_eq!(workflows_plan["crates"].as_array().unwrap().len(), 1);
+    assert_eq!(workflows_plan["crates"][0]["package"], "lightflow-example");
+    assert_eq!(
+        workflows_plan["commands"][0],
+        serde_json::json!([
+            "cargo",
+            "publish",
+            "--manifest-path",
+            "workflows/examples/example/Cargo.toml",
+            "--dry-run"
+        ])
+    );
+    let dirty_workflows_plan = lfw(&root, ["publish", "--workflows", "--allow-dirty"])?;
+    assert_eq!(
+        dirty_workflows_plan["commands"][0],
+        serde_json::json!([
+            "cargo",
+            "publish",
+            "--manifest-path",
+            "workflows/examples/example/Cargo.toml",
+            "--allow-dirty",
+            "--dry-run"
+        ])
+    );
+
+    lfw(&root, ["new", "lightflow.base", "--category", "examples"])?;
+    lfw(&root, ["new", "lightflow.top", "--category", "examples"])?;
+    let top_manifest_path = root.join("workflows/examples/top/Cargo.toml");
+    let mut top_manifest = fs::read_to_string(&top_manifest_path)?;
+    top_manifest.push_str("lightflow-base = { path = \"../base\", version = \"0.1.0\" }\n");
+    fs::write(&top_manifest_path, top_manifest)?;
+    let ordered_plan = lfw(&root, ["publish", "--workflows"])?;
+    let packages = ordered_plan["crates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|crate_plan| crate_plan["package"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    let base_index = packages
+        .iter()
+        .position(|package| *package == "lightflow-base")
+        .unwrap();
+    let top_index = packages
+        .iter()
+        .position(|package| *package == "lightflow-top")
+        .unwrap();
+    assert!(base_index < top_index);
+    assert_eq!(
+        ordered_plan["crates"][top_index]["internal_dependencies"],
+        serde_json::json!(["lightflow-base"])
+    );
+
+    let root_manifest_path = root.join("Cargo.toml");
+    let mut root_manifest = fs::read_to_string(&root_manifest_path)?;
+    root_manifest.push_str("bad-workspace = { path = \"../bad-workspace\" }\n");
+    fs::write(&root_manifest_path, root_manifest)?;
+    let example_manifest_path = root.join("workflows/examples/example/Cargo.toml");
+    let mut example_manifest = fs::read_to_string(&example_manifest_path)?;
+    example_manifest.push_str("bad-workspace = { workspace = true }\n");
+    fs::write(&example_manifest_path, example_manifest)?;
+    let blocked_plan = lfw(&root, ["publish", "--workflows"])?;
+    assert_eq!(blocked_plan["publishable"], false);
+    assert!(
+        blocked_plan["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue
+                .as_str()
+                .unwrap()
+                .contains("dependency bad-workspace uses path without a crates.io version"))
+    );
+
     let _ = fs::remove_dir_all(root);
     Ok(())
 }

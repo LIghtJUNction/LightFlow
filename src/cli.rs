@@ -469,7 +469,7 @@ fn usage() -> String {
         "  lfw runs list|get|rm ...",
         "  lfw patch list|get|save|validate|rm ...",
         "  lfw replay <run_id>",
-        "  lfw publish [workflow_id|--crate <path>] [--apply]",
+        "  lfw publish [workflow_id|--crate <path>|--workflows] [--apply] [--allow-dirty]",
         "  lfw run <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] [--patch <json|-|@file|name>] ['|' <workflow_id> ...]",
         "  lfw serve [--host <host>] [--port <port>]",
     ]

@@ -225,9 +225,13 @@ is not set. `lfw home` prints the active home, its `Cargo.toml`, its
 ## Publishing Model
 
 Publishing is intentionally delegated to Cargo. `lfw publish` selects a root
-crate, workflow id, or explicit crate path, validates the manifest for common
-crates.io blockers, and returns the exact `cargo publish --manifest-path ...`
-command. The command is a plan by default; `--apply` executes it.
+crate, workflow id, explicit crate path, or all workflow crates, validates
+manifests for common crates.io blockers, and returns the exact
+`cargo publish --manifest-path ...` commands. The command is a plan by default;
+`--apply` executes it. Batch workflow publishing still publishes ordinary Cargo
+packages one by one, ordered so local workflow path dependencies are published
+before dependents. Dirty worktrees remain blocked by Cargo unless the caller
+passes `--allow-dirty`.
 
 This keeps workflow installation and workflow publishing on the same primitive:
 ordinary Rust crates.
