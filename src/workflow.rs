@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 mod builder;
+mod program;
 pub use builder::WorkflowBuilder;
+pub use program::{ContextWorkflow, Runnable, Workflow, WorkflowState};
 fn default_version() -> String {
     "0.1.0".to_owned()
 }
@@ -269,6 +272,32 @@ pub struct WorkflowExecutionOptions {
     pub disabled_nodes: Vec<String>,
     #[serde(default)]
     pub enabled_nodes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<WorkflowPatch>,
+}
+
+/// Runtime patch applied at workflow node boundaries.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowPatch {
+    #[serde(default)]
+    pub nodes: BTreeMap<String, WorkflowNodePatch>,
+}
+
+/// Patch behavior for one workflow graph node.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowNodePatch {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disable: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub enable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replace_with: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_workflow_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
 }
 
 /// Execution result for one workflow run.
@@ -302,6 +331,10 @@ pub struct NodeExecution {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_workflow_id: Option<String>,
     pub status: NodeExecutionStatus,
+    #[serde(default)]
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub attempts: usize,
     #[serde(default)]
     pub inputs: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]

@@ -10,9 +10,12 @@ use std::process::Command;
 
 mod add;
 mod batch;
+mod history;
+mod install;
 mod list;
 pub mod mcp;
 mod models;
+mod patches;
 mod project;
 mod publish;
 mod run;
@@ -22,8 +25,14 @@ mod upgrade;
 
 use add::{add_dependency, parse_add_dependency_options};
 use batch::{execute_batch, parse_batch_options};
+use history::{
+    manage_runs, now_ms, parse_replay_run_id, read_manifest, record_failed_run, record_run,
+    trace_run,
+};
+use install::{install_workflow_repo, parse_install_options};
 use list::{list_workflows, parse_list_options};
 use models::manage_models;
+use patches::manage_patches;
 use project::{
     InitMode, add_workflow, init_plugin_project, init_workflow_project, normalize_workflow_id,
     parse_add_workflow_options, parse_init_options,
@@ -57,8 +66,8 @@ pub async fn run_lfx(args: Vec<String>) -> CliResult<()> {
     let runtime = RuntimeConfig::load()?;
     let service =
         ApiService::new(env::current_dir()?).with_workflow_paths(runtime.workflow_paths.clone());
-    let options = parse_run_options(&args)?;
-    print_json(&execute_run_options(&service, options)?)?;
+    let options = parse_run_options(service.repo_root(), &args)?;
+    print_json(&execute_and_record_run_options(&service, options)?)?;
     Ok(())
 }
 
@@ -101,7 +110,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let workflow_id = normalize_workflow_id(&options.workflow_id);
             let root = if options.global {
                 ensure_lfw_shell_setup(&runtime)?;
-                runtime.default_workflow_path.as_path()
+                runtime.home_path.as_path()
             } else {
                 Path::new(".")
             };
@@ -117,11 +126,34 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let options = parse_add_dependency_options(args)?;
             let root = if options.global {
                 ensure_lfw_shell_setup(&runtime)?;
-                runtime.default_workflow_path.as_path()
+                runtime.home_path.as_path()
             } else {
                 Path::new(".")
             };
             print_json(&add_dependency(root, &options, options.global)?)?;
+        }
+        "install" => {
+            let options = parse_install_options(args)?;
+            let (root, repo_store_root) = if options.global {
+                ensure_lfw_shell_setup(&runtime)?;
+                let store = runtime.home_path.join("repos");
+                (runtime.home_path.as_path(), store)
+            } else {
+                let cwd = env::current_dir()?;
+                (Path::new("."), cwd.join(".lightflow").join("repos"))
+            };
+            print_json(&install_workflow_repo(root, &repo_store_root, &options)?)?;
+        }
+        "home" => {
+            ensure_no_extra_args(args, 0, "home")?;
+            let shell_setup = ensure_lfw_shell_setup(&runtime)?;
+            print_json(&json!({
+                "home": runtime.home_path,
+                "manifest": shell_setup.workspace_manifest,
+                "workflows": runtime.default_workflow_path,
+                "repos": runtime.home_path.join("repos"),
+                "lfw_path": runtime.lfw_path,
+            }))?;
         }
         "list" | "ls" => {
             let options = parse_list_options(args)?;
@@ -176,20 +208,12 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
         }
         "update" => {
             let options = parse_cargo_workspace_options(args, command)?;
-            let root = cargo_workspace_root(
-                &env::current_dir()?,
-                &runtime.default_workflow_path,
-                &options,
-            );
+            let root = cargo_workspace_root(&env::current_dir()?, &runtime.home_path, &options);
             print_json(&update_index(&root)?)?;
         }
         "upgrade" => {
             let options = parse_cargo_workspace_options(args, command)?;
-            let root = cargo_workspace_root(
-                &env::current_dir()?,
-                &runtime.default_workflow_path,
-                &options,
-            );
+            let root = cargo_workspace_root(&env::current_dir()?, &runtime.home_path, &options);
             print_json(&upgrade_workspace(&root)?)?;
         }
         "models" => {
@@ -202,13 +226,32 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             let options = parse_batch_options(args)?;
             print_json(&execute_batch(&service, &options)?)?;
         }
+        "trace" => {
+            print_json(&trace_run(service.repo_root(), args)?)?;
+        }
+        "runs" => {
+            print_json(&manage_runs(service.repo_root(), args)?)?;
+        }
+        "patch" | "patches" => {
+            print_json(&manage_patches(service.repo_root(), args)?)?;
+        }
+        "replay" => {
+            let run_id = parse_replay_run_id(args)?;
+            let manifest = read_manifest(service.repo_root(), run_id)?;
+            print_json(&execute_and_record_run_options(
+                &service,
+                RunOptions {
+                    stages: manifest.stages,
+                },
+            )?)?;
+        }
         "publish" => {
             let options = parse_publish_options(args)?;
             print_json(&publish_crate(Path::new("."), &options)?)?;
         }
         "run" => {
-            let options = parse_run_options(args)?;
-            print_json(&execute_run_options(&service, options)?)?;
+            let options = parse_run_options(service.repo_root(), args)?;
+            print_json(&execute_and_record_run_options(&service, options)?)?;
         }
         "serve" => {
             let bind = parse_bind_addr(args, command)?;
@@ -242,6 +285,64 @@ struct PipelineExecution {
     stages: Vec<WorkflowExecution>,
     outputs: serde_json::Map<String, serde_json::Value>,
     artifacts: Vec<WorkflowArtifact>,
+}
+
+fn execute_and_record_run_options(
+    service: &ApiService,
+    options: RunOptions,
+) -> CliResult<serde_json::Value> {
+    let started_at_ms = now_ms();
+    let output = match execute_run_options(service, options.clone()) {
+        Ok(output) => output,
+        Err(error) => {
+            let completed_at_ms = now_ms();
+            let error_json = json!({
+                "message": error.to_string(),
+            });
+            let history = record_failed_run(
+                service.repo_root(),
+                &options,
+                &error_json,
+                started_at_ms,
+                completed_at_ms,
+            )?;
+            return Err(CliError::Usage(format!(
+                "{}\nrun_id: {}\ntrace_path: {}",
+                error,
+                history.run_id,
+                history.run_dir.join("execution.json").display()
+            )));
+        }
+    };
+    let completed_at_ms = now_ms();
+    let history = record_run(
+        service.repo_root(),
+        &options,
+        &output,
+        started_at_ms,
+        completed_at_ms,
+    )?;
+    let mut value = serde_json::to_value(&output)?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(CliError::Usage(
+            "workflow execution output must be a JSON object".to_owned(),
+        ));
+    };
+    object.insert("run_id".to_owned(), history.run_id.into());
+    object.insert(
+        "run_dir".to_owned(),
+        history.run_dir.display().to_string().into(),
+    );
+    object.insert(
+        "trace_path".to_owned(),
+        history
+            .run_dir
+            .join("execution.json")
+            .display()
+            .to_string()
+            .into(),
+    );
+    Ok(value)
 }
 
 fn execute_run_options(service: &ApiService, options: RunOptions) -> CliResult<RunOutput> {
@@ -344,7 +445,9 @@ fn usage() -> String {
     [
         "usage:",
         "  lfw init [--workflow|--plugin] [path]",
+        "  lfw home",
         "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
+        "  lfw install <path-or-git-url> [--git] [--name <name>] [--global|-g]",
         "  lfw new <workflow_id> --category <name> [--name <name>] [--global|-g]",
         "  lfw list [--brief|--detail] [--category <name>]",
         "  lfw list --categories",
@@ -362,8 +465,12 @@ fn usage() -> String {
         "  lfw mcp [<json|-|@file>]",
         "  lfw batch run <jobs.jsonl> [--workflow <workflow_id>] [--run-id <id>] [--max-gpu-jobs <n|auto>] [--max-cpu-jobs <n|auto>] [--batch-size <n|auto>] [--retries <n>] [--reserve-mem <size>] [--reserve-vram <size>] [--max-load <n>]",
         "  lfw batch resume <run_id> [--max-gpu-jobs <n|auto>]",
+        "  lfw trace [last|run_id]",
+        "  lfw runs list|get|rm ...",
+        "  lfw patch list|get|save|validate|rm ...",
+        "  lfw replay <run_id>",
         "  lfw publish [workflow_id|--crate <path>] [--apply]",
-        "  lfw run <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] ['|' <workflow_id> ...]",
+        "  lfw run <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] [--patch <json|-|@file|name>] ['|' <workflow_id> ...]",
         "  lfw serve [--host <host>] [--port <port>]",
     ]
     .join("\n")

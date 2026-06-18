@@ -8,13 +8,14 @@ use super::{ApiError, ApiResult};
 use crate::workflow::{
     ModelProvider, NodeExecution, NodeExecutionStatus, PortSpec, WorkflowArtifact,
     WorkflowCondition, WorkflowExecution, WorkflowExecutionOptions, WorkflowNode, WorkflowNodeKind,
-    WorkflowSpec,
+    WorkflowNodePatch, WorkflowSpec,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 pub(super) fn execute_workflow_spec(
     root: &Path,
@@ -52,6 +53,7 @@ fn execute_workflow_spec_with_models(
 
     let disabled_nodes = options.disabled_nodes.into_iter().collect::<BTreeSet<_>>();
     let enabled_nodes = options.enabled_nodes.into_iter().collect::<BTreeSet<_>>();
+    let patch = options.patch.unwrap_or_default();
     let nodes_by_id = workflow
         .nodes
         .iter()
@@ -65,16 +67,28 @@ fn execute_workflow_spec_with_models(
         let Some(node) = nodes_by_id.get(node_id.as_str()) else {
             continue;
         };
+        let node_started_at = Instant::now();
         let node_inputs =
             collect_node_inputs(node, workflow, workflows, &options.inputs, &node_outputs);
-        let is_disabled = (node.disabled || disabled_nodes.contains(&node.id))
-            && !enabled_nodes.contains(&node.id);
-        if is_disabled {
+        let node_patch = patch.nodes.get(&node.id);
+        let is_enabled =
+            enabled_nodes.contains(&node.id) || node_patch.is_some_and(|patch| patch.enable);
+        let is_disabled = (node.disabled
+            || disabled_nodes.contains(&node.id)
+            || node_patch.is_some_and(|patch| patch.disable))
+            && !is_enabled;
+        if is_disabled
+            && node_patch
+                .and_then(|patch| patch.fallback_workflow_id.as_ref())
+                .is_none()
+        {
             executions.push(NodeExecution {
                 node_id: node.id.clone(),
                 workflow_id: node.workflow_id.clone(),
                 selected_workflow_id: None,
                 status: NodeExecutionStatus::Skipped,
+                duration_ms: elapsed_ms(node_started_at),
+                attempts: 0,
                 inputs: node_inputs,
                 outputs: serde_json::Map::new(),
                 artifacts: Vec::new(),
@@ -82,7 +96,8 @@ fn execute_workflow_spec_with_models(
             continue;
         }
 
-        let selected_workflow_id = selected_node_workflow_id(node, &node_inputs)?;
+        let selected_workflow_id =
+            patched_node_workflow_id(node, &node_inputs, node_patch, is_disabled)?;
         let child = workflows
             .get(selected_workflow_id.as_str())
             .ok_or_else(|| {
@@ -91,21 +106,32 @@ fn execute_workflow_spec_with_models(
                     node.id, selected_workflow_id
                 ))
             })?;
-        let leaf = execute_child_workflow(root, child, workflows, &node_inputs, model_manager)?;
-        node_outputs.insert(node.id.clone(), leaf.outputs.clone());
-        artifacts.extend(leaf.artifacts.clone());
+        let child_run = execute_child_workflow_with_patch(
+            root,
+            child,
+            workflows,
+            &node_inputs,
+            model_manager,
+            node_patch,
+        )?;
+        node_outputs.insert(node.id.clone(), child_run.leaf.outputs.clone());
+        artifacts.extend(child_run.leaf.artifacts.clone());
         executions.push(NodeExecution {
             node_id: node.id.clone(),
             workflow_id: node.workflow_id.clone(),
-            selected_workflow_id: if node.kind == WorkflowNodeKind::If {
+            selected_workflow_id: if node.kind == WorkflowNodeKind::If
+                || selected_workflow_id != node.workflow_id
+            {
                 Some(selected_workflow_id)
             } else {
                 None
             },
             status: NodeExecutionStatus::Completed,
+            duration_ms: elapsed_ms(node_started_at),
+            attempts: child_run.attempts,
             inputs: node_inputs,
-            outputs: leaf.outputs,
-            artifacts: leaf.artifacts,
+            outputs: child_run.leaf.outputs,
+            artifacts: child_run.leaf.artifacts,
         });
     }
 
@@ -118,6 +144,23 @@ fn execute_workflow_spec_with_models(
         artifacts,
         nodes: executions,
     })
+}
+
+fn patched_node_workflow_id(
+    node: &WorkflowNode,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    patch: Option<&WorkflowNodePatch>,
+    is_disabled: bool,
+) -> ApiResult<String> {
+    if let Some(fallback) = patch.and_then(|patch| patch.fallback_workflow_id.as_ref())
+        && is_disabled
+    {
+        return Ok(fallback.clone());
+    }
+    if let Some(replacement) = patch.and_then(|patch| patch.replace_with.as_ref()) {
+        return Ok(replacement.clone());
+    }
+    selected_node_workflow_id(node, inputs)
 }
 
 fn selected_node_workflow_id(
@@ -170,6 +213,7 @@ fn execute_child_workflow(
             inputs: inputs.clone(),
             disabled_nodes: Vec::new(),
             enabled_nodes: Vec::new(),
+            patch: None,
         },
         model_manager,
     )?;
@@ -179,10 +223,59 @@ fn execute_child_workflow(
     })
 }
 
+fn execute_child_workflow_with_patch(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    model_manager: &mut ModelManager,
+    patch: Option<&WorkflowNodePatch>,
+) -> ApiResult<ChildWorkflowRun> {
+    let attempts = patch.and_then(|patch| patch.retry).unwrap_or(1).max(1);
+    let timeout_ms = patch.and_then(|patch| patch.timeout_ms).map(u128::from);
+    let mut last_error = None;
+    for attempt in 1..=attempts {
+        let started_at = Instant::now();
+        let result = execute_child_workflow(root, workflow, workflows, inputs, model_manager);
+        match result {
+            Ok(output) => {
+                if let Some(timeout_ms) = timeout_ms
+                    && started_at.elapsed().as_millis() > timeout_ms
+                {
+                    last_error = Some(ApiError::InvalidRequest(format!(
+                        "node execution timed out after {timeout_ms}ms"
+                    )));
+                    continue;
+                }
+                return Ok(ChildWorkflowRun {
+                    leaf: output,
+                    attempts: attempt,
+                });
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.expect("node attempts are always at least one"))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ChildWorkflowRun {
+    leaf: LeafExecution,
+    attempts: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct LeafExecution {
     outputs: serde_json::Map<String, serde_json::Value>,
     artifacts: Vec<WorkflowArtifact>,
+}
+
+fn elapsed_ms(started_at: Instant) -> u64 {
+    started_at
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn execute_leaf_workflow(

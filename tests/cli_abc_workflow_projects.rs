@@ -125,7 +125,7 @@ fn abc_workflow_projects_resolve_import_run_and_install_modes()
     assert_eq!(global_c["global"], true);
 
     let global_manifest =
-        fs::read_to_string(global_project.join(".test-xdg/data/lightflow/workflows/Cargo.toml"))?;
+        fs::read_to_string(global_project.join(".test-xdg/data/lightflow/Cargo.toml"))?;
     assert!(global_manifest.contains("lightflow-b"));
     assert!(global_manifest.contains("lightflow-c"));
     let global_deps = lfw(&global_project, ["deps", "lightflow.a"])?;

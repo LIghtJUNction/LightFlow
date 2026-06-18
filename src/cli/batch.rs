@@ -355,6 +355,7 @@ fn execute_one_job(service: ApiService, index: usize, job: BatchJobRecord) -> Jo
         inputs: job.inputs,
         disabled_nodes: job.disabled_nodes,
         enabled_nodes: job.enabled_nodes,
+        patch: None,
     };
     match service.execute_workflow(&job.workflow_id, options) {
         Ok(execution) => JobOutcome {

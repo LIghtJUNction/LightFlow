@@ -63,11 +63,11 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert!(gitignore.contains("/lfw.lock"));
     let rc = fs::read_to_string(root.join(".test-xdg/config/lightflow/.lfwrc"))?;
     assert!(rc.contains("export LFW_PATH="));
-    assert!(rc.contains(".test-xdg/data/lightflow/workflows"));
-    let lfw_path_manifest = root.join(".test-xdg/data/lightflow/workflows/Cargo.toml");
+    assert!(rc.contains(".test-xdg/data/lightflow"));
+    let lfw_path_manifest = root.join(".test-xdg/data/lightflow/Cargo.toml");
     assert!(lfw_path_manifest.exists());
     let lfw_path_workspace = fs::read_to_string(&lfw_path_manifest)?;
-    assert!(lfw_path_workspace.contains("members = [\"*/*\"]"));
+    assert!(lfw_path_workspace.contains("members = [\"workflows/*/*\"]"));
     assert!(lfw_path_workspace.contains(&format!("lightflow = {:?}", env!("CARGO_PKG_VERSION"))));
     assert_eq!(
         init["config"]["workflow_workspace_manifest"],
@@ -97,6 +97,23 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
 
     let workflow = lightflow(&root, ["workflows", "get", "lightflow.extra"])?;
     assert_eq!(workflow["id"], "lightflow.extra");
+
+    let home = lfw(&root, ["home"])?;
+    assert_eq!(
+        home["home"],
+        root.join(".test-xdg/data/lightflow").to_str().unwrap()
+    );
+    assert_eq!(
+        home["lfw_path"],
+        root.join(".test-xdg/data/lightflow").to_str().unwrap()
+    );
+    assert_eq!(home["manifest"], lfw_path_manifest.to_str().unwrap());
+    assert_eq!(
+        home["workflows"],
+        root.join(".test-xdg/data/lightflow/workflows")
+            .to_str()
+            .unwrap()
+    );
 
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -148,8 +165,8 @@ fn lfw_new_and_add_support_global_workflow_workspace() -> Result<(), Box<dyn std
         ],
     )?;
     assert_eq!(added["global"], true);
-    let global_manifest = fs::read_to_string(global_root.join("Cargo.toml"))?;
-    assert!(global_manifest.contains("members = [\"*/*\"]"));
+    let global_manifest = fs::read_to_string(root.join(".test-xdg/data/lightflow/Cargo.toml"))?;
+    assert!(global_manifest.contains("members = [\"workflows/*/*\"]"));
     assert!(global_manifest.contains("lightflow-std"));
     let project_manifest = fs::read_to_string(root.join("Cargo.toml"))?;
     assert!(!project_manifest.contains("lightflow-std"));
@@ -238,6 +255,25 @@ pub fn define() -> WorkflowSpec {
     let default_list = lfw(&root, ["list"])?;
     assert_eq!(default_list["workflows"][0]["id"], "lightflow.xdg_default");
 
+    let legacy_default_home = lfw_with_env(
+        &root,
+        ["home"],
+        [("LFW_PATH", xdg_data_workflows.as_path())],
+    )?;
+    assert_eq!(
+        legacy_default_home["lfw_path"],
+        root.join(".test-xdg/data/lightflow").to_str().unwrap()
+    );
+    let legacy_default_list = lfw_with_env(
+        &root,
+        ["list"],
+        [("LFW_PATH", xdg_data_workflows.as_path())],
+    )?;
+    assert_eq!(
+        legacy_default_list["workflows"][0]["id"],
+        "lightflow.xdg_default"
+    );
+
     let custom_workflows = root.join("custom-workflows");
     write_workflow_crate_in(
         &custom_workflows,
@@ -314,10 +350,7 @@ fn lfw_init_installs_fish_source_when_shell_is_fish() -> Result<(), Box<dyn std:
 
     let rc = fs::read_to_string(root.join(".test-xdg/config/lightflow/.lfwrc"))?;
     assert!(rc.contains("set -gx LFW_PATH "));
-    assert!(
-        root.join(".test-xdg/data/lightflow/workflows/Cargo.toml")
-            .exists()
-    );
+    assert!(root.join(".test-xdg/data/lightflow/Cargo.toml").exists());
     let fish_config = fs::read_to_string(root.join(".test-xdg/config/fish/config.fish"))?;
     assert!(fish_config.contains("source "));
     assert!(fish_config.contains(".test-xdg/config/lightflow/.lfwrc"));

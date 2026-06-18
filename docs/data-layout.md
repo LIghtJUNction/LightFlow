@@ -22,13 +22,13 @@ $XDG_CONFIG_HOME/lightflow/.lfwrc
 For bash and zsh, the rc file uses shell-style export syntax:
 
 ```bash
-export LFW_PATH="$HOME/.local/share/lightflow/workflows"
+export LFW_PATH="$HOME/.local/share/lightflow"
 ```
 
 For fish, `lfw init` writes fish syntax instead:
 
 ```fish
-set -gx LFW_PATH "$HOME/.local/share/lightflow/workflows"
+set -gx LFW_PATH "$HOME/.local/share/lightflow"
 ```
 
 `lfw init` detects `SHELL` and appends `source <rc>` to `.bashrc`, `.zshrc`,
@@ -36,8 +36,8 @@ or `$XDG_CONFIG_HOME/fish/config.fish`. Project workflows are discovered from
 the current working directory's `workflows/` tree and never need `LFW_PATH`.
 `LFW_PATH` is only for global or shared workflow collections. If there is no
 exported `LFW_PATH`, `lfw` uses the XDG default
-`$XDG_DATA_HOME/lightflow/workflows`, or
-`~/.local/share/lightflow/workflows` when `XDG_DATA_HOME` is not set. `lfw`
+`$XDG_DATA_HOME/lightflow`, or
+`~/.local/share/lightflow` when `XDG_DATA_HOME` is not set. `lfw`
 does not parse `.lfwrc` directly at runtime; it reads the environment provided
 by the shell.
 
@@ -47,28 +47,124 @@ Generated image outputs default to the user's XDG Pictures directory, under a
 falls back to `$HOME/Pictures/lightflow`. Explicit `output_path` inputs always
 win.
 
-Each `LFW_PATH` entry is a workflow collection and must classify global or
-shared workflows with exactly one category level:
+Single workflow and pipeline runs are recorded in the current project under:
 
 ```text
-$XDG_DATA_HOME/lightflow/workflows/
-  <category>/
-    <short-name>/
-      Cargo.toml
-      src/
-        lib.rs
+.lightflow/
+  patches/
+    <name>.json
+  runs/
+    last
+    <run_id>/
+      manifest.json
+      execution.json
+      events.jsonl
 ```
 
-The default collection at `$XDG_DATA_HOME/lightflow/workflows` is initialized as
-a Cargo workspace root. Its generated manifest uses `members = ["*/*"]`, because
-the collection root already contains `<category>/<short-name>` workflow crates.
+`manifest.json` stores the run id, timestamps, workflow stages, inputs, and
+temporary node toggles. It also records `status` as `completed` or `failed`.
+`execution.json` stores the actual workflow or pipeline result. Composite node
+records include status, inputs, outputs, artifact handles, `duration_ms`, and
+`attempts`. Failed runs store `status: "failed"` and an error object in
+`execution.json`. `events.jsonl` is append-only trace data: it starts with
+`run_started`, includes one `node_completed` or `node_skipped` event for each
+successful graph node, and ends with `run_finished` or `run_failed`. `lfw trace
+last` reads this directory without executing anything, and `lfw replay <run_id>`
+uses the stored stage definitions to create a new run.
+
+Run history can also be managed directly:
+
+```bash
+lfw runs list
+lfw runs get last
+lfw runs get run-1781797000000
+lfw runs rm run-1781797000000
+```
+
+`lfw runs list` returns compact manifest summaries sorted by newest completion
+time first. `lfw runs get` returns the same full data as `lfw trace`. Removing
+a run deletes only that run directory and clears `last` if it pointed at the
+removed run.
+
+Trace snapshots follow the same zero-copy boundary as workflow execution:
+large files are represented as artifact handles and paths, not embedded file
+bytes, model weights, or tensor payloads.
+
+Runtime patches are part of the stored stage definition, so replay uses the
+same patch that the original run used. `lfw run` and `lfx` accept the patch as
+inline JSON, stdin, an `@file` reference, or a project registry name:
+
+```bash
+lfw run lightflow.qa --input question=hello --patch @patch.json
+lfw run lightflow.qa --input question=hello --patch qa-debug
+```
+
+The patch file is serializable graph-runner data:
+
+```json
+{
+  "nodes": {
+    "search": {
+      "replace_with": "lightflow.mock_search",
+      "retry": 3,
+      "timeout_ms": 5000
+    },
+    "payment": {
+      "disable": true,
+      "fallback_workflow_id": "lightflow.payment_skipped"
+    },
+    "draft": {
+      "enable": true
+    }
+  }
+}
+```
+
+Node keys are graph node ids from the workflow source. `replace_with` and
+`fallback_workflow_id` must name workflows already visible through project
+discovery, `LFW_PATH`, or Cargo dependencies. `enable` overrides author-time or
+CLI disables for that node. `disable` without a fallback skips the node.
+
+Reusable project patches are stored in `.lightflow/patches/<name>.json` and
+managed through:
+
+```bash
+lfw patch save qa-debug @patch.json
+lfw patch list
+lfw patch get qa-debug
+lfw patch validate qa-debug
+lfw patch rm qa-debug
+```
+
+The registry is a convenience for authoring and editor tooling. A run manifest
+stores the expanded patch data, not a pointer to the registry name, so replay
+remains stable when registry entries are edited later.
+
+Each `LFW_PATH` entry may be a LightFlow home or a legacy workflow collection.
+A LightFlow home is a normal Cargo workspace:
+
+```text
+$XDG_DATA_HOME/lightflow/
+  Cargo.toml
+  repos/
+  workflows/
+    <category>/
+      <short-name>/
+        Cargo.toml
+        src/
+          lib.rs
+```
+
+The default home at `$XDG_DATA_HOME/lightflow` is initialized as a Cargo
+workspace root. Its generated manifest uses `members = ["workflows/*/*"]`.
 This gives globally installed workflows one shared dependency environment,
 analogous to a small language-specific environment for LightFlow workflows.
-`lfw new --global` creates workflow crates in this default collection, and
-`lfw add --global` writes dependencies to this collection's `Cargo.toml`.
-The backend scans this global workspace manifest for Cargo `path`
-dependencies, so global CLI-installed path workflows are available through
-normal workflow lookup. `lfw update --global` runs `cargo fetch` in this
+`lfw home` prints this root, its `Cargo.toml`, the workflow source directory,
+and the repo cache. `lfw new --global` creates workflow crates under
+`workflows/<category>/<short-name>`, and `lfw add --global` writes dependencies
+to the home `Cargo.toml`. The backend scans this global workspace manifest for
+Cargo `path` dependencies, so global CLI-installed path workflows are available
+through normal workflow lookup. `lfw update --global` runs `cargo fetch` in this
 workspace, and
 `lfw upgrade --global` runs `cargo update`. Version resolution remains Cargo's
 job; LightFlow only chooses the workspace where the command runs.
@@ -127,6 +223,134 @@ executable entrypoint.
 
 The backend accepts `WorkflowSpec` JSON over HTTP/MCP/CLI for tool integration,
 but the source-controlled project format is Rust.
+
+Workflow crates can also expose executable workflow entrypoints with normal
+Rust `src/bin/*.rs` targets. The library remains the reusable workflow
+definition, while each bin is a direct executable for one workflow:
+
+```rust
+fn main() -> lightflow::runner::RunnerResult<()> {
+    lightflow::runner::run_workflow_from_env(my_workflow_crate::define())
+}
+```
+
+This keeps workflow projects self-contained: agents and `lfw` can import the
+library workflow definition, while users can run the workflow with `cargo run
+--bin <name>` or an installed binary without going through the `lfw run`
+subcommand.
+
+For fully typed Rust workflows that need internal state machines, implement
+the `ContextWorkflow` trait. `Input` is converted into a mutable `Context`,
+nodes mutate that context and return the next state, and `Output` is assembled
+once at the end:
+
+```rust
+use lightflow::preload::*;
+
+struct MyWorkflow;
+
+impl ContextWorkflow for MyWorkflow {
+    type Input = Input;
+    type Output = Output;
+    type Context = Context;
+    type State = State;
+
+    fn context(&self, input: Input) -> Context {
+        Context { input, answer: None }
+    }
+
+    fn initial_state(&self) -> State {
+        State::Classify
+    }
+
+    async fn step(&self, state: State, ctx: &mut Context) -> anyhow::Result<State> {
+        match state {
+            State::Classify => classify(ctx).await,
+            State::Answer => answer(ctx).await,
+            State::End => Ok(State::End),
+        }
+    }
+
+    fn output(&self, ctx: Context) -> anyhow::Result<Output> {
+        Ok(Output { answer: ctx.answer.unwrap_or_default() })
+    }
+}
+```
+
+For cross-workflow composition, use the typed `Workflow<I, O>` function
+boundary. A workflow is also a node: it implements `Runnable<I, O>` and can be
+placed anywhere a typed task is expected.
+
+```rust
+use lightflow::preload::*;
+
+let classify_flow: Workflow<UserInput, Intent> = build_classify_flow();
+let search_flow: Workflow<Intent, SearchResult> = build_search_flow();
+let answer_flow: Workflow<SearchResult, FinalAnswer> = build_answer_flow();
+
+let answer = classify_flow
+    .then(search_flow)
+    .then(answer_flow)
+    .run(input)
+    .await?;
+```
+
+The rule is:
+
+```text
+external composition: Workflow<Input, Output>
+internal implementation: Context + State
+```
+
+That keeps workflow composition compile-time checked while still allowing each
+workflow to keep rich private execution state.
+
+## Patch And Hook Runtime
+
+Patch behavior is applied at node call boundaries, not by rewriting workflow
+source. Hand-written nodes and macro-generated nodes can both use the same
+typed hook registry:
+
+```rust
+use lightflow::preload::*;
+
+let hooks = HookRegistry::new().hook("search", LogHook);
+
+let result = run_node("search", query, |query| async move {
+    search(query).await
+}, &hooks).await?;
+```
+
+`NodeHook<I, O>` supports `before`, `after`, and `on_error`.
+`AroundHook<I, O>` wraps execution through `Next<I, O>` and is the foundation
+for logging, metrics, auth, caching, retry, timeout, mock, disable, and
+replacement behavior. Registries are typed per node input/output shape so Rust
+still checks patch compatibility.
+
+The first concrete patch operations are:
+
+```rust
+let hooks = HookRegistry::new()
+    .replace("search", |query| async move { mock_search(query).await })
+    .disable_with("payment", |request| async move { Ok(PaymentResult::skipped(request)) })
+    .retry("llm", 3)
+    .timeout_ms("http", 5_000);
+```
+
+`run_node` applies `before` once, retries the around/base/replacement/fallback
+execution according to policy, applies timeout per attempt, then calls `after`
+once on success or `on_error` once after final failure. `#[node]` generates a
+`<node>_with_hooks(input, &HookRegistry<_, _>)` entrypoint for single-input
+typed nodes, so macro-authored nodes and hand-written nodes share the same
+runtime boundary.
+
+CLI graph patches use the same boundary idea but remain workflow-id based and
+serializable. They cannot directly name Rust function pointers or closures;
+typed function replacement belongs in the SDK `HookRegistry`.
+
+Use `run_node_borrowed` when the input should not be cloned. This is the right
+shape for large artifacts and model paths: the workflow layer passes paths and
+handles while the backend owns decoding or mmap.
 
 ## Agent Skills
 
@@ -198,6 +422,21 @@ lfw add lightflow-std --path ../lightflow-std --editable
 lfw add lightflow-std --git https://github.com/lightjunction/LightFlow --package lightflow-std
 lfw add lightflow-std --version 0.1.1 --global
 ```
+
+For a self-contained workflow repository or local collection that contains
+multiple workflow crates, use `lfw install` instead of adding each crate by
+hand:
+
+```bash
+lfw install --global /path/to/lightflow-flux
+lfw install --global https://github.com/lightjunction/lightflow-flux.git
+```
+
+`lfw install` discovers `workflows/<category>/<crate>` entries and records each
+workflow crate as a Cargo path dependency in the target project or global
+workspace. Git sources are cloned into LightFlow's managed repo store first,
+then installed from that clone. The original workflow repository remains the
+self-contained Cargo workspace that owns its `[workspace.dependencies]`.
 
 `--editable` is only valid with `--path`. It keeps the manifest as a standard
 Cargo path dependency and makes the CLI result report `"editable": true`,

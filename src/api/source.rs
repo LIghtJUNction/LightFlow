@@ -52,6 +52,19 @@ fn read_workflow_search_path(
     if !path.exists() {
         return Ok(());
     }
+    if path.join(WORKFLOW_DIR).is_dir() {
+        let manifest = path.join("Cargo.toml");
+        if manifest.exists() {
+            manifests.insert(normalize_existing_path(&manifest)?);
+        }
+        return read_workflow_collection(
+            &path.join(WORKFLOW_DIR),
+            false,
+            workflows,
+            manifests,
+            visited_libs,
+        );
+    }
     read_workflow_collection(path, false, workflows, manifests, visited_libs)
 }
 
@@ -204,12 +217,24 @@ fn read_path_dependency_workflows(
                 continue;
             }
             if let Some(mut workflow) = read_optional_workflow_source(&lib)? {
-                workflow.category = Some("extensions".to_owned());
+                workflow.category = Some(
+                    dependency_category(&dependency_dir).unwrap_or_else(|| "extensions".to_owned()),
+                );
                 workflows.push(workflow);
             }
         }
     }
     Ok(())
+}
+
+fn dependency_category(dependency_dir: &Path) -> Option<String> {
+    let category = dependency_dir.parent()?.file_name()?.to_str()?;
+    let marker = dependency_dir.parent()?.parent()?.file_name()?.to_str()?;
+    if marker == WORKFLOW_DIR && validate_id_segment(category, "workflow category").is_ok() {
+        Some(category.to_owned())
+    } else {
+        None
+    }
 }
 
 fn cargo_path_dependencies(manifest: &Path) -> ApiResult<Vec<PathBuf>> {

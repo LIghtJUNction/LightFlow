@@ -274,7 +274,7 @@ pub(super) fn workspace_manifest() -> String {
 
 pub(super) fn workflow_collection_manifest() -> String {
     format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\"*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
+        "[workspace]\nresolver = \"3\"\nmembers = [\"workflows/*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -341,7 +341,7 @@ fn workflow_crate_dir(
     global: bool,
 ) -> PathBuf {
     let mut path = if global {
-        root.to_path_buf()
+        root.join("workflows")
     } else {
         root.join("workflows")
     };

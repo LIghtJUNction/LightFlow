@@ -19,7 +19,7 @@ use crate::workflow::{
     WorkflowSpec, WorkflowSummary, WorkflowValidation,
 };
 use deps::dependency_report;
-use execution::execute_workflow_spec;
+use execution::execute_workflow_spec as execute_workflow_spec_impl;
 use source::read_workflow_sources;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
@@ -132,7 +132,19 @@ impl ApiService {
         let workflow = workflows
             .get(workflow_id)
             .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))?;
-        execute_workflow_spec(&self.repo_root, workflow, &workflows, options)
+        execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, options)
+    }
+
+    /// Execute an explicit workflow spec while resolving referenced workflows
+    /// from the service's project and global workflow paths.
+    pub fn execute_workflow_spec(
+        &self,
+        workflow: &WorkflowSpec,
+        options: WorkflowExecutionOptions,
+    ) -> ApiResult<WorkflowExecution> {
+        let mut workflows = self.workflow_specs()?;
+        workflows.insert(workflow.id.clone(), workflow.clone());
+        execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, options)
     }
 
     fn workflow_specs(&self) -> ApiResult<BTreeMap<String, WorkflowSpec>> {

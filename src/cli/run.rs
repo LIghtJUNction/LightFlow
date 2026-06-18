@@ -1,36 +1,38 @@
-use super::{CliError, CliResult, request_json, required_arg, required_flag_value};
+use super::{CliError, CliResult, patches, request_json, required_arg, required_flag_value};
 use crate::workflow::WorkflowExecutionOptions;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 pub(super) fn lfx_usage() -> String {
-    "usage:\n  lfx <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] ['|' <workflow_id> ...]"
+    "usage:\n  lfx <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] [--patch <json|-|@file|name>] ['|' <workflow_id> ...]"
         .to_owned()
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub(super) struct RunStage {
     pub(super) workflow_id: String,
     pub(super) execution: WorkflowExecutionOptions,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub(super) struct RunOptions {
     pub(super) stages: Vec<RunStage>,
 }
 
-pub(super) fn parse_run_options(args: &[String]) -> CliResult<RunOptions> {
+pub(super) fn parse_run_options(root: &Path, args: &[String]) -> CliResult<RunOptions> {
     let mut stages = Vec::new();
     let mut stage_start = 0;
     for (index, arg) in args.iter().enumerate() {
         if arg == "|" {
-            stages.push(parse_run_stage(&args[stage_start..index])?);
+            stages.push(parse_run_stage(root, &args[stage_start..index])?);
             stage_start = index + 1;
         }
     }
-    stages.push(parse_run_stage(&args[stage_start..])?);
+    stages.push(parse_run_stage(root, &args[stage_start..])?);
     Ok(RunOptions { stages })
 }
 
-fn parse_run_stage(args: &[String]) -> CliResult<RunStage> {
+fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
     let workflow_id = required_arg(args, 0, "workflow id")?.to_owned();
     let mut execution = WorkflowExecutionOptions::default();
     let mut index = 1;
@@ -100,6 +102,11 @@ fn parse_run_stage(args: &[String]) -> CliResult<RunStage> {
                 execution
                     .enabled_nodes
                     .push(required_flag_value(args, index, "--enable")?.to_owned());
+                index += 2;
+            }
+            "--patch" => {
+                let value = required_flag_value(args, index, "--patch")?;
+                execution.patch = Some(patches::parse_patch_argument(root, value)?);
                 index += 2;
             }
             value => {

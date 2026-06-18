@@ -10,6 +10,7 @@ pub(super) struct RuntimeConfig {
     pub(super) rc_path: PathBuf,
     pub(super) lfw_path: String,
     pub(super) workflow_paths: Vec<PathBuf>,
+    pub(super) home_path: PathBuf,
     pub(super) default_workflow_path: PathBuf,
 }
 
@@ -18,26 +19,55 @@ impl RuntimeConfig {
         let config_home = xdg_config_home()?;
         let data_home = xdg_data_home()?;
         let rc_path = config_home.join("lightflow").join(".lfwrc");
-        let default_workflow_path = data_home.join("lightflow").join("workflows");
-        let lfw_path = env::var("LFW_PATH")
+        let home_path = data_home.join("lightflow");
+        let default_workflow_path = home_path.join("workflows");
+        let raw_lfw_path = env::var("LFW_PATH")
             .ok()
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| default_workflow_path.display().to_string());
-        let workflow_paths = workflow_search_paths(&lfw_path, &default_workflow_path);
+            .unwrap_or_else(|| home_path.display().to_string());
+        let lfw_path =
+            normalize_default_lfw_path(&raw_lfw_path, &home_path, &default_workflow_path);
+        let workflow_paths = workflow_search_paths(&lfw_path, &home_path, &default_workflow_path);
         Ok(Self {
             rc_path,
             lfw_path,
             workflow_paths,
+            home_path,
             default_workflow_path,
         })
     }
 }
 
-fn workflow_search_paths(lfw_path: &str, default_workflow_path: &Path) -> Vec<PathBuf> {
+fn normalize_default_lfw_path(
+    lfw_path: &str,
+    home_path: &Path,
+    default_workflow_path: &Path,
+) -> String {
+    let paths = env::split_paths(lfw_path)
+        .map(|path| {
+            if path == default_workflow_path {
+                home_path.to_path_buf()
+            } else {
+                path
+            }
+        })
+        .collect::<Vec<_>>();
+    env::join_paths(paths)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_else(|| lfw_path.to_owned())
+}
+
+fn workflow_search_paths(
+    lfw_path: &str,
+    home_path: &Path,
+    default_workflow_path: &Path,
+) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for path in env::split_paths(lfw_path) {
         push_unique_path(&mut paths, path);
     }
+    push_unique_path(&mut paths, home_path.to_path_buf());
     push_unique_path(&mut paths, default_workflow_path.to_path_buf());
     paths
 }
@@ -63,7 +93,7 @@ pub(super) struct ShellSetup {
 pub(super) fn ensure_lfw_shell_setup(runtime: &RuntimeConfig) -> CliResult<ShellSetup> {
     fs::create_dir_all(&runtime.default_workflow_path)?;
     let (workspace_manifest, workspace_created) =
-        ensure_default_workflow_workspace(&runtime.default_workflow_path)?;
+        ensure_default_workflow_workspace(&runtime.home_path)?;
     let parent = runtime
         .rc_path
         .parent()
@@ -122,7 +152,7 @@ fn ensure_default_workflow_workspace(path: &Path) -> CliResult<(PathBuf, bool)> 
 }
 
 fn lfwrc_body(shell: Option<&str>, runtime: &RuntimeConfig) -> String {
-    let value = runtime.default_workflow_path.display().to_string();
+    let value = runtime.home_path.display().to_string();
     if shell == Some("fish") {
         format!(
             "# LightFlow CLI configuration\nset -gx LFW_PATH {}\n",

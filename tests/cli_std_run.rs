@@ -169,8 +169,12 @@ fn lfwx_runs_workflow_and_temporarily_toggles_nodes() -> Result<(), Box<dyn std:
     assert_eq!(run["outputs"]["out"], "hello");
     assert_eq!(run["nodes"][0]["node_id"], "nested");
     assert_eq!(run["nodes"][0]["status"], "completed");
+    assert!(run["nodes"][0]["duration_ms"].is_number());
+    assert_eq!(run["nodes"][0]["attempts"], 1);
     assert_eq!(run["nodes"][1]["node_id"], "sink");
     assert_eq!(run["nodes"][1]["status"], "completed");
+    assert!(run["nodes"][1]["duration_ms"].is_number());
+    assert_eq!(run["nodes"][1]["attempts"], 1);
 
     let disabled = lfwx(
         &root,
@@ -184,6 +188,7 @@ fn lfwx_runs_workflow_and_temporarily_toggles_nodes() -> Result<(), Box<dyn std:
     )?;
     assert_eq!(disabled["nodes"][0]["node_id"], "nested");
     assert_eq!(disabled["nodes"][0]["status"], "skipped");
+    assert_eq!(disabled["nodes"][0]["attempts"], 0);
     assert_eq!(disabled["outputs"]["out"], Value::Null);
 
     let enabled = lfw(
@@ -305,6 +310,255 @@ pub fn define() -> WorkflowSpec {
     assert_eq!(lfx_run["inputs"]["text"], "from-lfx");
     assert_eq!(lfx_run["inputs"]["prompt"], "from-input");
     assert_eq!(lfx_run["inputs"]["output_path"], "out.png");
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn lfw_run_records_trace_and_replays_history() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    write_project_specs(&root)?;
+
+    let run = lfw(&root, ["run", "lightflow.parent", "--input", "in=hello"])?;
+    let run_id = run["run_id"]
+        .as_str()
+        .expect("run output includes run_id")
+        .to_owned();
+    let run_dir = root.join(".lightflow/runs").join(&run_id);
+    assert!(run_dir.join("manifest.json").exists());
+    assert!(run_dir.join("execution.json").exists());
+    assert!(run_dir.join("events.jsonl").exists());
+    assert_eq!(run["workflow_id"], "lightflow.parent");
+    assert_eq!(run["outputs"]["out"], "hello");
+
+    let trace = lfw(&root, ["trace", "last"])?;
+    assert_eq!(trace["run_id"], run_id);
+    assert_eq!(
+        trace["manifest"]["stages"][0]["workflow_id"],
+        "lightflow.parent"
+    );
+    assert_eq!(trace["execution"]["workflow_id"], "lightflow.parent");
+    assert_eq!(trace["execution"]["outputs"]["out"], "hello");
+    assert_eq!(trace["events"][0]["event"], "run_started");
+    assert_eq!(trace["events"][1]["event"], "node_completed");
+    assert_eq!(trace["events"][1]["node_id"], "nested");
+    assert_eq!(trace["events"][1]["workflow_id"], "lightflow.parent");
+    assert_eq!(trace["events"][1]["attempts"], 1);
+    assert!(trace["events"][1]["duration_ms"].is_number());
+    assert_eq!(trace["events"][2]["event"], "node_completed");
+    assert_eq!(trace["events"][2]["node_id"], "sink");
+    assert_eq!(trace["events"][3]["event"], "run_finished");
+
+    let replay = lfw(&root, ["replay", run_id.as_str()])?;
+    assert_eq!(replay["workflow_id"], "lightflow.parent");
+    assert_eq!(replay["outputs"]["out"], "hello");
+    assert_ne!(replay["run_id"], run_id);
+
+    let replay_trace = lfw(&root, ["trace", replay["run_id"].as_str().unwrap()])?;
+    assert_eq!(replay_trace["execution"]["outputs"]["out"], "hello");
+
+    let runs = lfw(&root, ["runs", "list"])?;
+    assert_eq!(runs["last"], replay["run_id"]);
+    let runs_array = runs["runs"].as_array().unwrap();
+    assert_eq!(runs_array.len(), 2);
+    assert_eq!(runs_array[0]["run_id"], replay["run_id"]);
+    assert_eq!(runs_array[0]["status"], "completed");
+    assert_eq!(runs_array[0]["workflow_id"], "lightflow.parent");
+    assert_eq!(runs_array[1]["run_id"], run_id);
+
+    let run_detail = lfw(&root, ["runs", "get", run_id.as_str()])?;
+    assert_eq!(run_detail["run_id"], run_id);
+    assert_eq!(run_detail["execution"]["outputs"]["out"], "hello");
+
+    let removed = lfw(&root, ["runs", "rm", run_id.as_str()])?;
+    assert_eq!(removed["removed"], true);
+    assert!(!root.join(".lightflow/runs").join(&run_id).exists());
+    let runs_after_remove = lfw(&root, ["runs", "list"])?;
+    assert_eq!(runs_after_remove["runs"].as_array().unwrap().len(), 1);
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn lfw_run_applies_patch_files_at_node_boundaries() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    write_project_specs(&root)?;
+    write_workflow_crate(
+        &root,
+        "lightflow.replacement",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.replacement")
+        .version("0.1.0")
+        .name("Replacement")
+        .input("in", "json")
+        .output("out", "json")
+        .build()
+}
+"#,
+    )?;
+    write_workflow_crate(
+        &root,
+        "lightflow.fallback",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.fallback")
+        .version("0.1.0")
+        .name("Fallback")
+        .input("in", "json")
+        .output("out", "json")
+        .build()
+}
+"#,
+    )?;
+
+    let patch_path = root.join("patch.json");
+    fs::write(
+        &patch_path,
+        r#"{
+  "nodes": {
+    "nested": {
+      "replace_with": "lightflow.replacement",
+      "retry": 2,
+      "timeout_ms": 1000
+    }
+  }
+}
+"#,
+    )?;
+    let saved_patch = lfw(
+        &root,
+        [
+            "patch",
+            "save",
+            "qa-debug",
+            &format!("@{}", patch_path.display()),
+        ],
+    )?;
+    assert_eq!(saved_patch["saved"], true);
+    assert_eq!(saved_patch["name"], "qa-debug");
+    assert!(root.join(".lightflow/patches/qa-debug.json").exists());
+
+    let patches = lfw(&root, ["patch", "list"])?;
+    assert_eq!(patches["patches"][0]["name"], "qa-debug");
+
+    let registered_patch = lfw(&root, ["patch", "get", "qa-debug"])?;
+    assert_eq!(
+        registered_patch["patch"]["nodes"]["nested"]["replace_with"],
+        "lightflow.replacement"
+    );
+    let validated_patch = lfw(&root, ["patch", "validate", "qa-debug"])?;
+    assert_eq!(validated_patch["valid"], true);
+    assert_eq!(
+        validated_patch["patch"]["nodes"]["nested"]["replace_with"],
+        "lightflow.replacement"
+    );
+
+    let patched = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--patch",
+            "qa-debug",
+        ],
+    )?;
+    assert_eq!(patched["outputs"]["out"], "hello");
+    assert_eq!(patched["nodes"][0]["node_id"], "nested");
+    assert_eq!(patched["nodes"][0]["workflow_id"], "lightflow.child");
+    assert_eq!(
+        patched["nodes"][0]["selected_workflow_id"],
+        "lightflow.replacement"
+    );
+    assert_eq!(patched["nodes"][0]["attempts"], 1);
+
+    let trace = lfw(&root, ["trace", patched["run_id"].as_str().unwrap()])?;
+    assert_eq!(
+        trace["manifest"]["stages"][0]["execution"]["patch"]["nodes"]["nested"]["replace_with"],
+        "lightflow.replacement"
+    );
+    assert_eq!(
+        trace["manifest"]["stages"][0]["execution"]["patch"]["nodes"]["nested"]["retry"],
+        2
+    );
+    assert_eq!(trace["events"][1]["event"], "node_completed");
+    assert_eq!(trace["events"][1]["node_id"], "nested");
+    assert_eq!(
+        trace["events"][1]["selected_workflow_id"],
+        "lightflow.replacement"
+    );
+
+    let fallback_patch = r#"{
+  "nodes": {
+    "nested": {
+      "disable": true,
+      "fallback_workflow_id": "lightflow.fallback"
+    }
+  }
+}"#;
+    let fallback = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--patch",
+            fallback_patch,
+        ],
+    )?;
+    assert_eq!(fallback["nodes"][0]["status"], "completed");
+    assert_eq!(
+        fallback["nodes"][0]["selected_workflow_id"],
+        "lightflow.fallback"
+    );
+    assert_eq!(fallback["outputs"]["out"], "hello");
+
+    let disabled = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--patch",
+            r#"{"nodes":{"nested":{"disable":true}}}"#,
+        ],
+    )?;
+    assert_eq!(disabled["nodes"][0]["status"], "skipped");
+    assert!(disabled["nodes"][0]["duration_ms"].is_number());
+    assert_eq!(disabled["nodes"][0]["attempts"], 0);
+    assert_eq!(disabled["outputs"]["out"], Value::Null);
+
+    let disabled_trace = lfw(&root, ["trace", disabled["run_id"].as_str().unwrap()])?;
+    assert_eq!(disabled_trace["events"][1]["event"], "node_skipped");
+    assert_eq!(disabled_trace["events"][1]["node_id"], "nested");
+
+    let enabled = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--disable",
+            "nested",
+            "--patch",
+            r#"{"nodes":{"nested":{"enable":true}}}"#,
+        ],
+    )?;
+    assert_eq!(enabled["nodes"][0]["status"], "completed");
+    assert_eq!(enabled["outputs"]["out"], "hello");
+
+    let removed_patch = lfw(&root, ["patch", "rm", "qa-debug"])?;
+    assert_eq!(removed_patch["removed"], true);
+    assert!(!root.join(".lightflow/patches/qa-debug.json").exists());
 
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -528,6 +782,26 @@ pub fn define() -> WorkflowSpec {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("has no executor"));
     assert!(stderr.contains("lightflow.image.inpaint"));
+    assert!(stderr.contains("run_id: run-"));
+    assert!(stderr.contains("trace_path:"));
+
+    let trace = lfw(&root, ["trace", "last"])?;
+    assert_eq!(trace["manifest"]["status"], "failed");
+    assert_eq!(trace["execution"]["status"], "failed");
+    assert!(
+        trace["execution"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("lightflow.image.inpaint")
+    );
+    assert_eq!(trace["events"][0]["event"], "run_started");
+    assert_eq!(trace["events"][1]["event"], "run_failed");
+    assert!(
+        trace["events"][1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("has no executor")
+    );
 
     let _ = fs::remove_dir_all(root);
     Ok(())
