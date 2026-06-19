@@ -404,7 +404,7 @@ fn order_workflow_publish_plans(plans: &mut Vec<WorkflowPublishPlan>) -> CliResu
             internal_path_dependencies(&plan.manifest_path, &package_by_dir)?;
     }
 
-    let mut pending = plans.drain(..).collect::<Vec<_>>();
+    let mut pending = std::mem::take(plans);
     let mut published = BTreeSet::new();
     let mut ordered = Vec::new();
     while !pending.is_empty() {
@@ -469,10 +469,10 @@ fn collect_internal_path_dependencies(
             continue;
         };
         let dependency_dir = manifest_dir.join(path);
-        if let Ok(dependency_dir) = canonicalize_existing(&dependency_dir) {
-            if let Some(package) = package_by_dir.get(&dependency_dir) {
-                internal_dependencies.insert(package.clone());
-            }
+        if let Ok(dependency_dir) = canonicalize_existing(&dependency_dir)
+            && let Some(package) = package_by_dir.get(&dependency_dir)
+        {
+            internal_dependencies.insert(package.clone());
         }
     }
     Ok(())

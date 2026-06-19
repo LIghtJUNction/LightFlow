@@ -11,8 +11,8 @@ Use `lightflow.text_result` to pass generated text into a final result port.
 ## Workflow
 
 - Workflow id: `lightflow.text_result`
-- Input `text`: generated text.
-- Output `result`: final text result.
+- Input `text`: required generated text; widget `textarea`.
+- Output `result`: final normalized text result.
 
 ## Usage
 

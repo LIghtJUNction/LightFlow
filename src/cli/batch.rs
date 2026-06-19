@@ -542,8 +542,7 @@ fn default_cpu_jobs() -> usize {
         .map(usize::from)
         .unwrap_or(2)
         .saturating_div(2)
-        .max(1)
-        .min(8)
+        .clamp(1, 8)
 }
 
 fn now_ms() -> u128 {

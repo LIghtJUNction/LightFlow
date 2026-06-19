@@ -89,10 +89,14 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     let source = fs::read_to_string(path)?;
     assert!(source.contains("workflow(\"lightflow.extra\")"));
     assert!(source.contains(".name(\"Extra Workflow\")"));
+    assert!(source.contains(".input_description(\"value\""));
+    assert!(source.contains(".input_required(\"value\", true)"));
+    assert!(source.contains(".input_widget(\"value\", \"json\")"));
     let skill = fs::read_to_string(
         root.join("workflows/examples/extra/.agent/skills/lightflow-extra/SKILL.md"),
     )?;
     assert!(skill.contains("Workflow id: `lightflow.extra`"));
+    assert!(skill.contains("Input `value`: JSON value; required; widget `json`."));
     assert!(!root.join("workflows/examples/extra/src/main.rs").exists());
 
     let workflow = lightflow(&root, ["workflows", "get", "lightflow.extra"])?;
@@ -170,6 +174,138 @@ fn lfw_new_and_add_support_global_workflow_workspace() -> Result<(), Box<dyn std
     assert!(global_manifest.contains("lightflow-std"));
     let project_manifest = fs::read_to_string(root.join("Cargo.toml"))?;
     assert!(!project_manifest.contains("lightflow-std"));
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn lfw_new_runtime_template_creates_node_contract_files() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    lfw(&root, ["init"])?;
+
+    let created = lfw(
+        &root,
+        [
+            "new",
+            "my_flux_sampler",
+            "--category",
+            "image",
+            "--name",
+            "My Flux Sampler",
+            "--runtime",
+            "lightflow.image.generate",
+        ],
+    )?;
+    assert_eq!(created["workflow_id"], "lightflow.my_flux_sampler");
+    assert_eq!(created["runtime"], "lightflow.image.generate");
+    assert_eq!(
+        created["example"],
+        serde_json::json!([
+            "lfw",
+            "run",
+            "lightflow.my_flux_sampler",
+            "--prompt",
+            "\"a quiet lake\"",
+            "-i",
+            "width=512",
+            "-i",
+            "height=512"
+        ])
+    );
+
+    let crate_dir = root.join("workflows/image/my_flux_sampler");
+    let source = fs::read_to_string(crate_dir.join("src/lib.rs"))?;
+    assert!(source.contains(".runtime(\"image_runtime\", \"lightflow.image.generate\")"));
+    assert!(source.contains(".model(\"image_model\", \"text-to-image\")"));
+    assert!(source.contains(".input_widget(\"prompt\", \"prompt\")"));
+    assert!(source.contains(".input_model_requirement(\"model\", \"image_model\")"));
+    assert!(source.contains(".output_artifact_kind(\"image\", \"image\")"));
+
+    let skill =
+        fs::read_to_string(crate_dir.join(".agent/skills/lightflow-my-flux-sampler/SKILL.md"))?;
+    assert!(skill.contains("Runtime: `lightflow.image.generate`."));
+    assert!(skill.contains("Model requirement `image_model`"));
+    assert!(skill.contains("lfw run lightflow.my_flux_sampler"));
+
+    let contract = fs::read_to_string(crate_dir.join("tests/contract.rs"))?;
+    assert!(contract.contains("lightflow_my_flux_sampler::define()"));
+    assert!(contract.contains("lightflow.image.generate"));
+
+    let workflow = lfw(&root, ["workflows", "get", "lightflow.my_flux_sampler"])?;
+    assert_eq!(
+        workflow["runtimes"][0]["capability"],
+        "lightflow.image.generate"
+    );
+    assert_eq!(workflow["models"][0]["id"], "image_model");
+    assert_eq!(workflow["inputs"][0]["name"], "prompt");
+    assert_eq!(workflow["inputs"][0]["widget"], "prompt");
+    assert_eq!(workflow["outputs"][0]["artifact_kind"], "image");
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn lfw_node_test_checks_schema_runtime_models_and_skill() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    lfw(&root, ["init"])?;
+    lfw(
+        &root,
+        [
+            "new",
+            "my_flux_sampler",
+            "--category",
+            "image",
+            "--runtime",
+            "lightflow.image.generate",
+        ],
+    )?;
+
+    let report = lfw(&root, ["node", "test", "lightflow.my_flux_sampler"])?;
+    assert_eq!(report["workflow_id"], "lightflow.my_flux_sampler");
+    assert_eq!(report["valid"], true);
+    assert!(
+        report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| { check["id"] == "node.schema" && check["status"] == "passed" })
+    );
+    assert!(
+        report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| { check["id"] == "node.runtime" && check["status"] == "passed" })
+    );
+    assert!(
+        report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| { check["id"] == "node.skill" && check["status"] == "passed" })
+    );
+
+    let crate_dir = root.join("workflows/image/my_flux_sampler");
+    fs::remove_dir_all(crate_dir.join(".agent/skills/lightflow-my-flux-sampler"))?;
+    let failed = Command::new(env!("CARGO_BIN_EXE_lfw"))
+        .args(["node", "test", "lightflow.my_flux_sampler"])
+        .current_dir(&root)
+        .env("HOME", &root)
+        .env("SHELL", "/bin/zsh")
+        .env("XDG_CONFIG_HOME", root.join(".test-xdg/config"))
+        .env("XDG_DATA_HOME", root.join(".test-xdg/data"))
+        .env_remove("LFW_PATH")
+        .output()?;
+    assert!(!failed.status.success());
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("\"valid\":false"), "stderr:\n{stderr}");
+    assert!(stderr.contains("node.skill"), "stderr:\n{stderr}");
 
     let _ = fs::remove_dir_all(root);
     Ok(())

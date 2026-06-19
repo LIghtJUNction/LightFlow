@@ -1,0 +1,28 @@
+use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.control.merge")
+        .version("0.1.0")
+        .name("Control Merge")
+        .description("Merge two JSON values using a selected merge mode.")
+        .input("a", "json")
+        .input_description("a", "First value.")
+        .input_required("a", false)
+        .input_widget("a", "json")
+        .input("b", "json")
+        .input_description("b", "Second value.")
+        .input_required("b", false)
+        .input_widget("b", "json")
+        .input("mode", "text")
+        .input_description("mode", "Merge mode: first_non_null, object, or array.")
+        .input_required("mode", false)
+        .input_default_json("mode", "\"first_non_null\"")
+        .input_enum_json("mode", "[\"first_non_null\",\"object\",\"array\"]")
+        .input_widget("mode", "select")
+        .output("value", "json")
+        .output_description("value", "Merged value.")
+        .output("selected", "text")
+        .output_description("selected", "Merge mode used.")
+        .runtime("control_merge", "lightflow.control.merge")
+        .build()
+}

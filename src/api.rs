@@ -3,11 +3,14 @@
 mod deps;
 mod dsl;
 mod execution;
+mod executors;
 mod flux;
 #[cfg(feature = "flux-native")]
 mod flux_native;
+mod history;
 mod llm_rig;
 mod model_manager;
+mod nodes;
 mod plan;
 mod source;
 mod util;
@@ -31,6 +34,12 @@ use writer::{workflow_source, write_text_atomic};
 
 pub(super) const WORKFLOW_DIR: &str = "workflows";
 pub(super) const LEGACY_LIGHTFLOW_DIR: &str = "lightflow";
+
+pub use executors::{ExecutorInfo, executor_registry};
+#[cfg(test)]
+pub(crate) use history::write_history_fixture;
+pub use history::{ArtifactCatalog, RunCatalog, RunEvents, RunTrace};
+pub use nodes::{ModelCatalog, NodeCard, NodeCatalog};
 
 /// Backend service state independent of any web framework.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -71,6 +80,51 @@ impl ApiService {
             .map(WorkflowSummary::from)
             .collect();
         Ok(WorkflowList { workflows })
+    }
+
+    /// List workflow-backed nodes with editor-facing schema, runtime, and
+    /// validation metadata.
+    pub fn list_nodes(&self) -> ApiResult<NodeCatalog> {
+        let workflows = self.workflow_specs()?;
+        let executors = executor_registry();
+        Ok(nodes::node_catalog(&workflows, &executors, |workflow| {
+            node_validation_summary(workflow, &workflows)
+        }))
+    }
+
+    /// Read one workflow-backed node card.
+    pub fn get_node(&self, workflow_id: &str) -> ApiResult<NodeCard> {
+        let workflows = self.workflow_specs()?;
+        let executors = executor_registry();
+        nodes::get_node_card(&workflows, &executors, workflow_id, |workflow| {
+            node_validation_summary(workflow, &workflows)
+        })
+    }
+
+    /// List model requirements declared by available nodes.
+    pub fn list_models(&self) -> ApiResult<ModelCatalog> {
+        let workflows = self.workflow_specs()?;
+        Ok(nodes::model_catalog(&workflows))
+    }
+
+    /// List recorded local runs.
+    pub fn list_runs(&self) -> ApiResult<RunCatalog> {
+        history::list_runs(&self.repo_root)
+    }
+
+    /// Read a recorded run trace by id, or `last`.
+    pub fn get_run(&self, selector: &str) -> ApiResult<RunTrace> {
+        history::get_run(&self.repo_root, selector)
+    }
+
+    /// Read only events for a recorded run.
+    pub fn get_run_events(&self, selector: &str) -> ApiResult<RunEvents> {
+        history::get_run_events(&self.repo_root, selector)
+    }
+
+    /// List artifacts produced by recorded runs.
+    pub fn list_artifacts(&self) -> ApiResult<ArtifactCatalog> {
+        history::list_artifacts(&self.repo_root)
     }
 
     /// Read one workflow spec.
@@ -170,6 +224,30 @@ impl ApiService {
             .join(workflow_crate_dir_name(workflow_id))
             .join("src")
             .join("lib.rs"))
+    }
+}
+
+fn node_validation_summary(
+    workflow: &WorkflowSpec,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+) -> nodes::NodeValidationSummary {
+    let mut validation = validate_workflow_spec(workflow, workflows);
+    let dependencies = dependency_report(&workflow.id, workflows);
+    for cycle in dependencies.cycles {
+        validation
+            .issues
+            .push(format!("workflow dependency cycle: {}", cycle.join(" -> ")));
+    }
+    for mismatch in dependencies.version_mismatches {
+        validation.issues.push(format!(
+            "workflow {} requires version {} but found {}",
+            mismatch.workflow_id, mismatch.required, mismatch.found
+        ));
+    }
+    validation.valid = validation.issues.is_empty();
+    nodes::NodeValidationSummary {
+        valid: validation.valid,
+        issues: validation.issues,
     }
 }
 

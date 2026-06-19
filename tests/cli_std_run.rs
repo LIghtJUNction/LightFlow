@@ -30,7 +30,8 @@ fn repository_std_workflow_is_library_only_and_abstract() -> Result<(), Box<dyn 
 
     let manifest = fs::read_to_string(crate_dir.join("Cargo.toml"))?;
     assert!(manifest.contains("name = \"lightflow-std\""));
-    assert!(manifest.contains("lightflow = { version = \"0.1.1\", path = \"../../../..\" }"));
+    assert!(manifest.contains("lightflow = { version = \"0.1.1\", path = \"../../..\" }"));
+    assert!(manifest.contains("[workspace]"));
     assert!(!manifest.contains("publish = false"));
 
     Ok(())

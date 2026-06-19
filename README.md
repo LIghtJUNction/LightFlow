@@ -50,7 +50,11 @@ pub fn define() -> WorkflowSpec {
         .version("0.1.0")
         .name("Text Plan")
         .input("value", "json")
+        .input_description("value", "Structured request payload.")
+        .input_required("value", true)
+        .input_widget("value", "json")
         .output("result", "text")
+        .output_description("result", "Generated text result.")
         .depends_on("lightflow.std", "0.1.0")
         .depends_on("lightflow.text_prompt", "0.1.0")
         .node("identity", "lightflow.std")
@@ -63,12 +67,18 @@ pub fn define() -> WorkflowSpec {
 The backend parses this DSL statically from Rust ASTs; it does not execute or
 compile workflow source files.
 
+Ports can include Node Schema v1 metadata such as descriptions,
+required/default constraints, numeric ranges, enum values, widget hints,
+artifact kinds, and model requirement bindings. That metadata is used by
+`lfw help`, OpenAPI, and future editor node panels.
+
 ## CLI
 
 ```bash
 cargo run --bin lfw -- init --workflow
 cargo run --bin lfw -- init --plugin
 cargo run --bin lfw -- new my_flow --category std --name "My Flow"
+cargo run --bin lfw -- new my_flux_sampler --category image --runtime lightflow.image.generate
 cargo run --bin lfw -- new my_global_flow --category std --global
 cargo run --bin lfw -- info
 cargo run --bin lfw -- home
@@ -94,9 +104,16 @@ cargo run --bin lfw -- runs get last
 cargo run --bin lfw -- replay run-1781797000000
 cargo run --bin lfx -- lightflow.text_plan --input value='{"topic":"demo"}' --disable prompt
 cargo run --bin lfw -- workflows validate '{"id":"lightflow.example","version":"0.1.0","name":"Example"}'
+cargo run --bin lfw -- node test lightflow.text_to_image
 cargo run --bin lfw -- publish lightflow.std
 cargo run --bin lfw -- mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 cargo run --bin lfw -- serve --port 5174
+curl http://127.0.0.1:5174/nodes
+curl http://127.0.0.1:5174/nodes/lightflow.text_to_image
+curl http://127.0.0.1:5174/models
+curl http://127.0.0.1:5174/runs
+curl http://127.0.0.1:5174/runs/last/events
+curl http://127.0.0.1:5174/artifacts
 ```
 
 `lfx` is an alias for `lfw run`. It accepts generic JSON inputs, common text /
@@ -130,13 +147,43 @@ a local `mock` provider for tests.
 Use `lfw info` to inspect the current LightFlow build and project architecture:
 package version, enabled build features, project workflow search paths,
 workflow counts by category, declared runtime capabilities, model requirement
-count, and available executors. `lfw arch` and `lfw architecture` are aliases.
+count, and the Executor Registry. `lfw arch` and `lfw architecture` are
+aliases. The registry is the single contract for current executors such as
+passthrough, preview image generation/edit/inpaint, FLUX, image transforms,
+builtin text/JSON/mask/control/model helpers, offline mock LLM generation, and
+RIG, plus reserved future capabilities such as command, Python node, ONNX, and
+Candle execution.
 
 Use `lfw help <workflow_id>` when you know a workflow id but not its contract.
 It returns the workflow metadata, input and output ports, dependency status,
 model requirements, runtime capabilities, graph nodes and edges, plus example
 `lfw run` input flags and a JSON input shape. `lfw workflows help <workflow_id>`
 is the equivalent namespaced form.
+
+When the HTTP backend is running, `/nodes` returns editor-facing node cards for
+all visible workflows: Node Schema v1 ports, runtime executor availability,
+model requirements, graph summary, and validation status. `/nodes/{workflow_id}`
+returns one node card, and `/models` returns model requirements with their port
+bindings. These endpoints are the backend contract for a ComfyUI-style node
+palette without introducing a separate node source format.
+
+The same backend exposes project-local run history for editor history panels:
+`/runs` lists `.lightflow/runs`, `/runs/{run_id}` returns manifest, execution,
+and events, `/runs/{run_id}/events` returns only append-only events, and
+`/artifacts` lists artifact handles found in recorded executions.
+
+The standard node library now includes executable text and JSON helpers for
+prompt graphs: `lightflow.text.concat`, `lightflow.text.template`,
+`lightflow.text.regex`, and `lightflow.json.extract`; image and mask helpers
+`lightflow.image.load`, `lightflow.image.save`, `lightflow.image.resize`,
+`lightflow.image.crop`, `lightflow.image.upscale`, and
+`lightflow.mask.compose`; preview diffusion nodes `lightflow.image.edit` and
+`lightflow.image.inpaint`; control helpers `lightflow.control.if`,
+`lightflow.control.switch`, `lightflow.control.merge`, and
+`lightflow.control.split`; model helpers `lightflow.model.select` and
+`lightflow.model.lock_check`; and LLM helpers `lightflow.llm.generate`,
+`lightflow.llm.classify`, and `lightflow.llm.structured_output`, alongside
+identity, prompt/result, image generation, and image invert workflows.
 
 Every `lfw run` and `lfx` execution is recorded under
 `.lightflow/runs/<run_id>/`:

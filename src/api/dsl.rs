@@ -93,17 +93,109 @@ fn parse_workflow_builder(expression: &syn::Expr, path: &Path) -> ApiResult<Work
                     expect_arg_len(&call.args, 1, &method, path)?;
                 }
                 "input" => {
-                    workflow.inputs.push(PortSpec {
-                        name: string_arg(&call.args, 0, &method, path)?,
-                        ty: string_arg(&call.args, 1, &method, path)?,
-                    });
+                    workflow.inputs.push(PortSpec::new(
+                        string_arg(&call.args, 0, &method, path)?,
+                        string_arg(&call.args, 1, &method, path)?,
+                    ));
                     expect_arg_len(&call.args, 2, &method, path)?;
                 }
                 "output" => {
-                    workflow.outputs.push(PortSpec {
-                        name: string_arg(&call.args, 0, &method, path)?,
-                        ty: string_arg(&call.args, 1, &method, path)?,
-                    });
+                    workflow.outputs.push(PortSpec::new(
+                        string_arg(&call.args, 0, &method, path)?,
+                        string_arg(&call.args, 1, &method, path)?,
+                    ));
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "input_description" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let description = string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.description = Some(description);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "output_description" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let description = string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.outputs, &name) {
+                        port.description = Some(description);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "input_required" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let required = bool_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.required = Some(required);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "input_default_json" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let value = json_string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.default = Some(value);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "input_range" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let min = number_arg(&call.args, 1, &method, path)?;
+                    let max = number_arg(&call.args, 2, &method, path)?;
+                    let step = number_arg(&call.args, 3, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.min = Some(min);
+                        port.max = Some(max);
+                        port.step = Some(step);
+                    }
+                    expect_arg_len(&call.args, 4, &method, path)?;
+                }
+                "input_enum_json" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let values = json_array_string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.enum_values = values;
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "input_widget" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let widget = string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.widget = Some(widget);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "input_artifact_kind" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let kind = string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.artifact_kind = Some(kind);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "output_artifact_kind" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let kind = string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.outputs, &name) {
+                        port.artifact_kind = Some(kind);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "input_model_requirement" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let requirement_id = string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.inputs, &name) {
+                        port.model_requirement = Some(requirement_id);
+                    }
+                    expect_arg_len(&call.args, 2, &method, path)?;
+                }
+                "output_model_requirement" => {
+                    let name = string_arg(&call.args, 0, &method, path)?;
+                    let requirement_id = string_arg(&call.args, 1, &method, path)?;
+                    if let Some(port) = find_port_mut(&mut workflow.outputs, &name) {
+                        port.model_requirement = Some(requirement_id);
+                    }
                     expect_arg_len(&call.args, 2, &method, path)?;
                 }
                 "depends_on" => {
@@ -364,6 +456,81 @@ fn string_arg(
     }
 }
 
+fn json_string_arg(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    index: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<serde_json::Value> {
+    let raw = string_arg(args, index, method, path)?;
+    serde_json::from_str(&raw).map_err(|error| {
+        ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) argument {} in {:?} must be JSON: {error}",
+            index + 1,
+            path
+        ))
+    })
+}
+
+fn json_array_string_arg(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    index: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<Vec<serde_json::Value>> {
+    let value = json_string_arg(args, index, method, path)?;
+    match value {
+        serde_json::Value::Array(values) => Ok(values),
+        _ => Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) argument {} in {:?} must be a JSON array",
+            index + 1,
+            path
+        ))),
+    }
+}
+
+fn number_arg(
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    index: usize,
+    method: &str,
+    path: &Path,
+) -> ApiResult<f64> {
+    let Some(argument) = args.iter().nth(index) else {
+        return Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) in {:?} is missing argument {}",
+            path,
+            index + 1
+        )));
+    };
+    match argument {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Float(value),
+            ..
+        }) => value.base10_parse::<f64>().map_err(|error| {
+            ApiError::InvalidRequest(format!(
+                "workflow builder .{method}(...) argument {} in {:?} must be a number: {error}",
+                index + 1,
+                path
+            ))
+        }),
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(value),
+            ..
+        }) => value.base10_parse::<f64>().map_err(|error| {
+            ApiError::InvalidRequest(format!(
+                "workflow builder .{method}(...) argument {} in {:?} must be a number: {error}",
+                index + 1,
+                path
+            ))
+        }),
+        _ => Err(ApiError::InvalidRequest(format!(
+            "workflow builder .{method}(...) argument {} in {:?} must be a number literal",
+            index + 1,
+            path
+        ))),
+    }
+}
+
 fn bool_arg(
     args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
     index: usize,
@@ -388,6 +555,10 @@ fn bool_arg(
             path
         ))),
     }
+}
+
+fn find_port_mut<'a>(ports: &'a mut [PortSpec], name: &str) -> Option<&'a mut PortSpec> {
+    ports.iter_mut().find(|port| port.name == name)
 }
 
 fn expect_arg_len(

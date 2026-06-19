@@ -376,18 +376,12 @@ where
     O: Send + Sync + 'static,
 {
     let mut next = Next { call: f };
-    for hook in hooks
-        .around
-        .get(node_id)
-        .into_iter()
-        .flatten()
-        .rev()
-        .cloned()
-    {
+    for hook in hooks.around.get(node_id).into_iter().flatten().rev() {
+        let hook = Arc::clone(hook);
         let previous = next;
         next = Next {
             call: Arc::new(move |input| {
-                let hook = hook.clone();
+                let hook = Arc::clone(&hook);
                 let previous = previous.clone();
                 Box::pin(async move { hook.call(input, previous).await })
             }),

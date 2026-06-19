@@ -192,10 +192,20 @@ pub fn define() -> WorkflowSpec {
         .name("Example")
         .description("Reusable workflow definition.")
         .input("value", "json")
+        .input_description("value", "Value to process.")
+        .input_required("value", true)
+        .input_widget("value", "json")
         .output("text", "text")
+        .output_description("text", "Processed text output.")
         .build()
 }
 ```
+
+Input and output ports can carry Node Schema v1 metadata for editor and agent
+tooling: descriptions, required/default values, numeric ranges, enum choices,
+widget hints, artifact kinds, and model requirement bindings. The short
+`.input(name, type)` and `.output(name, type)` forms remain valid for minimal
+workflows.
 
 Composite workflows nest other workflows with `.node()` and connect node ports
 with `.edge()`:
@@ -369,6 +379,47 @@ and `version`, followed by concise instructions for the workflow or plugin.
 `lfw init --workflow`, `lfw new`, and `lfw init --plugin` generate a starter
 skill. When workflow inputs, outputs, model requirements, runtime behavior, or
 common commands change, update the corresponding skill in the same change.
+`lfw new --runtime <capability>` selects a runtime-aware node template. For
+example, `--runtime lightflow.image.generate` generates prompt/image ports,
+Node Schema v1 metadata, an `image_model` requirement placeholder, a runnable
+skill example, and a `tests/contract.rs` scaffold for the workflow crate.
+Run `lfw node test <workflow_id>` before publishing or installing a node. The
+conformance check validates the workflow graph, `lfw help` contract, Node
+Schema v1 metadata, model requirement bindings, runtime executor availability,
+and the workflow crate's agent skill.
+
+The backend exposes workflow-backed nodes over HTTP for editor palettes:
+
+```text
+GET /nodes
+GET /nodes/<workflow_id>
+GET /models
+GET /runs
+GET /runs/<run_id>
+GET /runs/<run_id>/events
+GET /artifacts
+```
+
+The node endpoints do not create another node file format. They project the
+source-controlled workflow crates into node cards with schema, runtime, model,
+graph, and validation metadata. The run and artifact endpoints project the
+existing `.lightflow/runs` directory for editor history, event, and artifact
+browsers.
+
+Standard workflow nodes live in the same `workflows/std/<short-name>` layout.
+Current prompt-graph helpers include `lightflow.text.concat`,
+`lightflow.text.template`, `lightflow.text.regex`, and
+`lightflow.json.extract`; image and mask artifact helpers include
+`lightflow.image.load`, `lightflow.image.save`, `lightflow.image.resize`,
+`lightflow.image.crop`, `lightflow.image.upscale`, and
+`lightflow.mask.compose`; preview diffusion helpers include
+`lightflow.image.edit` and `lightflow.image.inpaint`; control helpers include
+`lightflow.control.if`, `lightflow.control.switch`, `lightflow.control.merge`,
+and `lightflow.control.split`; model helpers include `lightflow.model.select`
+and `lightflow.model.lock_check`; LLM helpers include
+`lightflow.llm.generate`, `lightflow.llm.classify`, and
+`lightflow.llm.structured_output`. Each has a matching
+`.agent/skills/<skill-name>/SKILL.md` file and a builtin runtime capability.
 
 `lfw sync --apply` discovers skills from installed workflow/plugin projects,
 asks whether to symlink each skill into the current project's `.agents/skills`

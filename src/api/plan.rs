@@ -1,13 +1,35 @@
 use super::{ApiError, ApiResult};
+use crate::api::executors::select_leaf_executor;
 use crate::workflow::WorkflowSpec;
 
 pub(super) const IMAGE_GENERATE_CAPABILITY: &str = "lightflow.image.generate";
 pub(super) const IMAGE_EDIT_CAPABILITY: &str = "lightflow.image.edit";
 pub(super) const IMAGE_INPAINT_CAPABILITY: &str = "lightflow.image.inpaint";
 pub(super) const IMAGE_INVERT_CAPABILITY: &str = "lightflow.image.invert";
+pub(super) const IMAGE_LOAD_CAPABILITY: &str = "lightflow.image.load";
+pub(super) const IMAGE_SAVE_CAPABILITY: &str = "lightflow.image.save";
+pub(super) const IMAGE_RESIZE_CAPABILITY: &str = "lightflow.image.resize";
+pub(super) const IMAGE_CROP_CAPABILITY: &str = "lightflow.image.crop";
 pub(super) const LLM_GENERATE_CAPABILITY: &str = "lightflow.llm.generate";
+pub(super) const TEXT_CONCAT_CAPABILITY: &str = "lightflow.text.concat";
+pub(super) const TEXT_TEMPLATE_CAPABILITY: &str = "lightflow.text.template";
+pub(super) const TEXT_REGEX_CAPABILITY: &str = "lightflow.text.regex";
+pub(super) const JSON_EXTRACT_CAPABILITY: &str = "lightflow.json.extract";
+pub(super) const CONTROL_IF_CAPABILITY: &str = "lightflow.control.if";
+pub(super) const CONTROL_SWITCH_CAPABILITY: &str = "lightflow.control.switch";
+pub(super) const CONTROL_MERGE_CAPABILITY: &str = "lightflow.control.merge";
+pub(super) const CONTROL_SPLIT_CAPABILITY: &str = "lightflow.control.split";
+pub(super) const MODEL_SELECT_CAPABILITY: &str = "lightflow.model.select";
+pub(super) const MODEL_LOCK_CHECK_CAPABILITY: &str = "lightflow.model.lock.check";
+pub(super) const IMAGE_UPSCALE_CAPABILITY: &str = "lightflow.image.upscale";
+pub(super) const MASK_COMPOSE_CAPABILITY: &str = "lightflow.mask.compose";
+pub(super) const LLM_CLASSIFY_CAPABILITY: &str = "lightflow.llm.classify";
+pub(super) const LLM_STRUCTURED_OUTPUT_CAPABILITY: &str = "lightflow.llm.structured_output";
 pub(super) const PREVIEW_ENGINE: &str = "builtin.preview.v1";
+pub(super) const PREVIEW_EDIT_ENGINE: &str = "builtin.preview.edit.v1";
+pub(super) const PREVIEW_INPAINT_ENGINE: &str = "builtin.preview.inpaint.v1";
 pub(super) const INVERT_ENGINE: &str = "builtin.image.invert.v1";
+pub(super) const LLM_MOCK_ENGINE: &str = "builtin.llm.mock.v1";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct ExecutionPlan {
@@ -32,7 +54,28 @@ pub(super) enum ExecutionRecipe {
     FluxImageEdit,
     FluxInpaint,
     ImageInvert,
+    ImageLoad,
+    ImageSave,
+    ImageResize,
+    ImageCrop,
+    PreviewImageEdit,
+    PreviewInpaint,
     RigLlmGenerate,
+    TextConcat,
+    TextTemplate,
+    TextRegex,
+    JsonExtract,
+    ControlIf,
+    ControlSwitch,
+    ControlMerge,
+    ControlSplit,
+    ModelSelect,
+    ModelLockCheck,
+    ImageUpscale,
+    MaskCompose,
+    BuiltinLlmGenerate,
+    LlmClassify,
+    LlmStructuredOutput,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -56,134 +99,26 @@ pub(super) enum DataPolicy {
 }
 
 pub(super) fn build_leaf_execution_plan(workflow: &WorkflowSpec) -> ApiResult<ExecutionPlan> {
-    let node = if workflow.runtimes.iter().any(|runtime| {
-        runtime.capability == IMAGE_GENERATE_CAPABILITY
-            && runtime.engine.as_deref() == Some(PREVIEW_ENGINE)
-    }) {
-        ExecutionPlanNode {
-            id: format!("{}::plan", workflow.id),
-            recipe: ExecutionRecipe::PreviewTextToImage,
-            atoms: atoms(&[
-                ("lightflow.atom.prompt", "lightflow.text.prompt"),
-                ("lightflow.atom.preview_pixels", IMAGE_GENERATE_CAPABILITY),
-                ("lightflow.atom.save_image", "lightflow.artifact.image"),
-            ]),
-            models: planned_models(workflow),
-            data_policy: DataPolicy::ArtifactHandles,
-        }
-    } else if workflow
-        .runtimes
-        .iter()
-        .any(|runtime| runtime.capability == IMAGE_GENERATE_CAPABILITY)
-        && super::flux::workflow_declares_flux_assets(workflow)
-    {
-        ExecutionPlanNode {
-            id: format!("{}::plan", workflow.id),
-            recipe: ExecutionRecipe::FluxTextToImage,
-            atoms: atoms(&[
-                ("lightflow.atom.load_flux_model", "lightflow.model.load"),
-                ("lightflow.atom.load_text_encoder", "lightflow.model.load"),
-                ("lightflow.atom.load_vae", "lightflow.model.load"),
-                ("lightflow.atom.encode_prompt", "lightflow.text.encode"),
-                ("lightflow.atom.sample_latents", IMAGE_GENERATE_CAPABILITY),
-                ("lightflow.atom.decode_vae", "lightflow.image.decode"),
-                ("lightflow.atom.save_image", "lightflow.artifact.image"),
-            ]),
-            models: planned_models(workflow),
-            data_policy: DataPolicy::DeviceResidentPreferred,
-        }
-    } else if workflow
-        .runtimes
-        .iter()
-        .any(|runtime| runtime.capability == IMAGE_EDIT_CAPABILITY)
-        && super::flux::workflow_declares_flux_assets(workflow)
-    {
-        ExecutionPlanNode {
-            id: format!("{}::plan", workflow.id),
-            recipe: ExecutionRecipe::FluxImageEdit,
-            atoms: atoms(&[
-                ("lightflow.atom.load_image", "lightflow.artifact.image"),
-                ("lightflow.atom.load_flux_model", "lightflow.model.load"),
-                ("lightflow.atom.load_text_encoder", "lightflow.model.load"),
-                ("lightflow.atom.load_vae", "lightflow.model.load"),
-                ("lightflow.atom.encode_prompt", "lightflow.text.encode"),
-                ("lightflow.atom.sample_latents", IMAGE_EDIT_CAPABILITY),
-                ("lightflow.atom.decode_vae", "lightflow.image.decode"),
-                ("lightflow.atom.save_image", "lightflow.artifact.image"),
-            ]),
-            models: planned_models(workflow),
-            data_policy: DataPolicy::DeviceResidentPreferred,
-        }
-    } else if workflow
-        .runtimes
-        .iter()
-        .any(|runtime| runtime.capability == IMAGE_INPAINT_CAPABILITY)
-        && super::flux::workflow_declares_flux_assets(workflow)
-    {
-        ExecutionPlanNode {
-            id: format!("{}::plan", workflow.id),
-            recipe: ExecutionRecipe::FluxInpaint,
-            atoms: atoms(&[
-                ("lightflow.atom.load_image", "lightflow.artifact.image"),
-                ("lightflow.atom.load_mask", "lightflow.artifact.mask"),
-                ("lightflow.atom.load_flux_model", "lightflow.model.load"),
-                ("lightflow.atom.load_text_encoder", "lightflow.model.load"),
-                ("lightflow.atom.load_vae", "lightflow.model.load"),
-                ("lightflow.atom.encode_prompt", "lightflow.text.encode"),
-                ("lightflow.atom.sample_latents", IMAGE_INPAINT_CAPABILITY),
-                ("lightflow.atom.decode_vae", "lightflow.image.decode"),
-                ("lightflow.atom.save_image", "lightflow.artifact.image"),
-            ]),
-            models: planned_models(workflow),
-            data_policy: DataPolicy::DeviceResidentPreferred,
-        }
-    } else if workflow.runtimes.iter().any(|runtime| {
-        runtime.capability == IMAGE_INVERT_CAPABILITY
-            && runtime.engine.as_deref() == Some(INVERT_ENGINE)
-    }) {
-        ExecutionPlanNode {
-            id: format!("{}::plan", workflow.id),
-            recipe: ExecutionRecipe::ImageInvert,
-            atoms: atoms(&[
-                ("lightflow.atom.load_image", "lightflow.artifact.image"),
-                ("lightflow.atom.invert_pixels", IMAGE_INVERT_CAPABILITY),
-                ("lightflow.atom.save_image", "lightflow.artifact.image"),
-            ]),
-            models: Vec::new(),
-            data_policy: DataPolicy::ArtifactHandles,
-        }
-    } else if workflow
-        .runtimes
-        .iter()
-        .any(|runtime| runtime.capability == LLM_GENERATE_CAPABILITY)
-    {
-        ExecutionPlanNode {
-            id: format!("{}::plan", workflow.id),
-            recipe: ExecutionRecipe::RigLlmGenerate,
-            atoms: atoms(&[
-                (
-                    "lightflow.atom.select_llm_provider",
-                    "lightflow.llm.provider",
-                ),
-                ("lightflow.atom.build_rig_agent", LLM_GENERATE_CAPABILITY),
-                ("lightflow.atom.prompt_llm", "lightflow.text.generate"),
-            ]),
-            models: planned_models(workflow),
-            data_policy: DataPolicy::JsonValues,
-        }
-    } else if let Some(runtime) = workflow.runtimes.first() {
+    let Some(executor) = select_leaf_executor(workflow) else {
+        let Some(runtime) = workflow.runtimes.first() else {
+            unreachable!("passthrough executor matches workflows with no runtimes");
+        };
         return Err(ApiError::InvalidRequest(format!(
             "workflow {} declares runtime capability {}, but this LightFlow build has no executor for it",
             workflow.id, runtime.capability
         )));
-    } else {
-        ExecutionPlanNode {
-            id: format!("{}::plan", workflow.id),
-            recipe: ExecutionRecipe::Passthrough,
-            atoms: atoms(&[("lightflow.atom.passthrough", "lightflow.data.copy")]),
-            models: Vec::new(),
-            data_policy: DataPolicy::JsonValues,
-        }
+    };
+
+    let node = ExecutionPlanNode {
+        id: format!("{}::plan", workflow.id),
+        recipe: executor.recipe,
+        atoms: atoms(executor.atoms),
+        models: if executor.plans_models {
+            planned_models(workflow)
+        } else {
+            Vec::new()
+        },
+        data_policy: executor.data_policy,
     };
 
     Ok(ExecutionPlan {

@@ -17,13 +17,7 @@ pub(super) fn node_inputs(
         WorkflowNodeKind::If => {
             let mut ports = Vec::new();
             if let Some(WorkflowCondition::InputEquals { input, .. }) = &node.condition {
-                push_unique_port(
-                    &mut ports,
-                    PortSpec {
-                        name: input.clone(),
-                        ty: "json".to_owned(),
-                    },
-                );
+                push_unique_port(&mut ports, PortSpec::new(input.clone(), "json"));
             }
             for workflow_id in branch_workflow_ids(node) {
                 if let Some(workflow) = workflows.get(workflow_id) {

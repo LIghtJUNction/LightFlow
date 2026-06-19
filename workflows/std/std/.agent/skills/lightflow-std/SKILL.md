@@ -10,8 +10,8 @@ Use `lightflow.std` as a domain-neutral identity workflow.
 
 ## Workflow
 
-- Workflow id: `lightflow.std`
-- Input `value`: JSON value to pass through.
+- Workflow id: `lightflow.std`.
+- Input `value`: required JSON value; widget `json`.
 - Output `value`: the same JSON value.
 
 ## Usage

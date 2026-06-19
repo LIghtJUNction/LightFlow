@@ -10,6 +10,26 @@ struct WorkflowHelpPort {
     #[serde(rename = "type")]
     ty: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step: Option<f64>,
+    #[serde(rename = "enum", skip_serializing_if = "Vec::is_empty")]
+    enum_values: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    widget: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artifact_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_requirement: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     cli_flag: Option<String>,
     value_hint: String,
 }
@@ -66,7 +86,7 @@ fn workflow_help_json(
             "outputs": output_ports,
             "constraints": {
                 "source": "workflow metadata",
-                "note": "LightFlow currently records port names and types; required/default constraints are not represented in the workflow DSL yet."
+                "note": "Node Schema v1 records optional descriptions, required/default constraints, numeric ranges, enum values, widget hints, artifact kinds, and model requirement bindings."
             }
         },
         "dependencies": {
@@ -94,6 +114,16 @@ fn help_port(port: &PortSpec, cli_input: bool) -> WorkflowHelpPort {
     WorkflowHelpPort {
         name: port.name.clone(),
         ty: port.ty.clone(),
+        description: port.description.clone(),
+        required: port.required,
+        default: port.default.clone(),
+        min: port.min,
+        max: port.max,
+        step: port.step,
+        enum_values: port.enum_values.clone(),
+        widget: port.widget.clone(),
+        artifact_kind: port.artifact_kind.clone(),
+        model_requirement: port.model_requirement.clone(),
         cli_flag: cli_input.then(|| format!("-i {}={}", port.name, value_hint(&port.ty))),
         value_hint: value_hint(&port.ty).to_owned(),
     }
@@ -119,7 +149,12 @@ fn run_command(workflow: &WorkflowSpec, input_flags: &[String]) -> Vec<String> {
 fn inputs_json_shape(workflow: &WorkflowSpec) -> serde_json::Value {
     let mut inputs = serde_json::Map::new();
     for port in &workflow.inputs {
-        inputs.insert(port.name.clone(), example_value(&port.ty));
+        inputs.insert(
+            port.name.clone(),
+            port.default
+                .clone()
+                .unwrap_or_else(|| example_value(&port.ty)),
+        );
     }
     serde_json::Value::Object(inputs)
 }

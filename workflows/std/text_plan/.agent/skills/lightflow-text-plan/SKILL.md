@@ -11,7 +11,7 @@ Use `lightflow.text_plan` as a small example of composing workflow nodes and edg
 ## Workflow
 
 - Workflow id: `lightflow.text_plan`
-- Input `value`: JSON value passed into the plan.
+- Input `value`: required JSON value passed into the plan; widget `json`.
 - Output `result`: normalized text result.
 - Dependencies: `lightflow.std`, `lightflow.text_prompt`, `lightflow.text_result`.
 

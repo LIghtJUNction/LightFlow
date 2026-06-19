@@ -1,0 +1,26 @@
+use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.control.if")
+        .version("0.1.0")
+        .name("Control If")
+        .description("Select one of two JSON values based on a boolean condition.")
+        .input("condition", "boolean")
+        .input_description("condition", "Boolean condition used to choose the branch.")
+        .input_required("condition", true)
+        .input_widget("condition", "toggle")
+        .input("then_value", "json")
+        .input_description("then_value", "Value emitted when condition is true.")
+        .input_required("then_value", false)
+        .input_widget("then_value", "json")
+        .input("else_value", "json")
+        .input_description("else_value", "Value emitted when condition is false.")
+        .input_required("else_value", false)
+        .input_widget("else_value", "json")
+        .output("value", "json")
+        .output_description("value", "Selected branch value.")
+        .output("selected", "text")
+        .output_description("selected", "Selected branch name: then or else.")
+        .runtime("control_if", "lightflow.control.if")
+        .build()
+}

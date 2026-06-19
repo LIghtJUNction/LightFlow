@@ -36,6 +36,100 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkflowSpec"
+  /nodes:
+    get:
+      summary: List workflow-backed nodes
+      description: Returns editor-facing node cards with Node Schema v1 ports, runtime executor status, model requirements, and validation status.
+      responses:
+        "200":
+          description: Node catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeCatalog"
+  /nodes/{workflow_id}:
+    get:
+      summary: Read a workflow-backed node
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Node card.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeCard"
+  /models:
+    get:
+      summary: List node model requirements
+      description: Returns model requirements declared by visible nodes, including port bindings.
+      responses:
+        "200":
+          description: Model requirement catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelCatalog"
+  /runs:
+    get:
+      summary: List recorded runs
+      description: Lists local `.lightflow/runs` history for editor run browsers.
+      responses:
+        "200":
+          description: Run catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunCatalog"
+  /runs/{run_id}:
+    get:
+      summary: Read a recorded run
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Run id or `last`.
+      responses:
+        "200":
+          description: Run manifest, execution, and events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunTrace"
+  /runs/{run_id}/events:
+    get:
+      summary: Read recorded run events
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Run id or `last`.
+      responses:
+        "200":
+          description: Run event stream.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunEvents"
+  /artifacts:
+    get:
+      summary: List recorded run artifacts
+      description: Lists artifact handles found in recorded run executions.
+      responses:
+        "200":
+          description: Artifact catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactCatalog"
   /workflows/{workflow_id}:
     get:
       summary: Read a workflow
@@ -127,6 +221,30 @@ components:
           type: string
         type:
           type: string
+        description:
+          type: string
+        required:
+          type: boolean
+        default:
+          description: Default JSON value for this port.
+        min:
+          type: number
+        max:
+          type: number
+        step:
+          type: number
+        enum:
+          type: array
+          items: true
+        widget:
+          type: string
+          description: UI widget hint for editors.
+        artifact_kind:
+          type: string
+          description: Artifact kind carried by this port, such as image or mask.
+        model_requirement:
+          type: string
+          description: Model requirement id associated with this port.
     WorkflowSpec:
       type: object
       required: [id, version, name]
@@ -158,6 +276,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ModelRequirement"
+        runtimes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeRequirement"
         nodes:
           type: array
           items:
@@ -254,6 +376,251 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkflowSummary"
+    NodeCatalog:
+      type: object
+      required: [nodes, categories, runtimes]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCard"
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCategory"
+        runtimes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeRuntimeSummary"
+    NodeCategory:
+      type: object
+      required: [category, nodes]
+      properties:
+        category:
+          type: string
+        nodes:
+          type: integer
+    NodeRuntimeSummary:
+      type: object
+      required: [capability, nodes, available_executors]
+      properties:
+        capability:
+          type: string
+        nodes:
+          type: integer
+        available_executors:
+          type: integer
+    NodeCard:
+      type: object
+      required:
+        - id
+        - version
+        - name
+        - kind
+        - inputs
+        - outputs
+        - dependencies
+        - models
+        - runtimes
+        - graph
+        - validation
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        kind:
+          type: string
+          enum: [leaf, composite]
+        inputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortSpec"
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortSpec"
+        dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowDependencyRequirement"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelRequirement"
+        runtimes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeRuntimeStatus"
+        graph:
+          $ref: "#/components/schemas/NodeGraphSummary"
+        validation:
+          $ref: "#/components/schemas/NodeValidationSummary"
+    NodeGraphSummary:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: integer
+        edges:
+          type: integer
+    NodeValidationSummary:
+      type: object
+      required: [valid, issues]
+      properties:
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: string
+    NodeRuntimeStatus:
+      type: object
+      required: [id, capability, available, executors]
+      properties:
+        id:
+          type: string
+        capability:
+          type: string
+        engine:
+          type: string
+        available:
+          type: boolean
+        executors:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeExecutorStatus"
+    NodeExecutorStatus:
+      type: object
+      required: [id, kind, available]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        available:
+          type: boolean
+        features:
+          type: array
+          items:
+            type: string
+        env:
+          type: string
+        command:
+          type: string
+    ModelCatalog:
+      type: object
+      required: [models]
+      properties:
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeModelCard"
+    NodeModelCard:
+      type: object
+      required: [workflow_id, workflow_name, requirement, bindings]
+      properties:
+        workflow_id:
+          type: string
+        workflow_name:
+          type: string
+        category:
+          type: string
+        requirement:
+          $ref: "#/components/schemas/ModelRequirement"
+        bindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeModelBinding"
+    NodeModelBinding:
+      type: object
+      required: [direction, port]
+      properties:
+        direction:
+          type: string
+          enum: [input, output]
+        port:
+          type: string
+    RunCatalog:
+      type: object
+      required: [runs]
+      properties:
+        last:
+          type: string
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunSummary"
+    RunSummary:
+      type: object
+      required: [run_id, status, started_at_ms, completed_at_ms, stages, run_dir]
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+        started_at_ms:
+          type: integer
+        completed_at_ms:
+          type: integer
+        workflow_id:
+          type: string
+        stages:
+          type: integer
+        run_dir:
+          type: string
+    RunTrace:
+      type: object
+      required: [run_id, run_dir, manifest, execution, events]
+      properties:
+        run_id:
+          type: string
+        run_dir:
+          type: string
+        manifest:
+          type: object
+          additionalProperties: true
+        execution:
+          type: object
+          additionalProperties: true
+        events:
+          type: array
+          items: true
+    RunEvents:
+      type: object
+      required: [run_id, events]
+      properties:
+        run_id:
+          type: string
+        events:
+          type: array
+          items: true
+    ArtifactCatalog:
+      type: object
+      required: [artifacts]
+      properties:
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunArtifact"
+    RunArtifact:
+      type: object
+      required: [run_id, artifact]
+      properties:
+        run_id:
+          type: string
+        workflow_id:
+          type: string
+        node_id:
+          type: string
+        artifact:
+          $ref: "#/components/schemas/WorkflowArtifact"
     WorkflowSummary:
       type: object
       required: [id, version, name, inputs, outputs, dependencies, models, nodes, edges]
@@ -271,6 +638,8 @@ components:
         dependencies:
           type: integer
         models:
+          type: integer
+        runtimes:
           type: integer
         nodes:
           type: integer
@@ -367,6 +736,16 @@ components:
           type: string
         file:
           type: string
+    RuntimeRequirement:
+      type: object
+      required: [id, capability]
+      properties:
+        id:
+          type: string
+        capability:
+          type: string
+        engine:
+          type: string
     WorkflowVersionMismatch:
       type: object
       required: [workflow_id, required, found, required_by]
@@ -393,6 +772,30 @@ components:
           type: array
           items:
             type: string
+        patch:
+          $ref: "#/components/schemas/WorkflowPatch"
+    WorkflowPatch:
+      type: object
+      properties:
+        nodes:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/WorkflowNodePatch"
+    WorkflowNodePatch:
+      type: object
+      properties:
+        disable:
+          type: boolean
+        enable:
+          type: boolean
+        replace_with:
+          type: string
+        fallback_workflow_id:
+          type: string
+        retry:
+          type: integer
+        timeout_ms:
+          type: integer
     WorkflowExecution:
       type: object
       required: [workflow_id, version, inputs, outputs, nodes]
@@ -407,10 +810,29 @@ components:
         outputs:
           type: object
           additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowArtifact"
         nodes:
           type: array
           items:
             $ref: "#/components/schemas/NodeExecution"
+    WorkflowArtifact:
+      type: object
+      required: [id, kind, path, mime_type]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        path:
+          type: string
+        mime_type:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
     NodeExecution:
       type: object
       required: [node_id, workflow_id, status, inputs, outputs]
@@ -419,12 +841,22 @@ components:
           type: string
         workflow_id:
           type: string
+        selected_workflow_id:
+          type: string
         status:
           type: string
           enum: [completed, skipped]
+        duration_ms:
+          type: integer
+        attempts:
+          type: integer
         inputs:
           type: object
           additionalProperties: true
         outputs:
           type: object
           additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowArtifact"

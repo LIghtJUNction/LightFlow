@@ -16,6 +16,7 @@ mod install;
 mod list;
 pub mod mcp;
 mod models;
+mod node;
 mod patches;
 mod project;
 mod publish;
@@ -35,6 +36,7 @@ use info::architecture_info;
 use install::{install_workflow_repo, parse_install_options};
 use list::{list_workflows, parse_list_options};
 use models::manage_models;
+use node::manage_nodes;
 use patches::manage_patches;
 use project::{
     InitMode, add_workflow, init_plugin_project, init_workflow_project, normalize_workflow_id,
@@ -123,6 +125,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 &workflow_id,
                 options.name.as_deref(),
                 options.category.as_deref(),
+                options.runtime.as_deref(),
                 options.global,
             )?)?;
         }
@@ -234,6 +237,9 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
         }
         "models" => {
             print_json(&manage_models(args)?)?;
+        }
+        "node" | "nodes" => {
+            print_json(&manage_nodes(&service, args)?)?;
         }
         "mcp" => {
             print_json(&mcp::execute_mcp_request(&service, args)?)?;
@@ -465,7 +471,7 @@ fn usage() -> String {
         "  lfw home",
         "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
         "  lfw install <path-or-git-url> [--git] [--name <name>] [--global|-g]",
-        "  lfw new <workflow_id> --category <name> [--name <name>] [--global|-g]",
+        "  lfw new <workflow_id> --category <name> [--name <name>] [--runtime <capability>] [--global|-g]",
         "  lfw list [--brief|--detail] [--category <name>]",
         "  lfw list --categories",
         "  lfw ls [--brief|--detail] [--category <name>]",
@@ -481,6 +487,7 @@ fn usage() -> String {
         "  lfw upgrade [--global|-g]",
         "  lfw sync [workflow_id] [--model <requirement=variant>] [--hf-model <requirement=format:repo[:file]>] [--hf-url <requirement=url>] [--auto-model|--select-model] [--locked] [--apply]",
         "  lfw models list|download|rm|prune",
+        "  lfw node test <workflow_id>",
         "  lfw mcp [<json|-|@file>]",
         "  lfw batch run <jobs.jsonl> [--workflow <workflow_id>] [--run-id <id>] [--max-gpu-jobs <n|auto>] [--max-cpu-jobs <n|auto>] [--batch-size <n|auto>] [--retries <n>] [--reserve-mem <size>] [--reserve-vram <size>] [--max-load <n>]",
         "  lfw batch resume <run_id> [--max-gpu-jobs <n|auto>]",

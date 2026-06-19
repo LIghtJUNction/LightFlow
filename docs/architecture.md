@@ -61,6 +61,23 @@ helpers, and basic type adapters when they are broadly useful. It must not
 contain agent behavior, provider integrations, model download logic, or
 business templates.
 
+The repository also ships small standard workflow nodes for prompt and image
+graph composition. `lightflow.text.concat`, `lightflow.text.template`,
+`lightflow.text.regex`, `lightflow.json.extract`, `lightflow.image.load`,
+`lightflow.image.save`, `lightflow.image.resize`, `lightflow.image.crop`,
+`lightflow.image.upscale`, `lightflow.mask.compose`, `lightflow.image.edit`,
+`lightflow.image.inpaint`, `lightflow.control.if`,
+`lightflow.control.switch`, `lightflow.control.merge`,
+`lightflow.control.split`, `lightflow.model.select`,
+`lightflow.model.lock_check`, `lightflow.llm.generate`,
+`lightflow.llm.classify`, and `lightflow.llm.structured_output` are ordinary
+workflow crates with agent skills and Node Schema v1 metadata, but execute
+through builtin runtime capabilities. They cover common ComfyUI-style prompt
+preparation, PNG artifact handling, mask composition, preview image
+edit/inpaint, model selection checks, graph value routing, offline LLM
+composition, and simple upscale workflows without forcing users to write a
+custom Rust workflow for every adapter.
+
 The repository dogfoods this model: `lightflow.text_plan` declares an exact
 dependency on `lightflow.std` and includes a `lightflow.std` node in its graph.
 
@@ -125,6 +142,18 @@ inputs and synced model paths, then runs the native Rust `flux-native` backend
 when compiled in. Builds without that feature can call `LIGHTFLOW_FLUX_RUNNER`
 with the same stable task contract. The selected backend owns sampling and
 writes the PNG artifact.
+
+Leaf workflow execution is selected through the Executor Registry. The registry
+maps runtime capabilities such as `lightflow.image.generate`,
+`lightflow.image.edit`, `lightflow.image.inpaint`,
+`lightflow.mask.compose`, `lightflow.text.regex`, and
+`lightflow.llm.generate`, and reserved future capabilities including
+`lightflow.python.node`, `lightflow.command`, `lightflow.onnx`, and
+`lightflow.candle` to executor metadata and execution recipes. Builtin preview
+executors keep image generation/edit/inpaint runnable offline; model-backed
+FLUX and RIG executors can replace them when their feature flags or environment
+are available. `lfw info` reports the same registry, so the CLI, future editor,
+and planner see one executor contract.
 
 LLM text generation is the second runtime adapter boundary. Workflows that
 declare `lightflow.llm.generate` are executed by the RIG adapter when LightFlow
@@ -265,9 +294,26 @@ invert are always available; the external FLUX runner is available when
 `lfw help <workflow_id>` reports the contract for one workflow. It returns
 workflow metadata, input and output ports, dependency status, model and runtime
 requirements, graph structure, and runnable input examples. `lfw workflows help
-<workflow_id>` is the namespaced form. Current workflow metadata records port
-names and types; richer required/default constraints are not represented in the
-DSL yet.
+<workflow_id>` is the namespaced form. Node Schema v1 extends port metadata
+with optional descriptions, required/default constraints, numeric ranges, enum
+values, widget hints, artifact kinds, and model requirement bindings. The same
+metadata feeds CLI help, OpenAPI, and future editor node panels.
+
+The HTTP node directory is the editor-facing projection of the same workflow
+model. `GET /nodes` returns node cards for visible workflows, including Node
+Schema v1 ports, model requirements, runtime executor status, graph counts, and
+validation status. `GET /nodes/{workflow_id}` returns one card, and `GET
+/models` returns model requirements with input/output port bindings. This keeps
+the UI palette on the `ApiService` Interface instead of having a frontend infer
+nodes by stitching together workflow, help, info, and model data.
+
+The HTTP run-history endpoints project the same `.lightflow/runs` layout used
+by the CLI. `GET /runs` lists compact run summaries, `GET /runs/{run_id}`
+returns manifest, execution, and events, `GET /runs/{run_id}/events` returns
+only JSONL events, and `GET /artifacts` aggregates artifact handles from
+recorded executions. The backend still records runs through the CLI runner; the
+server reads those durable artifacts instead of inventing a separate history
+store.
 
 ## Boundaries
 

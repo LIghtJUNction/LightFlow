@@ -78,6 +78,31 @@ fn cli_reads_rust_workflows_and_resolves_dependencies() -> Result<(), Box<dyn st
             .iter()
             .any(|executor| executor["id"] == "passthrough" && executor["available"] == true)
     );
+    assert!(
+        info["executors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|executor| {
+                executor["id"] == "lightflow.command.executor.v1"
+                    && executor["kind"] == "reserved"
+                    && executor["available"] == false
+            })
+    );
+    assert!(
+        info["executors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|executor| {
+                executor["id"] == "lightflow.python.node.executor.v1"
+                    && executor["capabilities"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|capability| capability == "lightflow.python.node")
+            })
+    );
     let arch = lfw(&root, ["arch"])?;
     assert_eq!(arch["workflows"]["total"], 3);
 

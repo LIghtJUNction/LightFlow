@@ -11,8 +11,14 @@ Use `lightflow.text_to_image` for the built-in preview image runtime. This workf
 ## Workflow
 
 - Workflow id: `lightflow.text_to_image`
-- Inputs: `prompt`, `negative`, `width`, `height`, `seed`, `output_path`, `model`.
-- Outputs: `image`, `image_path`.
+- Input `prompt`: required positive prompt; widget `prompt`.
+- Input `negative`: optional negative prompt; default `""`; widget `textarea`.
+- Input `width`: optional integer; default `512`; range `64..2048`; step `8`; widget `number`.
+- Input `height`: optional integer; default `512`; range `64..2048`; step `8`; widget `number`.
+- Input `seed`: optional integer seed; widget `seed`.
+- Input `output_path`: optional destination PNG path; artifact kind `image`; widget `file_save`.
+- Input `model`: optional model variant id bound to `image_model`; choices `sdxl-gguf-q4` or `sdxl-safetensors`; widget `model_select`.
+- Outputs: `image` artifact metadata and `image_path`; artifact kind `image`; bound to `image_model`.
 - Runtime: `lightflow.image.generate` with engine `builtin.preview.v1`.
 - Default output directory: XDG Pictures under `lightflow/`.
 

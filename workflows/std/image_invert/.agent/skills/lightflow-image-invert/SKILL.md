@@ -11,10 +11,10 @@ Use this skill to invert the colors of a PNG image generated or referenced by a 
 ## Workflow
 
 - Workflow id: `lightflow.image.invert`
-- Input `image_path`: source PNG path.
-- Input `output_path`: optional destination PNG path.
-- Output `image_path`: inverted PNG path.
-- Output `image`: image artifact metadata.
+- Input `image_path`: required source PNG path; artifact kind `image`; widget `image`.
+- Input `output_path`: optional destination PNG path; artifact kind `image`; widget `file_save`.
+- Output `image_path`: inverted PNG path; artifact kind `image`.
+- Output `image`: image artifact metadata; artifact kind `image`.
 
 ## Pipeline Usage
 

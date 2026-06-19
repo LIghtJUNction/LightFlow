@@ -25,6 +25,23 @@ struct FluxModelHandles {
     vae: PathBuf,
 }
 
+struct FluxRunRequest<'a> {
+    task: FluxTask,
+    prompt: &'a str,
+    negative: &'a str,
+    width: i32,
+    height: i32,
+    seed: i64,
+    steps: i32,
+    guidance: f32,
+    cfg_scale: f32,
+    strength: f32,
+    image_path: Option<&'a Path>,
+    mask_path: Option<&'a Path>,
+    output_path: &'a Path,
+    models: &'a FluxModelHandles,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum FluxTask {
     TextToImage,
@@ -149,40 +166,29 @@ fn execute_flux_with_models(
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).map_err(ApiError::from)?;
         }
-        let image_seed = seed.saturating_add(offset as i64);
-        let backend = run_flux_backend(
+        let request = FluxRunRequest {
             task,
-            &prompt,
-            &negative,
+            prompt: &prompt,
+            negative: &negative,
             width,
             height,
-            image_seed,
+            seed: seed.saturating_add(offset as i64),
             steps,
             guidance,
             cfg_scale,
             strength,
-            image_path.as_deref(),
-            mask_path.as_deref(),
+            image_path: image_path.as_deref(),
+            mask_path: mask_path.as_deref(),
             output_path,
-            &models,
-        )?;
+            models: &models,
+        };
+        let backend = run_flux_backend(&request)?;
         artifacts.push(flux_artifact(
             workflow,
-            output_path,
-            &prompt,
-            width,
-            height,
-            image_seed,
-            steps,
-            guidance,
-            strength,
+            &request,
             backend,
-            task,
             offset + 1,
             count,
-            image_path.as_deref(),
-            mask_path.as_deref(),
-            &models,
         ));
     }
 
@@ -223,59 +229,14 @@ fn load_flux_models(
     })
 }
 
-fn run_flux_backend(
-    task: FluxTask,
-    prompt: &str,
-    negative: &str,
-    width: i32,
-    height: i32,
-    seed: i64,
-    steps: i32,
-    guidance: f32,
-    cfg_scale: f32,
-    strength: f32,
-    image_path: Option<&Path>,
-    mask_path: Option<&Path>,
-    output_path: &Path,
-    models: &FluxModelHandles,
-) -> ApiResult<FluxBackend> {
+fn run_flux_backend(request: &FluxRunRequest<'_>) -> ApiResult<FluxBackend> {
     match std::env::var(FLUX_BACKEND_ENV).as_deref() {
         Ok("external") | Ok("runner") => {
-            run_flux_runner(
-                task,
-                prompt,
-                negative,
-                width,
-                height,
-                seed,
-                steps,
-                guidance,
-                cfg_scale,
-                strength,
-                image_path,
-                mask_path,
-                output_path,
-                models,
-            )?;
+            run_flux_runner(request)?;
             Ok(FluxBackend::ExternalRunner)
         }
         Ok("native") => {
-            run_flux_native(
-                task,
-                prompt,
-                negative,
-                width,
-                height,
-                seed,
-                steps,
-                guidance,
-                cfg_scale,
-                strength,
-                image_path,
-                mask_path,
-                output_path,
-                models,
-            )?;
+            run_flux_native(request)?;
             Ok(FluxBackend::Native)
         }
         Ok(other) => Err(ApiError::InvalidRequest(format!(
@@ -283,40 +244,10 @@ fn run_flux_backend(
         ))),
         Err(_) => {
             if native_flux_runtime_enabled() {
-                run_flux_native(
-                    task,
-                    prompt,
-                    negative,
-                    width,
-                    height,
-                    seed,
-                    steps,
-                    guidance,
-                    cfg_scale,
-                    strength,
-                    image_path,
-                    mask_path,
-                    output_path,
-                    models,
-                )?;
+                run_flux_native(request)?;
                 Ok(FluxBackend::Native)
             } else {
-                run_flux_runner(
-                    task,
-                    prompt,
-                    negative,
-                    width,
-                    height,
-                    seed,
-                    steps,
-                    guidance,
-                    cfg_scale,
-                    strength,
-                    image_path,
-                    mask_path,
-                    output_path,
-                    models,
-                )?;
+                run_flux_runner(request)?;
                 Ok(FluxBackend::ExternalRunner)
             }
         }
@@ -328,81 +259,36 @@ fn native_flux_runtime_enabled() -> bool {
 }
 
 #[cfg(feature = "flux-native")]
-fn run_flux_native(
-    task: FluxTask,
-    prompt: &str,
-    negative: &str,
-    width: i32,
-    height: i32,
-    seed: i64,
-    steps: i32,
-    guidance: f32,
-    cfg_scale: f32,
-    strength: f32,
-    image_path: Option<&Path>,
-    mask_path: Option<&Path>,
-    output_path: &Path,
-    models: &FluxModelHandles,
-) -> ApiResult<()> {
+fn run_flux_native(request: &FluxRunRequest<'_>) -> ApiResult<()> {
     let request = super::flux_native::NativeFluxRequest {
-        task: task.as_str(),
-        prompt,
-        negative,
-        width,
-        height,
-        seed,
-        steps,
-        guidance,
-        cfg_scale,
-        strength,
-        image_path,
-        mask_path,
-        output_path,
-        diffusion_model: &models.diffusion_model,
-        llm_model: &models.llm,
-        vae_model: &models.vae,
+        task: request.task.as_str(),
+        prompt: request.prompt,
+        negative: request.negative,
+        width: request.width,
+        height: request.height,
+        seed: request.seed,
+        steps: request.steps,
+        guidance: request.guidance,
+        cfg_scale: request.cfg_scale,
+        strength: request.strength,
+        image_path: request.image_path,
+        mask_path: request.mask_path,
+        output_path: request.output_path,
+        diffusion_model: &request.models.diffusion_model,
+        llm_model: &request.models.llm,
+        vae_model: &request.models.vae,
     };
     super::flux_native::generate(request)
 }
 
 #[cfg(not(feature = "flux-native"))]
-fn run_flux_native(
-    _task: FluxTask,
-    _prompt: &str,
-    _negative: &str,
-    _width: i32,
-    _height: i32,
-    _seed: i64,
-    _steps: i32,
-    _guidance: f32,
-    _cfg_scale: f32,
-    _strength: f32,
-    _image_path: Option<&Path>,
-    _mask_path: Option<&Path>,
-    _output_path: &Path,
-    _models: &FluxModelHandles,
-) -> ApiResult<()> {
+fn run_flux_native(_request: &FluxRunRequest<'_>) -> ApiResult<()> {
     Err(ApiError::InvalidRequest(
         "native FLUX backend requested, but this LightFlow binary was not built with --features flux-native".to_owned(),
     ))
 }
 
-fn run_flux_runner(
-    task: FluxTask,
-    prompt: &str,
-    negative: &str,
-    width: i32,
-    height: i32,
-    seed: i64,
-    steps: i32,
-    guidance: f32,
-    cfg_scale: f32,
-    strength: f32,
-    image_path: Option<&Path>,
-    mask_path: Option<&Path>,
-    output_path: &Path,
-    models: &FluxModelHandles,
-) -> ApiResult<()> {
+fn run_flux_runner(request: &FluxRunRequest<'_>) -> ApiResult<()> {
     let runner = std::env::var_os(FLUX_RUNNER_ENV).ok_or_else(|| {
         ApiError::InvalidRequest(format!(
             "workflow requires a FLUX runner; set {FLUX_RUNNER_ENV} to an executable that accepts LightFlow FLUX runner arguments"
@@ -419,37 +305,37 @@ fn run_flux_runner(
     let mut command = Command::new(&runner);
     command
         .arg("--task")
-        .arg(task.as_str())
+        .arg(request.task.as_str())
         .arg("--prompt")
-        .arg(prompt)
+        .arg(request.prompt)
         .arg("--negative")
-        .arg(negative)
+        .arg(request.negative)
         .arg("--width")
-        .arg(width.to_string())
+        .arg(request.width.to_string())
         .arg("--height")
-        .arg(height.to_string())
+        .arg(request.height.to_string())
         .arg("--seed")
-        .arg(seed.to_string())
+        .arg(request.seed.to_string())
         .arg("--steps")
-        .arg(steps.to_string())
+        .arg(request.steps.to_string())
         .arg("--guidance")
-        .arg(guidance.to_string())
+        .arg(request.guidance.to_string())
         .arg("--cfg-scale")
-        .arg(cfg_scale.to_string())
+        .arg(request.cfg_scale.to_string())
         .arg("--strength")
-        .arg(strength.to_string())
+        .arg(request.strength.to_string())
         .arg("--output")
-        .arg(output_path)
+        .arg(request.output_path)
         .arg("--flux-model")
-        .arg(&models.diffusion_model)
+        .arg(&request.models.diffusion_model)
         .arg("--llm-model")
-        .arg(&models.llm)
+        .arg(&request.models.llm)
         .arg("--vae-model")
-        .arg(&models.vae);
-    if let Some(image_path) = image_path {
+        .arg(&request.models.vae);
+    if let Some(image_path) = request.image_path {
         command.arg("--image").arg(image_path);
     }
-    if let Some(mask_path) = mask_path {
+    if let Some(mask_path) = request.mask_path {
         command.arg("--mask").arg(mask_path);
     }
     let output = command.output().map_err(ApiError::from)?;
@@ -463,11 +349,11 @@ fn run_flux_runner(
         )));
     }
 
-    let bytes = fs::read(output_path).map_err(ApiError::from)?;
+    let bytes = fs::read(request.output_path).map_err(ApiError::from)?;
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err(ApiError::InvalidRequest(format!(
             "FLUX generation completed but did not write a PNG: {}",
-            output_path.display()
+            request.output_path.display()
         )));
     }
 
@@ -634,43 +520,32 @@ fn expand_tilde(path: PathBuf) -> PathBuf {
 
 fn flux_artifact(
     workflow: &WorkflowSpec,
-    output_path: &Path,
-    prompt: &str,
-    width: i32,
-    height: i32,
-    seed: i64,
-    steps: i32,
-    guidance: f32,
-    strength: f32,
+    request: &FluxRunRequest<'_>,
     backend: FluxBackend,
-    task: FluxTask,
     index: usize,
     count: usize,
-    image_path: Option<&Path>,
-    mask_path: Option<&Path>,
-    models: &FluxModelHandles,
 ) -> WorkflowArtifact {
     let mut metadata = serde_json::Map::new();
-    metadata.insert("capability".to_owned(), task.capability().into());
+    metadata.insert("capability".to_owned(), request.task.capability().into());
     metadata.insert("engine".to_owned(), backend.engine().into());
-    metadata.insert("task".to_owned(), task.as_str().into());
+    metadata.insert("task".to_owned(), request.task.as_str().into());
     metadata.insert("workflow_id".to_owned(), workflow.id.clone().into());
-    metadata.insert("prompt".to_owned(), prompt.to_owned().into());
-    metadata.insert("width".to_owned(), width.into());
-    metadata.insert("height".to_owned(), height.into());
-    metadata.insert("seed".to_owned(), seed.into());
+    metadata.insert("prompt".to_owned(), request.prompt.to_owned().into());
+    metadata.insert("width".to_owned(), request.width.into());
+    metadata.insert("height".to_owned(), request.height.into());
+    metadata.insert("seed".to_owned(), request.seed.into());
     metadata.insert("index".to_owned(), index.into());
     metadata.insert("count".to_owned(), count.into());
-    metadata.insert("steps".to_owned(), steps.into());
-    metadata.insert("guidance".to_owned(), guidance.into());
-    metadata.insert("strength".to_owned(), strength.into());
-    if let Some(image_path) = image_path {
+    metadata.insert("steps".to_owned(), request.steps.into());
+    metadata.insert("guidance".to_owned(), request.guidance.into());
+    metadata.insert("strength".to_owned(), request.strength.into());
+    if let Some(image_path) = request.image_path {
         metadata.insert(
             "source_image_path".to_owned(),
             image_path.display().to_string().into(),
         );
     }
-    if let Some(mask_path) = mask_path {
+    if let Some(mask_path) = request.mask_path {
         metadata.insert(
             "mask_path".to_owned(),
             mask_path.display().to_string().into(),
@@ -678,21 +553,21 @@ fn flux_artifact(
     }
     metadata.insert(
         "flux_model".to_owned(),
-        models.diffusion_model.display().to_string().into(),
+        request.models.diffusion_model.display().to_string().into(),
     );
     metadata.insert(
         "llm_model".to_owned(),
-        models.llm.display().to_string().into(),
+        request.models.llm.display().to_string().into(),
     );
     metadata.insert(
         "vae_model".to_owned(),
-        models.vae.display().to_string().into(),
+        request.models.vae.display().to_string().into(),
     );
 
     WorkflowArtifact {
         id: "image".to_owned(),
         kind: "image".to_owned(),
-        path: output_path.display().to_string(),
+        path: request.output_path.display().to_string(),
         mime_type: "image/png".to_owned(),
         metadata,
     }
