@@ -11,8 +11,8 @@ use std::process::Command;
 mod add;
 mod batch;
 mod history;
+mod import;
 mod info;
-mod install;
 mod list;
 pub mod mcp;
 mod models;
@@ -32,8 +32,8 @@ use history::{
     manage_runs, now_ms, parse_replay_run_id, read_manifest, record_failed_run, record_run,
     trace_run,
 };
+use import::{import_workflow_repo, parse_import_options};
 use info::architecture_info;
-use install::{install_workflow_repo, parse_install_options};
 use list::{list_workflows, parse_list_options};
 use models::manage_models;
 use node::manage_nodes;
@@ -139,8 +139,8 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             };
             print_json(&add_dependency(root, &options, options.global)?)?;
         }
-        "install" => {
-            let options = parse_install_options(args)?;
+        "import" => {
+            let options = parse_import_options(args)?;
             let (root, repo_store_root) = if options.global {
                 ensure_lfw_shell_setup(&runtime)?;
                 let store = runtime.home_path.join("repos");
@@ -149,7 +149,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 let cwd = env::current_dir()?;
                 (Path::new("."), cwd.join(".lightflow").join("repos"))
             };
-            print_json(&install_workflow_repo(root, &repo_store_root, &options)?)?;
+            print_json(&import_workflow_repo(root, &repo_store_root, &options)?)?;
         }
         "home" => {
             ensure_no_extra_args(args, 0, "home")?;
@@ -470,7 +470,7 @@ fn usage() -> String {
         "  lfw info",
         "  lfw home",
         "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
-        "  lfw install <path-or-git-url> [--git] [--name <name>] [--global|-g]",
+        "  lfw import <path-or-git-url> [--git] [--name <name>] [--global|-g]",
         "  lfw new <workflow_id> --category <name> [--name <name>] [--runtime <capability>] [--global|-g]",
         "  lfw list [--brief|--detail] [--category <name>]",
         "  lfw list --categories",

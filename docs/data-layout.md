@@ -157,7 +157,7 @@ $XDG_DATA_HOME/lightflow/
 
 The default home at `$XDG_DATA_HOME/lightflow` is initialized as a Cargo
 workspace root. Its generated manifest uses `members = ["workflows/*/*"]`.
-This gives globally installed workflows one shared dependency environment,
+This gives globally imported workflows one shared dependency environment,
 analogous to a small language-specific environment for LightFlow workflows.
 `lfw home` prints this root, its `Cargo.toml`, the workflow source directory,
 and the repo cache. `lfw new --global` creates workflow crates under
@@ -179,6 +179,10 @@ Cargo dependency workflows are then scanned as extension crates and cannot
 override a project workflow.
 
 ## Workflow Crates
+
+For a practical authoring tutorial, see
+[Workflow Development Guide](workflow-development.md). This section describes
+the underlying project layout and data model.
 
 Each workflow is a Rust library crate with embedded metadata and definition in
 `src/lib.rs`:
@@ -421,7 +425,7 @@ and `lightflow.model.lock_check`; LLM helpers include
 `lightflow.llm.structured_output`. Each has a matching
 `.agent/skills/<skill-name>/SKILL.md` file and a builtin runtime capability.
 
-`lfw sync --apply` discovers skills from installed workflow/plugin projects,
+`lfw sync --apply` discovers skills from workflow/plugin projects,
 asks whether to symlink each skill into the current project's `.agents/skills`
 directory or the global `~/.agents/skills` directory, and records the answer in
 `lfw.lock`. A recorded answer is not asked again. Delete `lfw.lock` to choose
@@ -442,7 +446,7 @@ Plugin crates and workflow crates have the same Rust/Cargo status: both expose
 both import `lightflow`. The core `lightflow` crate does not import plugin or
 workflow crates.
 
-## Installed Workflow Dependencies
+## Imported Workflow Dependencies
 
 A workflow can be installed as a Cargo dependency. The backend scans local
 workflow crates under `workflows/<category>/<short-name>/` and also
@@ -475,15 +479,15 @@ lfw add lightflow-std --version 0.1.1 --global
 ```
 
 For a self-contained workflow repository or local collection that contains
-multiple workflow crates, use `lfw install` instead of adding each crate by
+multiple workflow crates, use `lfw import` instead of adding each crate by
 hand:
 
 ```bash
-lfw install --global /path/to/lightflow-flux
-lfw install --global https://github.com/lightjunction/lightflow-flux.git
+lfw import --global /path/to/lightflow-flux
+lfw import --global https://github.com/lightjunction/lightflow-flux.git
 ```
 
-`lfw install` discovers `workflows/<category>/<crate>` entries and records each
+`lfw import` discovers `workflows/<category>/<crate>` entries and records each
 workflow crate as a Cargo path dependency in the target project or global
 workspace. Git sources are cloned into LightFlow's managed repo store first,
 then installed from that clone. The original workflow repository remains the

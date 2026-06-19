@@ -6,8 +6,8 @@ use std::process::Command;
 use support::*;
 
 #[test]
-fn abc_workflow_projects_resolve_import_run_and_install_modes()
--> Result<(), Box<dyn std::error::Error>> {
+fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dyn std::error::Error>>
+{
     let base = unique_temp_root();
     let project_a = base.join("lightflow-a");
     let project_b = base.join("lightflow-b");
@@ -131,6 +131,26 @@ fn abc_workflow_projects_resolve_import_run_and_install_modes()
     let global_deps = lfw(&global_project, ["deps", "lightflow.a"])?;
     assert_eq!(global_deps["complete"], true);
 
+    let import_collection = base.join("import-collection");
+    write_empty_workspace(&import_collection)?;
+    write_leaf_project_in_workspace(&import_collection, "b", "lightflow.b", "B")?;
+    write_leaf_project_in_workspace(&import_collection, "c", "lightflow.c", "C")?;
+    let import_project = base.join("import-consumer");
+    write_a_project(&import_project, &project_b, &project_c)?;
+    let imported = lfw(
+        &import_project,
+        ["import", import_collection.to_str().unwrap()],
+    )?;
+    let imported_packages = imported["imported"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["package"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(imported_packages, vec!["lightflow-b", "lightflow-c"]);
+    let import_deps = lfw(&import_project, ["deps", "lightflow.a"])?;
+    assert_eq!(import_deps["complete"], true);
+
     let registry_project = base.join("registry-install");
     write_empty_workspace(&registry_project)?;
     let registry = lfw(
@@ -247,6 +267,15 @@ fn write_leaf_project(
     display_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write_empty_workspace(root)?;
+    write_leaf_project_in_workspace(root, short_name, workflow_id, display_name)
+}
+
+fn write_leaf_project_in_workspace(
+    root: &Path,
+    short_name: &str,
+    workflow_id: &str,
+    display_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let crate_dir = root.join("workflows/abc").join(short_name);
     write_workflow_crate_at(
         &crate_dir,

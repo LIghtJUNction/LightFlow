@@ -7,19 +7,19 @@ use std::process::Command;
 use toml_edit::DocumentMut;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct InstallOptions {
-    pub(super) source: InstallSource,
+pub(super) struct ImportOptions {
+    pub(super) source: ImportSource,
     pub(super) global: bool,
     pub(super) name: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) enum InstallSource {
+pub(super) enum ImportSource {
     Path(PathBuf),
     Git(String),
 }
 
-pub(super) fn parse_install_options(args: &[String]) -> CliResult<InstallOptions> {
+pub(super) fn parse_import_options(args: &[String]) -> CliResult<ImportOptions> {
     let mut source = None;
     let mut global = false;
     let mut name = None;
@@ -44,13 +44,13 @@ pub(super) fn parse_install_options(args: &[String]) -> CliResult<InstallOptions
             }
             value if value.starts_with("--") => {
                 return Err(CliError::Usage(format!(
-                    "unexpected argument for install: {value}"
+                    "unexpected argument for import: {value}"
                 )));
             }
             value => {
                 if source.is_some() {
                     return Err(CliError::Usage(format!(
-                        "unexpected argument for install: {value}"
+                        "unexpected argument for import: {value}"
                     )));
                 }
                 source = Some(value.to_owned());
@@ -58,30 +58,30 @@ pub(super) fn parse_install_options(args: &[String]) -> CliResult<InstallOptions
             }
         }
     }
-    let source = source.ok_or_else(|| CliError::Usage("missing install source".to_owned()))?;
+    let source = source.ok_or_else(|| CliError::Usage("missing import source".to_owned()))?;
     let source = if force_git || looks_like_git_source(&source) {
-        InstallSource::Git(source)
+        ImportSource::Git(source)
     } else {
-        InstallSource::Path(PathBuf::from(source))
+        ImportSource::Path(PathBuf::from(source))
     };
-    Ok(InstallOptions {
+    Ok(ImportOptions {
         source,
         global,
         name,
     })
 }
 
-pub(super) fn install_workflow_repo(
+pub(super) fn import_workflow_repo(
     workspace_root: &Path,
     repo_store_root: &Path,
-    options: &InstallOptions,
+    options: &ImportOptions,
 ) -> CliResult<serde_json::Value> {
     let (source_root, source_json) = match &options.source {
-        InstallSource::Path(path) => {
+        ImportSource::Path(path) => {
             let source_root = path.canonicalize()?;
             (source_root, json!({ "path": path }))
         }
-        InstallSource::Git(url) => {
+        ImportSource::Git(url) => {
             let clone_dir = repo_store_root.join(repo_slug(options.name.as_deref(), url));
             sync_git_repo(url, &clone_dir)?;
             (clone_dir.canonicalize()?, json!({ "git": url }))
@@ -95,7 +95,7 @@ pub(super) fn install_workflow_repo(
         )));
     }
 
-    let mut installed = Vec::new();
+    let mut imported = Vec::new();
     for workflow_crate in &crates {
         let path = workflow_crate.path.display().to_string();
         let dependency = add_dependency(
@@ -106,11 +106,11 @@ pub(super) fn install_workflow_repo(
                 version: None,
                 package: None,
                 global: options.global,
-                editable: matches!(options.source, InstallSource::Path(_)),
+                editable: matches!(options.source, ImportSource::Path(_)),
             },
             options.global,
         )?;
-        installed.push(json!({
+        imported.push(json!({
             "package": workflow_crate.package,
             "category": workflow_crate.category,
             "path": path,
@@ -123,7 +123,7 @@ pub(super) fn install_workflow_repo(
         "source_root": source_root,
         "workspace": workspace_root,
         "global": options.global,
-        "installed": installed,
+        "imported": imported,
     }))
 }
 

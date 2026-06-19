@@ -262,7 +262,7 @@ packages one by one, ordered so local workflow path dependencies are published
 before dependents. Dirty worktrees remain blocked by Cargo unless the caller
 passes `--allow-dirty`.
 
-This keeps workflow installation and workflow publishing on the same primitive:
+This keeps workflow importing and workflow publishing on the same primitive:
 ordinary Rust crates.
 
 ## Sync Model
