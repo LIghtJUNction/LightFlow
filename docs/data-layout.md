@@ -631,6 +631,9 @@ path, and inpaint tasks add both input image and mask paths.
 
 Native text-to-image keeps the loaded model session in process memory and keys
 that session by the resolved `flux_model`, `llm_model`, and `vae_model` paths.
+When `count`, `num_images`, or `batch_count` requests multiple text-to-image
+outputs, the native backend receives one batch request while LightFlow still
+records each output as an individual artifact path.
 This does not change the on-disk layout: `lfw.lock` remains the source of model
 paths, run records still store artifact paths, and model weights stay in the
 Hugging Face cache. The residency benefit lasts for the lifetime of the

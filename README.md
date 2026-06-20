@@ -139,11 +139,12 @@ generation, edit, and inpaint workflows declare synced model requirements and
 delegate sampling to LightFlow's native `flux-native` backend when that feature
 is enabled. The native text-to-image path keeps a loaded FLUX/Qwen/VAE session
 inside the LightFlow process and reuses it for later images with the same model
-paths, avoiding repeated model loads during multi-image runs and long-lived
-`lfw serve` sessions. Builds without the native backend can fall back to the
-executable named by `LIGHTFLOW_FLUX_RUNNER`; LightFlow passes the task, prompt,
-optional source image and mask paths, sampling settings, output path, and
-locked model paths to that runner.
+paths. Multi-image text-to-image runs are sent to the native backend as one
+batch request, avoiding repeated model loads and reducing per-image dispatch
+overhead during long-lived `lfw serve` sessions. Builds without the native
+backend can fall back to the executable named by `LIGHTFLOW_FLUX_RUNNER`;
+LightFlow passes the task, prompt, optional source image and mask paths,
+sampling settings, output path, and locked model paths to that runner.
 
 Text-generation workflows can declare the `lightflow.llm.generate` runtime
 capability. Builds compiled with `--features rig` execute that runtime through

@@ -1,5 +1,5 @@
 use super::{ApiError, ApiResult};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(super) struct NativeFluxRequest<'a> {
     pub(super) task: &'a str,
@@ -20,15 +20,59 @@ pub(super) struct NativeFluxRequest<'a> {
     pub(super) vae_model: &'a Path,
 }
 
+pub(super) struct NativeFluxBatchRequest<'a> {
+    pub(super) task: &'a str,
+    pub(super) prompt: &'a str,
+    pub(super) negative: &'a str,
+    pub(super) width: i32,
+    pub(super) height: i32,
+    pub(super) seed: i64,
+    pub(super) steps: i32,
+    pub(super) guidance: f32,
+    pub(super) cfg_scale: f32,
+    pub(super) strength: f32,
+    pub(super) output_paths: &'a [PathBuf],
+    pub(super) diffusion_model: &'a Path,
+    pub(super) llm_model: &'a Path,
+    pub(super) vae_model: &'a Path,
+}
+
 pub(super) fn generate(request: NativeFluxRequest<'_>) -> ApiResult<()> {
     if request.task == "text-to-image"
         && request.image_path.is_none()
         && request.mask_path.is_none()
     {
-        return generate_text_to_image_with_cached_session(request);
+        let output_paths = [request.output_path.to_path_buf()];
+        let batch = NativeFluxBatchRequest {
+            task: request.task,
+            prompt: request.prompt,
+            negative: request.negative,
+            width: request.width,
+            height: request.height,
+            seed: request.seed,
+            steps: request.steps,
+            guidance: request.guidance,
+            cfg_scale: request.cfg_scale,
+            strength: request.strength,
+            output_paths: &output_paths,
+            diffusion_model: request.diffusion_model,
+            llm_model: request.llm_model,
+            vae_model: request.vae_model,
+        };
+        return generate_text_to_image_with_cached_session(batch);
     }
 
     generate_with_diffusion_rs(request)
+}
+
+pub(super) fn generate_batch(request: NativeFluxBatchRequest<'_>) -> ApiResult<()> {
+    if request.task != "text-to-image" {
+        return Err(ApiError::InvalidRequest(format!(
+            "native FLUX batch generation does not support task {}",
+            request.task
+        )));
+    }
+    generate_text_to_image_with_cached_session(request)
 }
 
 fn generate_with_diffusion_rs(request: NativeFluxRequest<'_>) -> ApiResult<()> {
@@ -85,7 +129,9 @@ fn generate_with_diffusion_rs(request: NativeFluxRequest<'_>) -> ApiResult<()> {
     })
 }
 
-fn generate_text_to_image_with_cached_session(request: NativeFluxRequest<'_>) -> ApiResult<()> {
+fn generate_text_to_image_with_cached_session(
+    request: NativeFluxBatchRequest<'_>,
+) -> ApiResult<()> {
     use diffusion_rs_sys::{
         generate_image, lora_apply_mode_t, sd_cache_params_init, sd_ctx_params_init,
         sd_get_default_sample_method, sd_get_default_scheduler, sd_guidance_params_t,
@@ -109,6 +155,12 @@ fn generate_text_to_image_with_cached_session(request: NativeFluxRequest<'_>) ->
         .map_err(|_| {
             ApiError::InvalidRequest("native FLUX session lock was poisoned".to_owned())
         })?;
+    if request.output_paths.is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "native FLUX batch generation requires at least one output path".to_owned(),
+        ));
+    }
+
     let key = NativeFluxSessionKey::from_request(&request);
     let reload = session
         .as_ref()
@@ -161,7 +213,9 @@ fn generate_text_to_image_with_cached_session(request: NativeFluxRequest<'_>) ->
         params.width = request.width;
         params.height = request.height;
         params.seed = request.seed;
-        params.batch_count = 1;
+        params.batch_count = i32::try_from(request.output_paths.len()).map_err(|_| {
+            ApiError::InvalidRequest("native FLUX batch count overflowed i32".to_owned())
+        })?;
         params.sample_params = sample_params;
         params.strength = request.strength;
         params.init_image = sd_image_t {
@@ -208,24 +262,23 @@ fn generate_text_to_image_with_cached_session(request: NativeFluxRequest<'_>) ->
             ));
         }
 
-        let result = slice::from_raw_parts(images, 1)
-            .first()
-            .ok_or_else(|| {
-                ApiError::InvalidRequest(
-                    "native FLUX text-to-image generation returned an empty image list".to_owned(),
-                )
-            })
-            .and_then(|image| write_native_png(*image, request.output_path));
+        let generated = slice::from_raw_parts(images, request.output_paths.len());
+        let result = generated
+            .iter()
+            .zip(request.output_paths)
+            .try_for_each(|(image, output_path)| write_native_png(*image, output_path));
         free(images.cast::<c_void>());
         result?;
     }
 
-    let bytes = std::fs::read(request.output_path).map_err(ApiError::from)?;
-    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Err(ApiError::InvalidRequest(format!(
-            "native FLUX generation completed but did not write a PNG: {}",
-            request.output_path.display()
-        )));
+    for output_path in request.output_paths {
+        let bytes = std::fs::read(output_path).map_err(ApiError::from)?;
+        if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            return Err(ApiError::InvalidRequest(format!(
+                "native FLUX generation completed but did not write a PNG: {}",
+                output_path.display()
+            )));
+        }
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,7 +289,7 @@ fn generate_text_to_image_with_cached_session(request: NativeFluxRequest<'_>) ->
     }
 
     impl NativeFluxSessionKey {
-        fn from_request(request: &NativeFluxRequest<'_>) -> Self {
+        fn from_request(request: &NativeFluxBatchRequest<'_>) -> Self {
             Self {
                 diffusion_model: request.diffusion_model.to_path_buf(),
                 llm_model: request.llm_model.to_path_buf(),

@@ -145,10 +145,12 @@ writes the PNG artifact.
 
 The native FLUX text-to-image backend is process-resident. It caches one loaded
 FLUX/Qwen/VAE session keyed by the locked model paths and reuses that session
-for later images in the same process. This is the preferred path for
-ComfyUI-style operation: run LightFlow as a long-lived process, such as
-`lfw serve`, so model residency survives multiple requests. One-shot CLI
-commands still unload when the process exits.
+for later images in the same process. Multi-image text-to-image requests are
+executed as one native batch call and then materialized to the individual
+workflow output paths. This is the preferred path for ComfyUI-style operation:
+run LightFlow as a long-lived process, such as `lfw serve`, so model residency
+survives multiple requests. One-shot CLI commands still unload when the process
+exits.
 
 Leaf workflow execution is selected through the Executor Registry. The registry
 maps runtime capabilities such as `lightflow.image.generate`,

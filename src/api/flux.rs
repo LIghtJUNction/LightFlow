@@ -42,6 +42,22 @@ struct FluxRunRequest<'a> {
     models: &'a FluxModelHandles,
 }
 
+#[allow(dead_code)]
+struct FluxBatchRunRequest<'a> {
+    task: FluxTask,
+    prompt: &'a str,
+    negative: &'a str,
+    width: i32,
+    height: i32,
+    seed: i64,
+    steps: i32,
+    guidance: f32,
+    cfg_scale: f32,
+    strength: f32,
+    output_paths: &'a [PathBuf],
+    models: &'a FluxModelHandles,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum FluxTask {
     TextToImage,
@@ -161,11 +177,57 @@ fn execute_flux_with_models(
     };
     let output_paths = output_paths(root, workflow, inputs, seed as u64, count);
     let mut artifacts = Vec::with_capacity(output_paths.len());
+    let backend = selected_flux_backend()?;
 
-    for (offset, output_path) in output_paths.iter().enumerate() {
+    for output_path in &output_paths {
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).map_err(ApiError::from)?;
         }
+    }
+
+    if matches!(backend, FluxBackend::Native)
+        && matches!(task, FluxTask::TextToImage)
+        && image_path.is_none()
+        && mask_path.is_none()
+    {
+        let request = FluxBatchRunRequest {
+            task,
+            prompt: &prompt,
+            negative: &negative,
+            width,
+            height,
+            seed,
+            steps,
+            guidance,
+            cfg_scale,
+            strength,
+            output_paths: &output_paths,
+            models: &models,
+        };
+        run_flux_native_batch(&request)?;
+    } else {
+        for (offset, output_path) in output_paths.iter().enumerate() {
+            let request = FluxRunRequest {
+                task,
+                prompt: &prompt,
+                negative: &negative,
+                width,
+                height,
+                seed: seed.saturating_add(offset as i64),
+                steps,
+                guidance,
+                cfg_scale,
+                strength,
+                image_path: image_path.as_deref(),
+                mask_path: mask_path.as_deref(),
+                output_path,
+                models: &models,
+            };
+            run_selected_flux_backend(&request, backend)?;
+        }
+    }
+
+    for (offset, output_path) in output_paths.iter().enumerate() {
         let request = FluxRunRequest {
             task,
             prompt: &prompt,
@@ -182,7 +244,6 @@ fn execute_flux_with_models(
             output_path,
             models: &models,
         };
-        let backend = run_flux_backend(&request)?;
         artifacts.push(flux_artifact(
             workflow,
             &request,
@@ -229,28 +290,27 @@ fn load_flux_models(
     })
 }
 
-fn run_flux_backend(request: &FluxRunRequest<'_>) -> ApiResult<FluxBackend> {
+fn selected_flux_backend() -> ApiResult<FluxBackend> {
     match std::env::var(FLUX_BACKEND_ENV).as_deref() {
-        Ok("external") | Ok("runner") => {
-            run_flux_runner(request)?;
-            Ok(FluxBackend::ExternalRunner)
-        }
-        Ok("native") => {
-            run_flux_native(request)?;
-            Ok(FluxBackend::Native)
-        }
+        Ok("external") | Ok("runner") => Ok(FluxBackend::ExternalRunner),
+        Ok("native") => Ok(FluxBackend::Native),
         Ok(other) => Err(ApiError::InvalidRequest(format!(
             "{FLUX_BACKEND_ENV} must be native, external, or unset; got {other}"
         ))),
         Err(_) => {
             if native_flux_runtime_enabled() {
-                run_flux_native(request)?;
                 Ok(FluxBackend::Native)
             } else {
-                run_flux_runner(request)?;
                 Ok(FluxBackend::ExternalRunner)
             }
         }
+    }
+}
+
+fn run_selected_flux_backend(request: &FluxRunRequest<'_>, backend: FluxBackend) -> ApiResult<()> {
+    match backend {
+        FluxBackend::Native => run_flux_native(request),
+        FluxBackend::ExternalRunner => run_flux_runner(request),
     }
 }
 
@@ -281,8 +341,36 @@ fn run_flux_native(request: &FluxRunRequest<'_>) -> ApiResult<()> {
     super::flux_native::generate(request)
 }
 
+#[cfg(feature = "flux-native")]
+fn run_flux_native_batch(request: &FluxBatchRunRequest<'_>) -> ApiResult<()> {
+    let request = super::flux_native::NativeFluxBatchRequest {
+        task: request.task.as_str(),
+        prompt: request.prompt,
+        negative: request.negative,
+        width: request.width,
+        height: request.height,
+        seed: request.seed,
+        steps: request.steps,
+        guidance: request.guidance,
+        cfg_scale: request.cfg_scale,
+        strength: request.strength,
+        output_paths: request.output_paths,
+        diffusion_model: &request.models.diffusion_model,
+        llm_model: &request.models.llm,
+        vae_model: &request.models.vae,
+    };
+    super::flux_native::generate_batch(request)
+}
+
 #[cfg(not(feature = "flux-native"))]
 fn run_flux_native(_request: &FluxRunRequest<'_>) -> ApiResult<()> {
+    Err(ApiError::InvalidRequest(
+        "native FLUX backend requested, but this LightFlow binary was not built with --features flux-native".to_owned(),
+    ))
+}
+
+#[cfg(not(feature = "flux-native"))]
+fn run_flux_native_batch(_request: &FluxBatchRunRequest<'_>) -> ApiResult<()> {
     Err(ApiError::InvalidRequest(
         "native FLUX backend requested, but this LightFlow binary was not built with --features flux-native".to_owned(),
     ))
