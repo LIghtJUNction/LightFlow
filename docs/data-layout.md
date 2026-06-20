@@ -169,6 +169,13 @@ workspace, and
 `lfw upgrade --global` runs `cargo update`. Version resolution remains Cargo's
 job; LightFlow only chooses the workspace where the command runs.
 
+There is no separate LightFlow package database. The global home is a Cargo
+workspace, and global installation means adding workspace members or Cargo
+dependencies to that workspace. `lfw add` targets one known Cargo package;
+`lfw import` targets a workflow repository or collection, discovers
+`workflows/<category>/<crate>` entries, and adds each discovered workflow crate
+as a Cargo path dependency.
+
 The directory name is a short slug, not the full workflow id. For example,
 `lightflow.text_plan` can live at `std/text_plan/src/lib.rs`; the Rust DSL
 still declares `workflow("lightflow.text_plan")`.
@@ -492,6 +499,11 @@ workflow crate as a Cargo path dependency in the target project or global
 workspace. Git sources are cloned into LightFlow's managed repo store first,
 then installed from that clone. The original workflow repository remains the
 self-contained Cargo workspace that owns its `[workspace.dependencies]`.
+
+This is a thin manifest-editing layer over Cargo. Cargo remains responsible for
+fetching, updating, lockfile resolution, feature resolution, and publishing;
+LightFlow is responsible for workflow discovery, node metadata, model sync, and
+agent skill sync.
 
 `--editable` is only valid with `--path`. It keeps the manifest as a standard
 Cargo path dependency and makes the CLI result report `"editable": true`,
