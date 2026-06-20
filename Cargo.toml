@@ -19,6 +19,8 @@ axum = "0.8.9"
 candle-core = { version = "0.10.2", optional = true, default-features = false }
 candle-transformers = { version = "0.10.2", optional = true, default-features = false }
 diffusion-rs = { version = "0.1.20", optional = true, default-features = false }
+diffusion-rs-sys = { version = "0.1.20", optional = true }
+libc = { version = "0.2.186", optional = true }
 lightflow-macros = { path = "lightflow-macros", version = "0.1.2" }
 petgraph = "0.8.3"
 png = "0.18.1"
@@ -35,7 +37,7 @@ toml_edit = "0.22.27"
 [features]
 default = ["flux", "gguf"]
 flux = []
-flux-native = ["flux", "dep:diffusion-rs"]
+flux-native = ["flux", "dep:diffusion-rs", "dep:diffusion-rs-sys", "dep:libc"]
 flux-native-cuda = ["flux-native", "diffusion-rs/cuda"]
 flux-native-vulkan = ["flux-native", "diffusion-rs/vulkan"]
 gguf = ["dep:candle-core", "dep:candle-transformers"]

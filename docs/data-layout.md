@@ -629,6 +629,13 @@ configured by `LIGHTFLOW_FLUX_RUNNER`. The same task contract covers
 text-to-image, image edit, and inpaint tasks; edit tasks add an input image
 path, and inpaint tasks add both input image and mask paths.
 
+Native text-to-image keeps the loaded model session in process memory and keys
+that session by the resolved `flux_model`, `llm_model`, and `vae_model` paths.
+This does not change the on-disk layout: `lfw.lock` remains the source of model
+paths, run records still store artifact paths, and model weights stay in the
+Hugging Face cache. The residency benefit lasts for the lifetime of the
+LightFlow process.
+
 RIG LLM workflows declare `lightflow.llm.generate` and keep provider selection
 as runtime input. `provider`, `model`, `prompt`, `system`, `api_key`,
 `base_url`, `temperature`, `max_tokens`, and `additional_params` are workflow

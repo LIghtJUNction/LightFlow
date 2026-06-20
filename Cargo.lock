@@ -2380,6 +2380,8 @@ dependencies = [
  "candle-core",
  "candle-transformers",
  "diffusion-rs",
+ "diffusion-rs-sys",
+ "libc",
  "lightflow-macros",
  "petgraph",
  "png",
