@@ -1,4 +1,4 @@
-use super::{CliError, CliResult, required_arg, required_flag_value};
+use super::{CliError, CliResult, required_arg, required_flag_value, validate_path_segment};
 use crate::api::ApiService;
 use crate::workflow::{WorkflowArtifact, WorkflowExecutionOptions};
 use serde::{Deserialize, Serialize};
@@ -233,6 +233,7 @@ fn run_batch(service: &ApiService, options: &BatchRunOptions) -> CliResult<serde
         .run_id
         .clone()
         .unwrap_or_else(|| format!("run-{}", now_ms()));
+    validate_path_segment(&run_id, "run id")?;
     let run_dir = service.repo_root().join(RUNS_DIR).join(&run_id);
     if run_dir.exists() {
         return Err(CliError::Usage(format!(
@@ -268,6 +269,7 @@ fn resume_batch(
     service: &ApiService,
     options: &BatchResumeOptions,
 ) -> CliResult<serde_json::Value> {
+    validate_path_segment(&options.run_id, "run id")?;
     let run_dir = service.repo_root().join(RUNS_DIR).join(&options.run_id);
     let mut manifest: BatchManifest =
         serde_json::from_slice(&fs::read(run_dir.join("manifest.json"))?)?;

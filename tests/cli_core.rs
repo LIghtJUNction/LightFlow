@@ -284,6 +284,13 @@ pub fn define() -> WorkflowSpec {
         "lightflow.parent"
     );
 
+    let service = ApiService::new(&root);
+    let execution_error = service
+        .execute_workflow("lightflow.parent", Default::default())
+        .expect_err("execution should reject dependency version mismatches")
+        .to_string();
+    assert!(execution_error.contains("lightflow.child requires version 9.9.9"));
+
     let validation = lightflow(
         &root,
         [
@@ -305,6 +312,75 @@ pub fn define() -> WorkflowSpec {
             .unwrap()
             .contains("must be semantic version")
     );
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn execution_rejects_recursive_workflow_dependency_cycles() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+
+    write_workflow_crate(
+        &root,
+        "lightflow.a",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.a")
+        .version("0.1.0")
+        .name("A")
+        .input("in", "json")
+        .output("out", "json")
+        .node("b", "lightflow.b")
+        .build()
+}
+"#,
+    )?;
+    write_workflow_crate(
+        &root,
+        "lightflow.b",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.b")
+        .version("0.1.0")
+        .name("B")
+        .input("in", "json")
+        .output("out", "json")
+        .node("a", "lightflow.a")
+        .build()
+}
+"#,
+    )?;
+
+    let service = ApiService::new(&root);
+    let execution_error = service
+        .execute_workflow("lightflow.a", Default::default())
+        .expect_err("execution should reject recursive workflow cycles")
+        .to_string();
+    assert!(execution_error.contains("workflow dependency cycle"));
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn runs_rm_rejects_run_id_path_traversal() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    let outside = root.join("outside-run-dir");
+    fs::create_dir_all(&outside)?;
+
+    let output = lfw_command(&root)
+        .args(["runs", "rm", "../../outside-run-dir"])
+        .output()?;
+
+    assert!(!output.status.success());
+    assert!(outside.exists());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid run id path segment"));
 
     let _ = fs::remove_dir_all(root);
     Ok(())

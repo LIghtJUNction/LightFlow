@@ -570,18 +570,18 @@ fn execute_preview_image_edit(
     let edited = preview_edit_image(&image, seed, &prompt, None);
     let output_path = image_transform_output_path(root, workflow, inputs, &image_path, "edited");
     write_png_image(&output_path, &edited)?;
-    let artifact = preview_transform_artifact(
+    let artifact = preview_transform_artifact(PreviewTransformArtifact {
         workflow,
-        &image_path,
-        None,
-        &output_path,
-        &prompt,
+        input_path: &image_path,
+        mask_path: None,
+        output_path: &output_path,
+        prompt: &prompt,
         seed,
-        PREVIEW_EDIT_ENGINE,
-        IMAGE_EDIT_CAPABILITY,
-        Some((edited.width, edited.height)),
+        engine: PREVIEW_EDIT_ENGINE,
+        capability: IMAGE_EDIT_CAPABILITY,
+        dimensions: Some((edited.width, edited.height)),
         inputs,
-    );
+    });
     preview_image_outputs(workflow, inputs, &output_path, artifact, &prompt, seed)
 }
 
@@ -606,18 +606,18 @@ fn execute_preview_inpaint(
     let inpainted = preview_edit_image(&image, seed, &prompt, Some(&mask));
     let output_path = image_transform_output_path(root, workflow, inputs, &image_path, "inpainted");
     write_png_image(&output_path, &inpainted)?;
-    let artifact = preview_transform_artifact(
+    let artifact = preview_transform_artifact(PreviewTransformArtifact {
         workflow,
-        &image_path,
-        Some(&mask_path),
-        &output_path,
-        &prompt,
+        input_path: &image_path,
+        mask_path: Some(&mask_path),
+        output_path: &output_path,
+        prompt: &prompt,
         seed,
-        PREVIEW_INPAINT_ENGINE,
-        IMAGE_INPAINT_CAPABILITY,
-        Some((inpainted.width, inpainted.height)),
+        engine: PREVIEW_INPAINT_ENGINE,
+        capability: IMAGE_INPAINT_CAPABILITY,
+        dimensions: Some((inpainted.width, inpainted.height)),
         inputs,
-    );
+    });
     preview_image_outputs(workflow, inputs, &output_path, artifact, &prompt, seed)
 }
 
@@ -1391,48 +1391,50 @@ fn image_file_artifact(
     }
 }
 
-fn preview_transform_artifact(
-    workflow: &WorkflowSpec,
-    input_path: &Path,
-    mask_path: Option<&Path>,
-    output_path: &Path,
-    prompt: &str,
+struct PreviewTransformArtifact<'a> {
+    workflow: &'a WorkflowSpec,
+    input_path: &'a Path,
+    mask_path: Option<&'a Path>,
+    output_path: &'a Path,
+    prompt: &'a str,
     seed: u64,
-    engine: &str,
-    capability: &str,
+    engine: &'a str,
+    capability: &'a str,
     dimensions: Option<(u32, u32)>,
-    inputs: &serde_json::Map<String, serde_json::Value>,
-) -> WorkflowArtifact {
+    inputs: &'a serde_json::Map<String, serde_json::Value>,
+}
+
+fn preview_transform_artifact(spec: PreviewTransformArtifact<'_>) -> WorkflowArtifact {
     let mut metadata = serde_json::Map::new();
-    metadata.insert("engine".to_owned(), engine.into());
-    metadata.insert("capability".to_owned(), capability.into());
-    metadata.insert("prompt".to_owned(), prompt.to_owned().into());
-    metadata.insert("seed".to_owned(), seed.into());
+    metadata.insert("engine".to_owned(), spec.engine.into());
+    metadata.insert("capability".to_owned(), spec.capability.into());
+    metadata.insert("prompt".to_owned(), spec.prompt.to_owned().into());
+    metadata.insert("seed".to_owned(), spec.seed.into());
     metadata.insert(
         "source_image_path".to_owned(),
-        input_path.display().to_string().into(),
+        spec.input_path.display().to_string().into(),
     );
-    if let Some(mask_path) = mask_path {
+    if let Some(mask_path) = spec.mask_path {
         metadata.insert(
             "mask_path".to_owned(),
             mask_path.display().to_string().into(),
         );
     }
-    if let Some((width, height)) = dimensions {
+    if let Some((width, height)) = spec.dimensions {
         metadata.insert("width".to_owned(), width.into());
         metadata.insert("height".to_owned(), height.into());
     }
-    if let Some(negative) = input_string(inputs, "negative") {
+    if let Some(negative) = input_string(spec.inputs, "negative") {
         metadata.insert("negative_prompt".to_owned(), negative.into());
     }
-    if let Some(model) = selected_model(workflow, inputs) {
+    if let Some(model) = selected_model(spec.workflow, spec.inputs) {
         metadata.insert("model".to_owned(), model);
     }
 
     WorkflowArtifact {
         id: "image".to_owned(),
         kind: "image".to_owned(),
-        path: output_path.display().to_string(),
+        path: spec.output_path.display().to_string(),
         mime_type: "image/png".to_owned(),
         metadata,
     }

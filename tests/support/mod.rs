@@ -22,6 +22,18 @@ pub fn lfw<const N: usize>(
     run_json(env!("CARGO_BIN_EXE_lfw"), root, &args)
 }
 
+pub fn lfw_command(root: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lfw"));
+    command
+        .current_dir(root)
+        .env("HOME", root)
+        .env("SHELL", "/bin/zsh")
+        .env("XDG_CONFIG_HOME", root.join(".test-xdg/config"))
+        .env("XDG_DATA_HOME", root.join(".test-xdg/data"))
+        .env_remove("LFW_PATH");
+    command
+}
+
 pub fn lfw_with_env<const N: usize, const M: usize>(
     root: &Path,
     args: [&str; N],

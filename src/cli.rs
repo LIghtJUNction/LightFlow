@@ -423,6 +423,20 @@ fn required_arg<'a>(args: &'a [String], index: usize, label: &str) -> CliResult<
         .ok_or_else(|| CliError::Usage(format!("missing {label}")))
 }
 
+fn validate_path_segment(value: &str, label: &str) -> CliResult<()> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+    {
+        return Err(CliError::Usage(format!(
+            "invalid {label} path segment: {value}"
+        )));
+    }
+    Ok(())
+}
+
 fn parse_bind_addr(args: &[String], command: &str) -> CliResult<String> {
     let mut host = "127.0.0.1".to_owned();
     let mut port = "5174".to_owned();

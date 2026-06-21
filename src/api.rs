@@ -152,17 +152,7 @@ impl ApiService {
         workflows.insert(workflow.id.clone(), workflow.clone());
         let mut validation = validate_workflow_spec(workflow, &workflows);
         let dependencies = dependency_report(&workflow.id, &workflows);
-        for cycle in dependencies.cycles {
-            validation
-                .issues
-                .push(format!("workflow dependency cycle: {}", cycle.join(" -> ")));
-        }
-        for mismatch in dependencies.version_mismatches {
-            validation.issues.push(format!(
-                "workflow {} requires version {} but found {}",
-                mismatch.workflow_id, mismatch.required, mismatch.found
-            ));
-        }
+        validation.issues.extend(dependency_issues(&dependencies));
         validation.valid = validation.issues.is_empty();
         validation
     }
@@ -186,6 +176,7 @@ impl ApiService {
         let workflow = workflows
             .get(workflow_id)
             .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))?;
+        validate_workflow_dependencies(workflow_id, &workflows)?;
         execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, options)
     }
 
@@ -198,6 +189,7 @@ impl ApiService {
     ) -> ApiResult<WorkflowExecution> {
         let mut workflows = self.workflow_specs()?;
         workflows.insert(workflow.id.clone(), workflow.clone());
+        validate_workflow_dependencies(&workflow.id, &workflows)?;
         execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, options)
     }
 
@@ -233,22 +225,42 @@ fn node_validation_summary(
 ) -> nodes::NodeValidationSummary {
     let mut validation = validate_workflow_spec(workflow, workflows);
     let dependencies = dependency_report(&workflow.id, workflows);
-    for cycle in dependencies.cycles {
-        validation
-            .issues
-            .push(format!("workflow dependency cycle: {}", cycle.join(" -> ")));
-    }
-    for mismatch in dependencies.version_mismatches {
-        validation.issues.push(format!(
-            "workflow {} requires version {} but found {}",
-            mismatch.workflow_id, mismatch.required, mismatch.found
-        ));
-    }
+    validation.issues.extend(dependency_issues(&dependencies));
     validation.valid = validation.issues.is_empty();
     nodes::NodeValidationSummary {
         valid: validation.valid,
         issues: validation.issues,
     }
+}
+
+fn validate_workflow_dependencies(
+    workflow_id: &str,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+) -> ApiResult<()> {
+    let dependencies = dependency_report(workflow_id, workflows);
+    let issues = dependency_issues(&dependencies);
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidRequest(issues.join("; ")))
+    }
+}
+
+fn dependency_issues(dependencies: &WorkflowDependencyReport) -> Vec<String> {
+    let mut issues = Vec::new();
+    for missing in &dependencies.missing_workflows {
+        issues.push(format!("workflow dependency missing: {missing}"));
+    }
+    for cycle in &dependencies.cycles {
+        issues.push(format!("workflow dependency cycle: {}", cycle.join(" -> ")));
+    }
+    for mismatch in &dependencies.version_mismatches {
+        issues.push(format!(
+            "workflow {} requires version {} but found {}",
+            mismatch.workflow_id, mismatch.required, mismatch.found
+        ));
+    }
+    issues
 }
 
 /// API-level error.

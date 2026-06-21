@@ -80,6 +80,38 @@ fn batch_run_persists_jobs_and_resume_finishes_pending_work()
     Ok(())
 }
 
+#[test]
+fn batch_run_and_resume_reject_run_id_path_traversal() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    let jobs_path = root.join("jobs.jsonl");
+    fs::write(&jobs_path, "{}\n")?;
+
+    let run_output = lfw_command(&root)
+        .args([
+            "batch",
+            "run",
+            jobs_path.to_str().unwrap(),
+            "--run-id",
+            "../../outside-batch-run",
+        ])
+        .output()?;
+    assert!(!run_output.status.success());
+    assert!(!root.join("outside-batch-run").exists());
+    let run_stderr = String::from_utf8_lossy(&run_output.stderr);
+    assert!(run_stderr.contains("invalid run id path segment"));
+
+    let resume_output = lfw_command(&root)
+        .args(["batch", "resume", "../../outside-batch-run"])
+        .output()?;
+    assert!(!resume_output.status.success());
+    let resume_stderr = String::from_utf8_lossy(&resume_output.stderr);
+    assert!(resume_stderr.contains("invalid run id path segment"));
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
 fn read_jsonl(path: &std::path::Path) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
     fs::read_to_string(path)?
         .lines()

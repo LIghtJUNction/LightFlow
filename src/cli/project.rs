@@ -534,7 +534,7 @@ impl NodeTemplate {
         Self {
             runtime: Some(runtime.to_owned()),
             source_body: format!(
-                "{}\n{}",
+                "{}\n        .runtime(\"runtime\", {})",
                 [
                     "        .input(\"value\", \"json\")",
                     "        .input_description(\"value\", \"TODO: describe the runtime input value.\")",
@@ -544,7 +544,7 @@ impl NodeTemplate {
                     "        .output_description(\"value\", \"TODO: describe the runtime output value.\")",
                 ]
                 .join("\n"),
-                format!("        .runtime(\"runtime\", {})", rust_string(runtime))
+                rust_string(runtime)
             ),
             skill_contract: format!(
                 "- Runtime: `{runtime}`.\n- Input `value`: JSON value; required; widget `json`.\n- Output `value`: JSON value.\n- Add runtime-specific inputs, outputs, model requirements, and executor notes before publishing."

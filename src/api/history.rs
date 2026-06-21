@@ -1,3 +1,4 @@
+use super::util::validate_id_segment;
 use super::{ApiError, ApiResult};
 use crate::workflow::WorkflowArtifact;
 use serde::Serialize;
@@ -208,9 +209,13 @@ fn collect_artifact_array(
 
 fn resolve_run_id(root: &Path, selector: &str) -> ApiResult<String> {
     if selector == "last" {
-        read_last(&runs_root(root)).ok_or_else(|| ApiError::NotFound("last run".to_owned()))
+        let run_id =
+            read_last(&runs_root(root)).ok_or_else(|| ApiError::NotFound("last run".to_owned()))?;
+        validate_id_segment(&run_id, "run id")?;
+        Ok(run_id)
     } else {
         let run_id = selector.to_owned();
+        validate_id_segment(&run_id, "run id")?;
         let manifest = run_dir(root, &run_id).join("manifest.json");
         if manifest.exists() {
             Ok(run_id)
@@ -309,4 +314,47 @@ pub(crate) fn write_history_fixture(root: &Path) -> ApiResult<()> {
 fn json_bytes(value: &Value) -> ApiResult<Vec<u8>> {
     serde_json::to_vec_pretty(value)
         .map_err(|error| ApiError::InvalidRequest(format!("invalid fixture JSON: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn get_run_rejects_path_traversal_selectors() -> Result<(), Box<dyn std::error::Error>> {
+        let root = temp_root();
+        let outside = root.join("outside");
+        fs::create_dir_all(&outside)?;
+        fs::create_dir_all(runs_root(&root))?;
+        fs::write(outside.join("manifest.json"), "{}")?;
+        fs::write(outside.join("execution.json"), "{}")?;
+        fs::write(outside.join("events.jsonl"), "")?;
+
+        let direct_error = get_run(&root, "../../outside")
+            .expect_err("direct traversal selectors should be rejected")
+            .to_string();
+        assert!(direct_error.contains("invalid run id path segment"));
+
+        fs::write(runs_root(&root).join("last"), "../../outside")?;
+        let last_error = get_run(&root, "last")
+            .expect_err("last should not be allowed to point outside runs")
+            .to_string();
+        assert!(last_error.contains("invalid run id path segment"));
+        assert!(outside.exists());
+
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    fn temp_root() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "lightflow-api-history-test-{}-{nanos}",
+            std::process::id()
+        ))
+    }
 }

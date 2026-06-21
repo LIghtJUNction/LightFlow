@@ -1,5 +1,5 @@
 use super::run::{RunOptions, RunStage};
-use super::{CliError, CliResult, required_arg};
+use super::{CliError, CliResult, required_arg, validate_path_segment};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs::{self, OpenOptions};
@@ -306,11 +306,11 @@ pub(super) fn read_manifest(root: &Path, selector: &str) -> CliResult<RunManifes
 fn resolve_run_id(root: &Path, selector: &str) -> CliResult<String> {
     if selector == "last" {
         let path = runs_root(root).join("last");
-        return Ok(fs::read_to_string(path)?.trim().to_owned());
+        let run_id = fs::read_to_string(path)?.trim().to_owned();
+        validate_path_segment(&run_id, "run id")?;
+        return Ok(run_id);
     }
-    if selector.is_empty() {
-        return Err(CliError::Usage("run id cannot be empty".to_owned()));
-    }
+    validate_path_segment(selector, "run id")?;
     Ok(selector.to_owned())
 }
 
