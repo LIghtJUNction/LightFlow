@@ -223,7 +223,7 @@ fn with_cors(mut response: Response) -> Response {
 mod tests {
     use super::*;
     use axum::body::{Body, to_bytes};
-    use axum::http::{Request, StatusCode};
+    use axum::http::{Method, Request, StatusCode};
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -236,6 +236,63 @@ mod tests {
         expected.sort();
 
         assert_eq!(paths, expected);
+    }
+
+    #[tokio::test]
+    async fn live_http_responses_match_openapi_required_fields() {
+        let openapi = std::fs::read_to_string("openapi/lightflow.yaml").expect("openapi");
+        let service = ApiService::new(std::env::current_dir().expect("current dir"));
+        let app = router(service);
+
+        for (path, schema) in [
+            ("/workflows", "WorkflowList"),
+            ("/nodes", "NodeCatalog"),
+            ("/nodes/lightflow.text_to_image", "NodeCard"),
+            ("/models", "ModelCatalog"),
+            (
+                "/workflows/lightflow.text_plan/dependencies",
+                "WorkflowDependencyReport",
+            ),
+        ] {
+            let response = request_json(&app, path).await;
+            assert_eq!(response["status"], StatusCode::OK.as_u16(), "{path}");
+            assert_required_fields(&openapi, schema, &response["body"]);
+        }
+
+        let run = request_json_post(
+            &app,
+            "/workflows/lightflow.text_plan/run",
+            json!({ "inputs": { "value": "hello" } }),
+        )
+        .await;
+        assert_eq!(run["status"], StatusCode::OK.as_u16());
+        assert_required_fields(&openapi, "WorkflowExecution", &run["body"]);
+
+        let missing = request_json(&app, "/workflows/lightflow.missing").await;
+        assert_eq!(missing["status"], StatusCode::NOT_FOUND.as_u16());
+        assert_required_fields(&openapi, "ErrorResponse", &missing["body"]);
+
+        let root = std::env::temp_dir().join(format!(
+            "lightflow-server-schema-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        crate::api::write_history_fixture(&root).expect("fixture");
+        let history_app = router(ApiService::new(&root));
+
+        for (path, schema) in [
+            ("/runs", "RunCatalog"),
+            ("/runs/last", "RunTrace"),
+            ("/runs/run-test/events", "RunEvents"),
+            ("/artifacts", "ArtifactCatalog"),
+        ] {
+            let response = request_json(&history_app, path).await;
+            assert_eq!(response["status"], StatusCode::OK.as_u16(), "{path}");
+            assert_required_fields(&openapi, schema, &response["body"]);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -330,12 +387,31 @@ mod tests {
     }
 
     async fn request_json(app: &Router, path: &str) -> serde_json::Value {
+        request_json_with_body(app, Method::GET, path, Body::empty()).await
+    }
+
+    async fn request_json_post(
+        app: &Router,
+        path: &str,
+        body: serde_json::Value,
+    ) -> serde_json::Value {
+        request_json_with_body(app, Method::POST, path, Body::from(body.to_string())).await
+    }
+
+    async fn request_json_with_body(
+        app: &Router,
+        method: Method,
+        path: &str,
+        body: Body,
+    ) -> serde_json::Value {
         let response = app
             .clone()
             .oneshot(
                 Request::builder()
+                    .method(method)
                     .uri(path)
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(body)
                     .expect("request"),
             )
             .await
@@ -348,6 +424,54 @@ mod tests {
             "status": status.as_u16(),
             "body": serde_json::from_slice::<serde_json::Value>(&body).expect("json"),
         })
+    }
+
+    fn assert_required_fields(openapi: &str, schema: &str, body: &serde_json::Value) {
+        for field in openapi_required_fields(openapi, schema) {
+            assert!(
+                body.get(&field).is_some(),
+                "{schema} requires field `{field}`, but body was {body}"
+            );
+        }
+    }
+
+    fn openapi_required_fields(openapi: &str, schema: &str) -> Vec<String> {
+        let schema_header = format!("    {schema}:");
+        let mut in_schema = false;
+        let mut required = Vec::new();
+        let mut reading_block_list = false;
+
+        for line in openapi.lines() {
+            if line == schema_header {
+                in_schema = true;
+                continue;
+            }
+            if !in_schema {
+                continue;
+            }
+            if line.starts_with("    ") && !line.starts_with("      ") && line.ends_with(':') {
+                break;
+            }
+            let trimmed = line.trim();
+            if reading_block_list {
+                if let Some(item) = trimmed.strip_prefix("- ") {
+                    required.push(item.to_owned());
+                    continue;
+                }
+                if !trimmed.is_empty() {
+                    reading_block_list = false;
+                }
+            }
+            if let Some(inline) = trimmed.strip_prefix("required: [") {
+                let inline = inline.trim_end_matches(']');
+                required.extend(inline.split(',').map(|field| field.trim().to_owned()));
+            } else if trimmed == "required:" {
+                reading_block_list = true;
+            }
+        }
+
+        assert!(!required.is_empty(), "{schema} must define required fields");
+        required
     }
 
     fn openapi_path_keys(openapi: &str) -> Vec<&str> {

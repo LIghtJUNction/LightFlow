@@ -194,6 +194,9 @@ and documentation:
 - `reserved`: declared future executor contract that is visible to clients but
   not runnable in the current build.
 
+For the verified runtime commands and native FLUX build prerequisites, see
+[Runtime Verification](docs/runtime-verification.md).
+
 Use `lfw help <workflow_id>` when you know a workflow id but not its contract.
 It returns the workflow metadata, input and output ports, dependency status,
 model requirements, runtime capabilities, graph nodes and edges, plus example
