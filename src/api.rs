@@ -281,6 +281,25 @@ impl ApiError {
             Self::Io(_) => 500,
         }
     }
+
+    /// Stable machine-readable error code for clients.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidRequest(_) => "invalid_request",
+            Self::NotFound(_) => "not_found",
+            Self::Io(_) => "internal_error",
+        }
+    }
+
+    /// Human-readable error message without the adapter prefix.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::InvalidRequest(message) | Self::NotFound(message) => message.clone(),
+            Self::Io(error) => error.to_string(),
+        }
+    }
 }
 
 impl Display for ApiError {

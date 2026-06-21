@@ -19,6 +19,24 @@ struct AppState {
     service: Arc<ApiService>,
 }
 
+#[cfg(test)]
+const HTTP_PATHS: &[&str] = &[
+    "/health",
+    "/workflows",
+    "/nodes",
+    "/nodes/{workflow_id}",
+    "/models",
+    "/runs",
+    "/runs/{run_id}",
+    "/runs/{run_id}/events",
+    "/artifacts",
+    "/workflows/{workflow_id}",
+    "/workflows/{workflow_id}/dependencies",
+    "/workflows/{workflow_id}/run",
+    "/workflows/validate",
+    "/mcp",
+];
+
 /// Run the LightFlow HTTP gateway.
 pub async fn serve(service: ApiService, bind: &str) -> io::Result<()> {
     let listener = TcpListener::bind(bind).await?;
@@ -166,7 +184,18 @@ fn api_json_with_status<T: Serialize>(
 fn error_response(error: ApiError) -> Response {
     let status =
         StatusCode::from_u16(error.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    with_cors((status, Json(json!({ "error": error.to_string() }))).into_response())
+    with_cors(
+        (
+            status,
+            Json(json!({
+                "error": error.to_string(),
+                "code": error.code(),
+                "message": error.message(),
+                "status": status.as_u16(),
+            })),
+        )
+            .into_response(),
+    )
 }
 
 fn json_response(value: Value) -> Response {
@@ -196,6 +225,36 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn openapi_paths_match_http_routes() {
+        let openapi = std::fs::read_to_string("openapi/lightflow.yaml").expect("openapi");
+        let mut paths = openapi_path_keys(&openapi);
+        paths.sort();
+
+        let mut expected = HTTP_PATHS.to_vec();
+        expected.sort();
+
+        assert_eq!(paths, expected);
+    }
+
+    #[tokio::test]
+    async fn error_responses_are_structured_for_clients() {
+        let service = ApiService::new(std::env::current_dir().expect("current dir"));
+        let app = router(service);
+
+        let response = request_json(&app, "/workflows/lightflow.missing").await;
+        assert_eq!(response["status"], StatusCode::NOT_FOUND.as_u16());
+        assert_eq!(response["body"]["code"], "not_found");
+        assert_eq!(response["body"]["status"], StatusCode::NOT_FOUND.as_u16());
+        assert_eq!(response["body"]["message"], "workflow lightflow.missing");
+        assert!(
+            response["body"]["error"]
+                .as_str()
+                .expect("error")
+                .contains("not found")
+        );
+    }
 
     #[tokio::test]
     async fn node_directory_endpoints_return_editor_contracts() {
@@ -289,5 +348,23 @@ mod tests {
             "status": status.as_u16(),
             "body": serde_json::from_slice::<serde_json::Value>(&body).expect("json"),
         })
+    }
+
+    fn openapi_path_keys(openapi: &str) -> Vec<&str> {
+        let mut in_paths = false;
+        let mut paths = Vec::new();
+        for line in openapi.lines() {
+            if line == "paths:" {
+                in_paths = true;
+                continue;
+            }
+            if in_paths && !line.starts_with(' ') && line.ends_with(':') {
+                break;
+            }
+            if in_paths && line.starts_with("  /") && line.ends_with(':') {
+                paths.push(line.trim().trim_end_matches(':'));
+            }
+        }
+        paths
     }
 }

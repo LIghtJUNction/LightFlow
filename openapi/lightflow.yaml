@@ -213,6 +213,22 @@ paths:
           description: JSON-RPC response.
 components:
   schemas:
+    ErrorResponse:
+      type: object
+      required: [error, code, message, status]
+      properties:
+        error:
+          type: string
+          description: Human-readable adapter-prefixed error string.
+        code:
+          type: string
+          enum: [invalid_request, not_found, internal_error]
+        message:
+          type: string
+          description: Human-readable error detail without adapter prefix.
+        status:
+          type: integer
+          description: HTTP status code.
     PortSpec:
       type: object
       required: [name, type]

@@ -566,6 +566,35 @@ pub fn define() -> WorkflowSpec {
 }
 
 #[test]
+fn patch_registry_rejects_path_traversal_names() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    let patch = r#"{"nodes":{}}"#;
+
+    for args in [
+        vec!["patch", "get", "../outside"],
+        vec!["patch", "save", "../outside", patch],
+        vec!["patch", "validate", "../outside"],
+        vec!["patch", "rm", "../outside"],
+    ] {
+        let output = lfw_command(&root).args(args).output()?;
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("patch name must be a single non-empty file name"),
+            "stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    assert!(!root.join(".lightflow/outside.json").exists());
+    assert!(!root.join("outside.json").exists());
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn lfw_run_chains_workflows_with_pipe() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;

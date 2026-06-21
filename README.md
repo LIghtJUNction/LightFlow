@@ -78,6 +78,22 @@ workflow projects, adding workflow dependencies, writing leaf and runtime-backed
 workflows, composing workflows with `.node()` / `.edge()`, and validating nodes
 with `lfw node test`.
 
+## Quickstart
+
+```bash
+cargo run --bin lfw -- init --workflow
+cargo run --bin lfw -- new demo_echo --category demo --name "Demo Echo"
+cargo run --bin lfw -- run lightflow.demo_echo --input value='"hello"'
+cargo run --bin lfw -- serve --port 5174
+```
+
+After `lfw serve` starts, inspect the backend contract used by editor clients:
+
+```bash
+curl http://127.0.0.1:5174/nodes
+curl http://127.0.0.1:5174/runs
+```
+
 ## CLI
 
 ```bash
@@ -163,6 +179,20 @@ passthrough, preview image generation/edit/inpaint, FLUX, image transforms,
 builtin text/JSON/mask/control/model helpers, offline mock LLM generation, and
 RIG, plus reserved future capabilities such as command, Python node, ONNX, and
 Candle execution.
+
+Runtime executor status is labeled consistently across `lfw info`, node cards,
+and documentation:
+
+- `preview`: deterministic local image generation/edit/inpaint executors for
+  demos, tests, and UI development; these do not prove production model quality.
+- `mock`: deterministic local LLM output for offline workflow composition and
+  tests.
+- `external`: process handoff through an environment variable such as
+  `LIGHTFLOW_FLUX_RUNNER`; the external executable owns model sampling.
+- `native`: in-process model-backed runtime enabled by build features such as
+  `flux-native` or `rig`.
+- `reserved`: declared future executor contract that is visible to clients but
+  not runnable in the current build.
 
 Use `lfw help <workflow_id>` when you know a workflow id but not its contract.
 It returns the workflow metadata, input and output ports, dependency status,
