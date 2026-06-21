@@ -78,6 +78,9 @@ workflow projects, adding workflow dependencies, writing leaf and runtime-backed
 workflows, composing workflows with `.node()` / `.edge()`, and validating nodes
 with `lfw node test`.
 
+For the longer product and architecture direction, see
+[Long-Term Goals](docs/long-term-goals.md).
+
 ## Quickstart
 
 ```bash
