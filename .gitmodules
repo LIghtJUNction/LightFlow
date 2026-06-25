@@ -1,3 +1,6 @@
 [submodule "LightFlowUI"]
 	path = LightFlowUI
 	url = https://github.com/LIghtJUNction/LightFlowUI.git
+[submodule "projects/lightflow-auto-editing"]
+	path = projects/lightflow-auto-editing
+	url = https://github.com/lightjunction/lightflow-auto-editing.git
