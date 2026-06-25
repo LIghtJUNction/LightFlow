@@ -4,3 +4,12 @@
 [submodule "projects/lightflow-auto-editing"]
 	path = projects/lightflow-auto-editing
 	url = https://github.com/lightjunction/lightflow-auto-editing.git
+[submodule "projects/lightflow-std"]
+	path = projects/lightflow-std
+	url = https://github.com/LIghtJUNction/lightflow-std.git
+[submodule "projects/lightflow-flux"]
+	path = projects/lightflow-flux
+	url = https://github.com/LIghtJUNction/lightflow-flux.git
+[submodule "projects/lightflow-rig"]
+	path = projects/lightflow-rig
+	url = https://github.com/LIghtJUNction/lightflow-rig.git

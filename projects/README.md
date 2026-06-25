@@ -7,10 +7,10 @@ This folder groups related LightFlow workflow projects for local iteration:
 - `lightflow-rig`
 - `lightflow-auto-editing`
 
-The first three entries are symlinks to sibling checkouts under
-`/home/lightjunction/Documents/GITHUB`. `lightflow-auto-editing` is a git
-submodule managed inside this folder. The projects remain independent git
-repositories; edit, commit, and push changes from each project directory.
+Each entry is a git submodule managed inside this folder. The projects remain
+independent git repositories; edit, commit, and push changes from each project
+directory, then update the parent LightFlow gitlink when you want the core repo
+to point at the new submodule commit.
 
 Use this folder when you want one workspace view across the core LightFlow repo
 and the workflow projects that are commonly iterated together.
