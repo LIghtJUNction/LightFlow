@@ -1,40 +1,43 @@
 use crate::api::{ApiError, ApiService};
 use crate::server;
-use crate::workflow::{WorkflowArtifact, WorkflowExecution, WorkflowSpec};
-use serde::Serialize;
+use crate::workflow::WorkflowSpec;
 use serde_json::json;
 use std::env;
-use std::io::{self, Read};
 use std::path::Path;
-use std::process::Command;
 
 mod add;
+mod artifacts;
 mod batch;
+mod development;
 mod history;
 mod import;
 mod info;
 mod list;
+pub(crate) mod loop_check;
 pub mod mcp;
 mod models;
 mod node;
 mod patches;
 mod project;
 mod publish;
+mod release;
 mod run;
+mod run_execution;
 mod runtime;
+mod support;
 mod sync;
 mod upgrade;
 mod workflow_help;
 
 use add::{add_dependency, parse_add_dependency_options};
+use artifacts::list_artifacts;
 use batch::{execute_batch, parse_batch_options};
-use history::{
-    manage_runs, now_ms, parse_replay_run_id, read_manifest, record_failed_run, record_run,
-    trace_run,
-};
+use development::manage_development;
+use history::{manage_runs, parse_replay_run_id, trace_run};
 use import::{import_workflow_repo, parse_import_options};
 use info::architecture_info;
 use list::{list_workflows, parse_list_options};
+use loop_check::manage_loop;
 use models::manage_models;
 use node::manage_nodes;
 use patches::manage_patches;
@@ -43,8 +46,18 @@ use project::{
     parse_add_workflow_options, parse_init_options,
 };
 use publish::{parse_publish_options, publish_crate};
-use run::{RunOptions, lfx_usage, parse_run_options};
+use release::{parse_release_options, release_check};
+use run::{lfx_usage, parse_run_options, parse_run_options_for_command};
+use run_execution::execute_and_record_run_options;
 use runtime::{RuntimeConfig, ensure_lfw_shell_setup};
+pub(crate) use support::{
+    CliError, CliResult, ensure_no_extra_args, home_usage, print_json, request_json, required_arg,
+    run_status, usage, validate_path_segment,
+};
+use support::{
+    parse_bind_addr, required_workflow_id_arg, required_workflow_json_arg, workflow_json_argument,
+    workflow_shortcuts_usage, workflows_usage,
+};
 use sync::{parse_sync_options, sync_project};
 use upgrade::{
     cargo_workspace_root, parse_cargo_workspace_options, update_index, upgrade_workspace,
@@ -58,21 +71,36 @@ pub async fn run_from_env() -> CliResult<()> {
 
 /// Run the quick workflow executor from process arguments.
 pub async fn run_lfx_from_env() -> CliResult<()> {
-    run_lfx(env::args().skip(1).collect()).await
+    let mut args = env::args();
+    let command = args
+        .next()
+        .and_then(|arg| {
+            Path::new(&arg)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "lfx".to_owned());
+    run_lfx_with_command(command.as_str(), args.collect()).await
 }
 
 /// Run the quick workflow executor with explicit arguments.
 pub async fn run_lfx(args: Vec<String>) -> CliResult<()> {
-    if args
-        .first()
-        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+    run_lfx_with_command("lfx", args).await
+}
+
+async fn run_lfx_with_command(command: &str, args: Vec<String>) -> CliResult<()> {
+    if args.is_empty()
+        || args
+            .first()
+            .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
     {
-        return Err(CliError::Usage(lfx_usage()));
+        return Err(CliError::Usage(lfx_usage(command)));
     }
     let runtime = RuntimeConfig::load()?;
     let service =
         ApiService::new(env::current_dir()?).with_workflow_paths(runtime.workflow_paths.clone());
-    let options = parse_run_options(service.repo_root(), &args)?;
+    let options = parse_run_options_for_command(service.repo_root(), &args, command)?;
     print_json(&execute_and_record_run_options(&service, options)?)?;
     Ok(())
 }
@@ -152,6 +180,12 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             print_json(&import_workflow_repo(root, &repo_store_root, &options)?)?;
         }
         "home" => {
+            if args
+                .first()
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(home_usage()));
+            }
             ensure_no_extra_args(args, 0, "home")?;
             let shell_setup = ensure_lfw_shell_setup(&runtime)?;
             print_json(&json!({
@@ -170,55 +204,133 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             print_json(&list_workflows(&service, &options)?)?;
         }
         "workflows" => {
-            let action = required_arg(args, 0, "workflow action")?;
+            let action = match args.first().map(String::as_str) {
+                Some("-h" | "--help" | "help") | None => {
+                    return Err(CliError::Usage(workflows_usage()));
+                }
+                Some(action) => action,
+            };
             match action {
                 "list" => {
+                    if args
+                        .get(1)
+                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+                    {
+                        return Err(CliError::Usage(workflows_usage()));
+                    }
                     ensure_no_extra_args(args, 1, "workflows list")?;
                     print_json(&service.list_workflows()?)?;
                 }
                 "get" => {
-                    let workflow_id = required_arg(args, 1, "workflow id")?;
+                    if args
+                        .get(1)
+                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+                    {
+                        return Err(CliError::Usage(workflows_usage()));
+                    }
+                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
                     ensure_no_extra_args(args, 2, "workflows get")?;
                     print_json(&service.get_workflow(workflow_id)?)?;
                 }
                 "deps" | "dependencies" => {
-                    let workflow_id = required_arg(args, 1, "workflow id")?;
+                    if args
+                        .get(1)
+                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+                    {
+                        return Err(CliError::Usage(workflows_usage()));
+                    }
+                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
                     ensure_no_extra_args(args, 2, "workflows deps")?;
                     print_json(&service.workflow_dependencies(workflow_id)?)?;
                 }
+                "plan" => {
+                    if args
+                        .get(1)
+                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+                    {
+                        return Err(CliError::Usage(workflows_usage()));
+                    }
+                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
+                    ensure_no_extra_args(args, 2, "workflows plan")?;
+                    print_json(&service.plan_workflow(workflow_id)?)?;
+                }
                 "help" => {
+                    if args
+                        .get(1)
+                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+                    {
+                        return Err(CliError::Usage(workflow_shortcuts_usage()));
+                    }
+                    required_workflow_id_arg(args, 1, workflows_usage)?;
                     print_json(&workflow_help(&service, &args[1..], "workflows help")?)?;
                 }
                 "validate" => {
-                    let workflow: WorkflowSpec = serde_json::from_value(request_json(
-                        required_arg(args, 1, "workflow json")?,
-                    )?)?;
+                    if args
+                        .get(1)
+                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+                    {
+                        return Err(CliError::Usage(workflows_usage()));
+                    }
+                    let workflow: WorkflowSpec = workflow_json_argument(
+                        required_workflow_json_arg(args, 1)?,
+                        "workflows validate",
+                    )?;
                     ensure_no_extra_args(args, 2, "workflows validate")?;
                     print_json(&service.validate_workflow(&workflow))?;
                 }
                 "save" => {
-                    let workflow: WorkflowSpec = serde_json::from_value(request_json(
-                        required_arg(args, 1, "workflow json")?,
-                    )?)?;
+                    if args
+                        .get(1)
+                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+                    {
+                        return Err(CliError::Usage(workflows_usage()));
+                    }
+                    let workflow: WorkflowSpec = workflow_json_argument(
+                        required_workflow_json_arg(args, 1)?,
+                        "workflows save",
+                    )?;
                     ensure_no_extra_args(args, 2, "workflows save")?;
                     print_json(&service.save_workflow(workflow)?)?;
                 }
                 _ => {
-                    return Err(CliError::Usage(
-                        "workflow action must be list|get|help|deps|validate|save".to_owned(),
-                    ));
+                    return Err(CliError::Usage(format!(
+                        "workflow action must be list|get|help|deps|plan|validate|save\n{}",
+                        workflows_usage()
+                    )));
                 }
             }
         }
         "deps" | "dependencies" => {
-            let workflow_id = required_arg(args, 0, "workflow id")?;
+            if args
+                .first()
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(workflow_shortcuts_usage()));
+            }
+            let workflow_id = required_workflow_id_arg(args, 0, workflow_shortcuts_usage)?;
             ensure_no_extra_args(args, 1, "deps")?;
             print_json(&service.workflow_dependencies(workflow_id)?)?;
         }
-        "help" => {
-            if args.is_empty() {
-                return Err(CliError::Usage(usage()));
+        "plan" => {
+            if args
+                .first()
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(workflow_shortcuts_usage()));
             }
+            let workflow_id = required_workflow_id_arg(args, 0, workflow_shortcuts_usage)?;
+            ensure_no_extra_args(args, 1, "plan")?;
+            print_json(&service.plan_workflow(workflow_id)?)?;
+        }
+        "help" => {
+            if args.is_empty()
+                || args
+                    .first()
+                    .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(workflow_shortcuts_usage()));
+            }
+            required_workflow_id_arg(args, 0, workflow_shortcuts_usage)?;
             print_json(&workflow_help(&service, args, "help")?)?;
         }
         "sync" => {
@@ -236,7 +348,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             print_json(&upgrade_workspace(&root)?)?;
         }
         "models" => {
-            print_json(&manage_models(args)?)?;
+            print_json(&manage_models(&service, args)?)?;
         }
         "node" | "nodes" => {
             print_json(&manage_nodes(&service, args)?)?;
@@ -249,27 +361,34 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             print_json(&execute_batch(&service, &options)?)?;
         }
         "trace" => {
-            print_json(&trace_run(service.repo_root(), args)?)?;
+            print_json(&trace_run(&service, args)?)?;
         }
         "runs" => {
-            print_json(&manage_runs(service.repo_root(), args)?)?;
+            print_json(&manage_runs(&service, args)?)?;
+        }
+        "artifact" | "artifacts" => {
+            print_json(&list_artifacts(&service, args)?)?;
         }
         "patch" | "patches" => {
-            print_json(&manage_patches(service.repo_root(), args)?)?;
+            print_json(&manage_patches(&service, args)?)?;
         }
         "replay" => {
             let run_id = parse_replay_run_id(args)?;
-            let manifest = read_manifest(service.repo_root(), run_id)?;
-            print_json(&execute_and_record_run_options(
-                &service,
-                RunOptions {
-                    stages: manifest.stages,
-                },
-            )?)?;
+            print_json(&service.replay_run_with_surface(run_id, "cli")?)?;
         }
         "publish" => {
             let options = parse_publish_options(args)?;
             print_json(&publish_crate(Path::new("."), &options)?)?;
+        }
+        "release" => {
+            let options = parse_release_options(args)?;
+            print_json(&release_check(&service, &options)?)?;
+        }
+        "dev" | "development" => {
+            print_json(&manage_development(&service, args)?)?;
+        }
+        "loop" => {
+            print_json(&manage_loop(&service, args)?)?;
         }
         "run" => {
             let options = parse_run_options(service.repo_root(), args)?;
@@ -284,322 +403,4 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
     }
 
     Ok(())
-}
-
-fn print_json(value: &impl Serialize) -> CliResult<()> {
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    serde_json::to_writer_pretty(&mut handle, value)?;
-    println!();
-    Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
-enum RunOutput {
-    Single(WorkflowExecution),
-    Pipeline(PipelineExecution),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-struct PipelineExecution {
-    pipeline: bool,
-    stages: Vec<WorkflowExecution>,
-    outputs: serde_json::Map<String, serde_json::Value>,
-    artifacts: Vec<WorkflowArtifact>,
-}
-
-fn execute_and_record_run_options(
-    service: &ApiService,
-    options: RunOptions,
-) -> CliResult<serde_json::Value> {
-    let started_at_ms = now_ms();
-    let output = match execute_run_options(service, options.clone()) {
-        Ok(output) => output,
-        Err(error) => {
-            let completed_at_ms = now_ms();
-            let error_json = json!({
-                "message": error.to_string(),
-            });
-            let history = record_failed_run(
-                service.repo_root(),
-                &options,
-                &error_json,
-                started_at_ms,
-                completed_at_ms,
-            )?;
-            return Err(CliError::Usage(format!(
-                "{}\nrun_id: {}\ntrace_path: {}",
-                error,
-                history.run_id,
-                history.run_dir.join("execution.json").display()
-            )));
-        }
-    };
-    let completed_at_ms = now_ms();
-    let history = record_run(
-        service.repo_root(),
-        &options,
-        &output,
-        started_at_ms,
-        completed_at_ms,
-    )?;
-    let mut value = serde_json::to_value(&output)?;
-    let Some(object) = value.as_object_mut() else {
-        return Err(CliError::Usage(
-            "workflow execution output must be a JSON object".to_owned(),
-        ));
-    };
-    object.insert("run_id".to_owned(), history.run_id.into());
-    object.insert(
-        "run_dir".to_owned(),
-        history.run_dir.display().to_string().into(),
-    );
-    object.insert(
-        "trace_path".to_owned(),
-        history
-            .run_dir
-            .join("execution.json")
-            .display()
-            .to_string()
-            .into(),
-    );
-    Ok(value)
-}
-
-fn execute_run_options(service: &ApiService, options: RunOptions) -> CliResult<RunOutput> {
-    let mut previous_outputs = serde_json::Map::new();
-    let mut executions = Vec::new();
-    let mut artifacts = Vec::new();
-    let stage_count = options.stages.len();
-
-    for (index, mut stage) in options.stages.into_iter().enumerate() {
-        if index > 0 {
-            let explicit_inputs = std::mem::take(&mut stage.execution.inputs);
-            stage.execution.inputs = previous_outputs.clone();
-            stage.execution.inputs.extend(explicit_inputs);
-        }
-        let execution = service.execute_workflow(&stage.workflow_id, stage.execution)?;
-        previous_outputs = execution.outputs.clone();
-        artifacts.extend(execution.artifacts.clone());
-        executions.push(execution);
-    }
-
-    if stage_count == 1 {
-        let execution = executions
-            .pop()
-            .ok_or_else(|| CliError::Usage("missing workflow id".to_owned()))?;
-        return Ok(RunOutput::Single(execution));
-    }
-
-    Ok(RunOutput::Pipeline(PipelineExecution {
-        pipeline: true,
-        stages: executions,
-        outputs: previous_outputs,
-        artifacts,
-    }))
-}
-
-fn request_body(argument: &str) -> CliResult<String> {
-    if argument == "-" {
-        let mut body = String::new();
-        io::stdin().read_to_string(&mut body)?;
-        return Ok(body);
-    }
-    if let Some(path) = argument.strip_prefix('@') {
-        return std::fs::read_to_string(path).map_err(CliError::from);
-    }
-    Ok(argument.to_owned())
-}
-
-fn request_json(argument: &str) -> CliResult<serde_json::Value> {
-    let body = request_body(argument)?;
-    serde_json::from_str(&body).map_err(CliError::from)
-}
-
-fn required_arg<'a>(args: &'a [String], index: usize, label: &str) -> CliResult<&'a str> {
-    args.get(index)
-        .map(String::as_str)
-        .ok_or_else(|| CliError::Usage(format!("missing {label}")))
-}
-
-fn validate_path_segment(value: &str, label: &str) -> CliResult<()> {
-    if value.is_empty()
-        || value == "."
-        || value == ".."
-        || value.contains('/')
-        || value.contains('\\')
-    {
-        return Err(CliError::Usage(format!(
-            "invalid {label} path segment: {value}"
-        )));
-    }
-    Ok(())
-}
-
-fn parse_bind_addr(args: &[String], command: &str) -> CliResult<String> {
-    let mut host = "127.0.0.1".to_owned();
-    let mut port = "5174".to_owned();
-    let mut index = 0;
-    while index < args.len() {
-        let flag = args[index].as_str();
-        match flag {
-            "--host" => host = required_flag_value(args, index, flag)?.to_owned(),
-            "--port" => port = required_flag_value(args, index, flag)?.to_owned(),
-            _ => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for {command}: {flag}"
-                )));
-            }
-        }
-        index += 2;
-    }
-    Ok(format!("{host}:{port}"))
-}
-
-fn required_flag_value<'a>(args: &'a [String], index: usize, flag: &str) -> CliResult<&'a str> {
-    let value = args
-        .get(index + 1)
-        .map(String::as_str)
-        .ok_or_else(|| CliError::Usage(format!("missing value for {flag}")))?;
-    if value.starts_with("--") {
-        return Err(CliError::Usage(format!("missing value for {flag}")));
-    }
-    Ok(value)
-}
-
-fn ensure_no_extra_args(args: &[String], max_len: usize, command: &str) -> CliResult<()> {
-    if let Some(extra) = args.get(max_len) {
-        return Err(CliError::Usage(format!(
-            "unexpected argument for {command}: {extra}"
-        )));
-    }
-    Ok(())
-}
-
-fn usage() -> String {
-    [
-        "usage:",
-        "  lfw init [--workflow|--plugin] [path]",
-        "  lfw info",
-        "  lfw home",
-        "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
-        "  lfw import <path-or-git-url> [--git] [--name <name>] [--global|-g]",
-        "  lfw new <workflow_id> --category <name> [--name <name>] [--runtime <capability>] [--global|-g]",
-        "  lfw list [--brief|--detail] [--category <name>]",
-        "  lfw list --categories",
-        "  lfw ls [--brief|--detail] [--category <name>]",
-        "  lfw workflows list",
-        "  lfw workflows get <workflow_id>",
-        "  lfw workflows help <workflow_id>",
-        "  lfw workflows deps <workflow_id>",
-        "  lfw workflows validate <json|-|@file>",
-        "  lfw workflows save <json|-|@file>",
-        "  lfw deps <workflow_id>",
-        "  lfw help <workflow_id>",
-        "  lfw update [--global|-g]",
-        "  lfw upgrade [--global|-g]",
-        "  lfw sync [workflow_id] [--model <requirement=variant>] [--hf-model <requirement=format:repo[:file]>] [--hf-url <requirement=url>] [--auto-model|--select-model] [--locked] [--apply]",
-        "  lfw models list|download|rm|prune",
-        "  lfw node test <workflow_id>",
-        "  lfw mcp [<json|-|@file>]",
-        "  lfw batch run <jobs.jsonl> [--workflow <workflow_id>] [--run-id <id>] [--max-gpu-jobs <n|auto>] [--max-cpu-jobs <n|auto>] [--batch-size <n|auto>] [--retries <n>] [--reserve-mem <size>] [--reserve-vram <size>] [--max-load <n>]",
-        "  lfw batch resume <run_id> [--max-gpu-jobs <n|auto>]",
-        "  lfw trace [last|run_id]",
-        "  lfw runs list|get|rm ...",
-        "  lfw patch list|get|save|validate|rm ...",
-        "  lfw replay <run_id>",
-        "  lfw publish [workflow_id|--crate <path>|--workflows] [--apply] [--allow-dirty]",
-        "  lfw run <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] [--patch <json|-|@file|name>] ['|' <workflow_id> ...]",
-        "  lfw serve [--host <host>] [--port <port>]",
-    ]
-    .join("\n")
-}
-
-fn run_status(command: &mut Command) -> CliResult<()> {
-    let status = command.status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(CliError::Usage(format!(
-            "command failed with status {status}"
-        )))
-    }
-}
-
-/// CLI result type.
-pub type CliResult<T> = Result<T, CliError>;
-
-/// CLI error with stable exit-code mapping.
-#[derive(Debug)]
-pub enum CliError {
-    Usage(String),
-    Api(ApiError),
-    Io(io::Error),
-    Json(serde_json::Error),
-}
-
-impl CliError {
-    /// Process exit code for this error.
-    #[must_use]
-    pub const fn exit_code(&self) -> i32 {
-        match self {
-            Self::Usage(_) | Self::Api(_) => 2,
-            Self::Io(_) | Self::Json(_) => 1,
-        }
-    }
-}
-
-impl std::fmt::Display for CliError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Usage(message) => f.write_str(message),
-            Self::Api(error) => std::fmt::Display::fmt(error, f),
-            Self::Io(error) => std::fmt::Display::fmt(error, f),
-            Self::Json(error) => std::fmt::Display::fmt(error, f),
-        }
-    }
-}
-
-impl std::error::Error for CliError {}
-
-impl From<ApiError> for CliError {
-    fn from(error: ApiError) -> Self {
-        Self::Api(error)
-    }
-}
-
-impl From<io::Error> for CliError {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-impl From<serde_json::Error> for CliError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Json(error)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_bind_addr;
-
-    #[test]
-    fn serve_bind_addr_supports_custom_host_and_port() {
-        assert_eq!(parse_bind_addr(&[], "serve").unwrap(), "127.0.0.1:5174");
-        assert_eq!(
-            parse_bind_addr(
-                &[
-                    "--host".to_owned(),
-                    "0.0.0.0".to_owned(),
-                    "--port".to_owned(),
-                    "8080".to_owned(),
-                ],
-                "serve"
-            )
-            .unwrap(),
-            "0.0.0.0:8080"
-        );
-    }
 }

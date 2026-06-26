@@ -1,5 +1,5 @@
 use super::project::validate_spec_id;
-use super::{CliError, CliResult, required_flag_value};
+use super::{CliError, CliResult};
 use crate::api::ApiService;
 use crate::workflow::WorkflowSummary;
 use serde::Serialize;
@@ -40,18 +40,22 @@ pub(super) fn parse_list_options(args: &[String]) -> CliResult<ListOptions> {
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            "-h" | "--help" | "help" => return Err(CliError::Usage(list_usage())),
             "--brief" | "--short" => mode = ListMode::Brief,
             "--detail" | "--detailed" | "-l" => mode = ListMode::Detail,
             "--category" => {
                 if category.is_some() {
                     return Err(CliError::Usage("duplicate flag --category".to_owned()));
                 }
-                let value = required_flag_value(args, index, "--category")?;
+                let value = required_list_category_value(args, index)?;
                 validate_spec_id(value, "workflow category")?;
                 category = Some(value.to_owned());
                 index += 1;
             }
             "--categories" => categories = true,
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(list_usage()));
+            }
             _ => {
                 return Err(CliError::Usage(format!(
                     "unexpected argument for list: {}",
@@ -71,6 +75,31 @@ pub(super) fn parse_list_options(args: &[String]) -> CliResult<ListOptions> {
         category,
         categories,
     })
+}
+
+fn required_list_category_value(args: &[String], index: usize) -> CliResult<&str> {
+    let Some(value) = args.get(index + 1).map(String::as_str) else {
+        return Err(CliError::Usage(list_usage()));
+    };
+    if value.starts_with("--") {
+        return Err(CliError::Usage(list_usage()));
+    }
+    Ok(value)
+}
+
+fn list_usage() -> String {
+    [
+        "usage:",
+        "  lfw list [--brief|--detail] [--category <name>]",
+        "  lfw list --categories",
+        "  lfw ls [--brief|--detail] [--category <name>]",
+        "",
+        "Lists workflows from the active workflow catalog.",
+        "--brief returns id, name, version, and category.",
+        "--detail includes inputs, outputs, nodes, edges, runtimes, models, and source metadata.",
+        "--category filters one workflow category; --categories returns category counts.",
+    ]
+    .join("\n")
 }
 
 pub(super) fn list_workflows(

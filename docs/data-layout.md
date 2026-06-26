@@ -12,6 +12,19 @@ workflows/
         lib.rs
 ```
 
+The core repository Cargo workspace contains only the backend crate and core
+support crates that ship with it:
+
+```toml
+members = [".", "lightflow-macros"]
+```
+
+`lightflow-macros` is part of the core SDK surface because it provides
+procedural macros used by typed workflow APIs. It is not a workflow project and
+does not belong under `projects/`. The `projects/` directory is reserved for
+independent workflow/plugin repositories such as `lightflow-std`,
+`lightflow-flux`, and `lightflow-rig`.
+
 Shared user workflows follow XDG paths. The shell sources:
 
 ```text
@@ -41,11 +54,14 @@ exported `LFW_PATH`, `lfw` uses the XDG default
 does not parse `.lfwrc` directly at runtime; it reads the environment provided
 by the shell.
 
-Generated image outputs default to the user's XDG Pictures directory, under a
-`lightflow` subdirectory. On Linux, LightFlow resolves this from
-`$XDG_PICTURES_DIR` when exported, then `$XDG_CONFIG_HOME/user-dirs.dirs`, then
-falls back to `$HOME/Pictures/lightflow`. Explicit `output_path` inputs always
-win.
+Generated media outputs use the core `MediaPathProvider` so workflows do not
+hand-roll platform paths. Image outputs default to the user's XDG Pictures
+directory, video outputs to XDG Videos, and music/audio outputs to XDG Music,
+each under a `lightflow` subdirectory. On Linux, LightFlow resolves these from
+`$XDG_PICTURES_DIR`, `$XDG_VIDEOS_DIR`, or `$XDG_MUSIC_DIR` when exported, then
+`$XDG_CONFIG_HOME/user-dirs.dirs`, then falls back to
+`$HOME/Pictures/lightflow`, `$HOME/Videos/lightflow`, or
+`$HOME/Music/lightflow`. Explicit `output_path` inputs always win.
 
 Single workflow and pipeline runs are recorded in the current project under:
 
@@ -63,36 +79,78 @@ Single workflow and pipeline runs are recorded in the current project under:
 
 `manifest.json` stores the run id, timestamps, workflow stages, inputs, and
 temporary node toggles. It also records `status` as `completed` or `failed`.
+Pipeline manifests record resolved stage inputs after upstream outputs and
+explicit overrides are merged, so replay can execute the same effective stage
+definitions. Older manifests without `stage_input_resolution: "resolved"` are
+replayed with the legacy pipeline propagation rule.
 `execution.json` stores the actual workflow or pipeline result. Composite node
 records include status, inputs, outputs, artifact handles, `duration_ms`, and
-`attempts`. Failed runs store `status: "failed"` and an error object in
-`execution.json`. `events.jsonl` is append-only trace data: it starts with
+`attempts`, plus selected runtime metadata for executed leaf nodes. Leaf
+workflow executions also record the selected executor when a runtime is chosen.
+Failed runs store `status: "failed"` and an error object in `execution.json`.
+When a CLI pipeline fails after one or more stages completed, `execution.json`
+also includes `partial_execution` with the completed stage executions, outputs,
+and artifacts that were available before the failing stage, and `events.jsonl`
+includes the completed stage node events before `run_failed`.
+`events.jsonl` is append-only trace data: it starts with
 `run_started`, includes one `node_completed` or `node_skipped` event for each
-successful graph node, and ends with `run_finished` or `run_failed`. `lfw trace
-last` reads this directory without executing anything, and `lfw replay <run_id>`
-uses the stored stage definitions to create a new run.
+successful graph node, adds `stage_completed` events for pipeline stages,
+carries selected runtime metadata on completed node and stage events, and ends
+with `run_finished` or `run_failed`. CLI commands, HTTP
+`POST /workflows/{workflow_id}/run`, and MCP run tools write the same run
+history shape, with `surface` labels in run-level events, so editor clients can
+inspect runs without private backend state. Failed HTTP workflow-run responses
+include `run_id`, `run_dir`, and `trace_path`; failed MCP workflow-run errors
+include the same fields in JSON-RPC error `data`. `lfw trace last` reads this
+directory without executing anything, and `lfw replay` replays `last` by
+default. `lfw replay <run_id>` uses one explicit run's stored stage definitions
+to create a new run.
 
 Run history can also be managed directly:
 
 ```bash
 lfw runs list
+lfw runs list --limit 20 --workflow lightflow.text_plan --status completed
 lfw runs get last
 lfw runs get run-1781797000000
+lfw artifacts
+lfw artifacts --run last --workflow lightflow.text_plan --kind image --limit 20
+lfw runs replay last
 lfw runs rm run-1781797000000
+lfw replay
+curl 'http://127.0.0.1:5174/runs?limit=20&workflow_id=lightflow.text_plan&status=completed'
+curl -X POST http://127.0.0.1:5174/runs/last/replay
+curl -X DELETE http://127.0.0.1:5174/runs/last
 ```
 
 `lfw runs list` returns compact manifest summaries sorted by newest completion
-time first. `lfw runs get` returns the same full data as `lfw trace`. Removing
-a run deletes only that run directory and clears `last` if it pointed at the
-removed run.
+time first. `--limit`, `--workflow`, and `--status` narrow the returned
+summary catalog for large local histories; the HTTP `/runs` endpoint accepts
+the same `limit`, `workflow_id`, and `status` query parameters, and MCP clients
+can pass the same arguments to `lightflow.run.list` or read
+`lightflow://runs?workflow_id=<id>&status=<status>&limit=<n>`. `lfw runs get`
+returns the same full data as `lfw trace`, `lfw artifacts` returns the same
+run/stage/node artifact catalog as `/artifacts`, and `lfw runs replay` is the
+namespaced run history form of `lfw replay`. `lfw artifacts` accepts `--run`,
+`--workflow`, `--kind`, and `--limit` so large local histories can be narrowed
+without a server; HTTP `/artifacts`, MCP `lightflow.artifact.list`, and
+`lightflow://artifacts?run_id=<run>&workflow_id=<id>&kind=<kind>&limit=<n>`
+accept matching filters. Removing a run deletes only that run directory and
+clears `last` if it pointed at the removed run.
 
 Trace snapshots follow the same zero-copy boundary as workflow execution:
 large files are represented as artifact handles and paths, not embedded file
 bytes, model weights, or tensor payloads.
 
 Runtime patches are part of the stored stage definition, so replay uses the
-same patch that the original run used. `lfw run` and `lfx` accept the patch as
-inline JSON, stdin, an `@file` reference, or a project registry name:
+same patch that the original run used. Recorded executions include
+`model_locks`, a snapshot of model lock status for executed workflows. Replay
+responses include a `replay` report comparing original and replayed runtime
+fingerprints plus model-lock fingerprints, so runtime and model changes are
+explicit. Pipeline model-lock fingerprints include `stage_index`, so drift is
+attributed to the stage that used the model-backed workflow. `lfw run` and
+`lfx` accept the patch as inline JSON, stdin, an
+`@file` reference, or a project registry name:
 
 ```bash
 lfw run lightflow.qa --input question=hello --patch @patch.json
@@ -124,6 +182,13 @@ Node keys are graph node ids from the workflow source. `replace_with` and
 `fallback_workflow_id` must name workflows already visible through project
 discovery, `LFW_PATH`, or Cargo dependencies. `enable` overrides author-time or
 CLI disables for that node. `disable` without a fallback skips the node.
+Before execution, LightFlow validates patch node keys and `--enable` /
+`--disable` toggles against the selected workflow, so patches aimed at another
+workflow shape or typoed node ids fail before a run manifest is written.
+Replacement and fallback workflows must preserve the patched node's input and
+output port names and types; extra ports are allowed, but missing or mismatched
+ports fail the run before execution. Extra input ports must be optional or have
+defaults, because a graph patch cannot invent values for new required inputs.
 
 Reusable project patches are stored in `.lightflow/patches/<name>.json` and
 managed through:
@@ -133,12 +198,25 @@ lfw patch save qa-debug @patch.json
 lfw patch list
 lfw patch get qa-debug
 lfw patch validate qa-debug
+lfw patch validate qa-debug --workflow lightflow.qa
 lfw patch rm qa-debug
 ```
 
 The registry is a convenience for authoring and editor tooling. A run manifest
 stores the expanded patch data, not a pointer to the registry name, so replay
 remains stable when registry entries are edited later.
+`lfw patch validate` returns `valid` and `issues`, checking that saved patch
+node ids, replacement workflows, fallback workflows, and retry values can be
+resolved against the current workflow catalog. With `--workflow <workflow_id>`,
+the same command validates the patch against one selected workflow's graph node
+ids and replacement/fallback port contracts before execution. `lfw loop check`
+treats invalid saved patches as a readiness failure.
+The registry is also available over HTTP through `/patches`, `/patches/{name}`,
+and `/patches/validate`, and over MCP through `lightflow.patch.*` tools plus
+`lightflow://patches/<name>` for read-only patch lookup.
+HTTP `/patches/validate?workflow_id=...` and MCP `lightflow.patch.validate`
+with `workflow_id` expose the same selected-workflow validation as the CLI.
+Those surfaces expose the same serializable patch objects as the CLI.
 
 Each `LFW_PATH` entry may be a LightFlow home or a legacy workflow collection.
 A LightFlow home is a normal Cargo workspace:
@@ -402,22 +480,74 @@ and the workflow crate's agent skill.
 The backend exposes workflow-backed nodes over HTTP for editor palettes:
 
 ```text
+GET /openapi.yaml
 GET /nodes
 GET /nodes/<workflow_id>
+GET /workflows/<workflow_id>
+GET /workflows/<workflow_id>/plan
+GET /executors
 GET /models
+GET /models?workflow_id=<workflow_id>&status=blocked
 GET /runs
 GET /runs/<run_id>
 GET /runs/<run_id>/events
+POST /runs/<run_id>/replay
+DELETE /runs/<run_id>
 GET /artifacts
 ```
 
+`/openapi.yaml` serves the same API contract checked into `openapi/`, so
+running backends are self-describing for editor and tool clients.
+
 The node endpoints do not create another node file format. They project the
 source-controlled workflow crates into node cards with schema, runtime, model,
-graph, and validation metadata. The run and artifact endpoints project the
-existing `.lightflow/runs` directory for editor history, event, and artifact
-browsers.
+graph, validation metadata, and model lock status from `lfw.lock`. Runtime
+executor entries include a status label, availability reason, data policy, and
+model-planning flag, matching `lfw info`; `/executors` exposes that registry
+directly for clients that need runtime status without a workflow-specific node
+card. `/workflows/<workflow_id>` exposes the source workflow graph for read-only
+inspection, and `/workflows/<workflow_id>/plan` projects the selected executor,
+atoms, data policy, and model requirements without creating `.lightflow/runs`
+entries, so editors and MCP clients can preview runtime choices before
+execution. `/models` exposes top-level total, available, blocked, and issue
+counts alongside lock status, selected variants, hashes, local paths, and
+missing paths plus per-workflow sync/verify commands for model-resource
+inspection. `workflow_id` and `status=all|available|blocked` query parameters
+filter the same catalog for focused editor and agent views; `lfw models
+requirements` returns the same catalog without starting the HTTP server or
+touching the Hugging Face cache, and
+`lfw models requirements <workflow_id>` filters that catalog to one workflow's
+declared requirements. `--blocked`, `--available`, and
+`--status all|available|blocked` filter the same catalog by lock readiness for
+agent-readable model triage. The run and artifact endpoints project the existing
+`.lightflow/runs` directory for editor history, event, replay, removal, and
+artifact browsers. Legacy run manifests that predate an
+explicit status field are summarized by inferring completed or failed status
+from terminal trace events or execution status before falling back to
+`unknown`.
+The MCP adapter exposes the same workflow, node, executor, model, run, replay,
+run removal, plan, OpenAPI, local loop, source-change safety, sibling project
+workspace catalog, publish readiness, and artifact projections as JSON-RPC
+tools/resources; MCP runs write the same history files with `surface: "mcp"`
+events. Parameterized MCP resources are advertised through
+`resources/templates/list`, including selected workflow definitions,
+dependencies, plans, publish readiness, node cards, filtered model requirement,
+run history, run details, run event timelines, artifact catalog,
+selected-workflow loop readiness, patch lookup, project-scoped publish
+readiness, project workspace catalog, and selected-workflow or project-scoped
+release readiness templates.
 
-Standard workflow nodes live in the same `workflows/std/<short-name>` layout.
+Standard workflow nodes live in the `lightflow-std` workflow project under
+`projects/lightflow-std/workflows/std/<short-name>` when that sibling project is
+checked out as part of the local project set. The core repository discovers
+project workflow sources listed in `projects/lightflow-projects.toml`
+`[workflows].default_sources`; this repo keeps `lightflow-std` there so
+baseline text, JSON, image helper, control, model, and LLM nodes are available
+after a normal submodule checkout. Other sibling workflow projects under
+`projects/`, including `lightflow-flux` and `lightflow-rig`, are opt-in
+workflow sources that should be added through `LFW_PATH`, `lfw import`, an
+explicit workflow search path, or the default source list when a run needs
+those domain-specific nodes.
 Current prompt-graph helpers include `lightflow.text.concat`,
 `lightflow.text.template`, `lightflow.text.regex`, and
 `lightflow.json.extract`; image and mask artifact helpers include
@@ -446,12 +576,20 @@ again.
 Cargo.toml
 src/
   lib.rs
+tests/
+  contract.rs
+.agent/
+  skills/
+    <skill-name>/
+      SKILL.md
 ```
 
 Plugin crates and workflow crates have the same Rust/Cargo status: both expose
 `pub fn define() -> WorkflowSpec`, both can use normal Cargo dependencies, and
-both import `lightflow`. The core `lightflow` crate does not import plugin or
-workflow crates.
+both import `lightflow`. The generated contract test calls `define()` and
+checks the basic workflow contract, while the generated skill documents how an
+agent should use the plugin workflow. The core `lightflow` crate does not
+import plugin or workflow crates.
 
 ## Imported Workflow Dependencies
 
@@ -461,7 +599,7 @@ scans `path` dependencies declared in the project `Cargo.toml`:
 
 ```toml
 [workspace.dependencies]
-lightflow-std = { path = "workflows/std/std" }
+lightflow-std = { path = "projects/lightflow-std/workflows/std/std" }
 ```
 
 If the dependency target contains `src/lib.rs` with `pub fn define() ->
@@ -472,16 +610,16 @@ Git dependencies use the same manifest shape:
 
 ```toml
 [dependencies]
-lightflow-std = { git = "https://github.com/lightjunction/LightFlow", package = "lightflow-std" }
+lightflow-std = { git = "https://github.com/lightjunction/lightflow-std", package = "lightflow-std" }
 ```
 
 `lfw add` writes these dependencies into the workspace manifest:
 
 ```bash
 lfw add lightflow-std --version 0.1.1
-lfw add lightflow-std --path workflows/std/std
-lfw add lightflow-std --path ../lightflow-std --editable
-lfw add lightflow-std --git https://github.com/lightjunction/LightFlow --package lightflow-std
+lfw add lightflow-std --path projects/lightflow-std/workflows/std/std
+lfw add lightflow-std --path projects/lightflow-std/workflows/std/std --editable
+lfw add lightflow-std --git https://github.com/lightjunction/lightflow-std --package lightflow-std
 lfw add lightflow-std --version 0.1.1 --global
 ```
 
@@ -515,12 +653,17 @@ Workflow dependencies can embed the same install metadata in the Rust file:
 ```rust
 workflow("lightflow.image_prompt")
     .depends_on_crate("lightflow.std", "0.1.0", "lightflow-std")
-    .depends_on_path("lightflow.local_std", "0.1.0", "lightflow-std", "../lightflow-std")
+    .depends_on_path(
+        "lightflow.local_std",
+        "0.1.0",
+        "lightflow-std",
+        "projects/lightflow-std/workflows/std/std",
+    )
     .depends_on_git(
         "lightflow.remote_std",
         "0.1.0",
         "lightflow-std",
-        "https://github.com/lightjunction/LightFlow",
+        "https://github.com/lightjunction/lightflow-std",
         "lightflow-std",
     )
 ```
@@ -540,17 +683,40 @@ packages once their metadata is ready.
 lfw publish lightflow.example
 lfw publish lightflow.example --apply
 lfw publish --workflows
+lfw publish --workflows --require-publishable
 lfw publish --workflows --apply
 lfw publish --workflows --apply --allow-dirty
 ```
 
 Repository-internal examples can still opt out with `publish = false`.
 `lfw publish` reports those as non-publishable instead of trying to upload
-them. `lfw publish --workflows` publishes a workflow workspace by publishing
-each workflow crate individually. The plan is dependency ordered for local
-workflow `path` dependencies, and `--apply` requires every workflow crate to
-pass publish checks before any upload is attempted. `--allow-dirty` is an
-explicit opt-in for publishing uncommitted working tree changes through Cargo.
+them. Workflow publish checks also parse each workflow crate's `src/lib.rs` and
+block unresolved generated `TODO` placeholders in workflow, input, or output
+descriptions. `lfw publish --workflows` publishes a workflow workspace by
+publishing each workflow crate individually, including present linked workflow
+project workspaces under `projects/`. The plan is dependency ordered for local
+workflow `path` dependencies and includes top-level total/publishable/blocked
+counts alongside per-crate workflow ids, workspace labels, and blockers.
+Duplicate workflow ids are deduped in favor of project-local definitions.
+`--apply` requires every workflow crate to pass publish checks and the
+`lfw loop changes` review gate before any upload is attempted. Every `--apply`
+path runs Cargo's publish dry-run command before the real upload command.
+`--allow-dirty` is an explicit opt-in for publishing uncommitted working tree
+changes through Cargo.
+`--require-publishable` is a non-network gate that exits non-zero when the
+computed publish plan has blockers.
+`GET /publish`, `lightflow.workflow.publish_list`, and `lightflow://publish`
+expose the same dependency-ordered workflow publish plan for HTTP, editor, and
+MCP clients, including present linked workflow project workspaces under
+`projects/` with top-level total/publishable/blocked counts, per-crate
+workflow ids and workspace labels, a top-level dependency-ordered dry-run
+command list, and duplicate workflow ids deduped in favor of project-local
+definitions. Use `GET /publish?project=<name>`, MCP
+`lightflow.workflow.publish_list` with `project`, or
+`lightflow://publish?project=<name>` to narrow the catalog to one linked
+project workspace using the same full-name, `projects/<name>` label, path, or
+short-alias matching as the CLI. MCP `resources/templates/list` advertises the
+parameterized publish resource as `lightflow://publish?project={project}`.
 
 ## Versioning
 

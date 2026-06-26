@@ -1,5 +1,5 @@
 use super::runtime::RuntimeConfig;
-use super::{CliResult, ensure_no_extra_args};
+use super::{CliError, CliResult, ensure_no_extra_args};
 use crate::api::{ApiService, executor_registry};
 use serde::Serialize;
 use serde_json::json;
@@ -35,6 +35,12 @@ pub(super) fn architecture_info(
     runtime: &RuntimeConfig,
     args: &[String],
 ) -> CliResult<serde_json::Value> {
+    if args
+        .first()
+        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+    {
+        return Err(CliError::Usage(info_usage()));
+    }
     ensure_no_extra_args(args, 0, "info")?;
     let summaries = service.list_workflows()?.workflows;
     let mut category_counts = BTreeMap::<String, usize>::new();
@@ -111,6 +117,23 @@ pub(super) fn architecture_info(
         },
         "executors": executor_registry(),
     }))
+}
+
+fn info_usage() -> String {
+    [
+        "usage:",
+        "  lfw info",
+        "  lfw arch",
+        "  lfw architecture",
+        "",
+        "Prints the current LightFlow package, build features, runtime config,",
+        "project root, active workflow catalog summary, runtime capabilities,",
+        "model requirement count, and executor registry as JSON.",
+        "",
+        "Use this when checking what the current process can see before planning,",
+        "running, publishing, or debugging workflows.",
+    ]
+    .join("\n")
 }
 
 fn build_features() -> BuildFeatures {

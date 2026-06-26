@@ -1,5 +1,5 @@
 use super::add::{AddDependencyOptions, DependencySource, add_dependency};
-use super::{CliError, CliResult, required_flag_value};
+use super::{CliError, CliResult};
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,6 +27,7 @@ pub(super) fn parse_import_options(args: &[String]) -> CliResult<ImportOptions> 
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            "-h" | "--help" | "help" => return Err(CliError::Usage(import_usage())),
             "--global" | "-g" => {
                 global = true;
                 index += 1;
@@ -39,13 +40,11 @@ pub(super) fn parse_import_options(args: &[String]) -> CliResult<ImportOptions> 
                 if name.is_some() {
                     return Err(CliError::Usage("duplicate flag --name".to_owned()));
                 }
-                name = Some(required_flag_value(args, index, "--name")?.to_owned());
+                name = Some(required_import_name_value(args, index)?.to_owned());
                 index += 2;
             }
             value if value.starts_with("--") => {
-                return Err(CliError::Usage(format!(
-                    "unexpected argument for import: {value}"
-                )));
+                return Err(CliError::Usage(import_usage()));
             }
             value => {
                 if source.is_some() {
@@ -58,7 +57,9 @@ pub(super) fn parse_import_options(args: &[String]) -> CliResult<ImportOptions> 
             }
         }
     }
-    let source = source.ok_or_else(|| CliError::Usage("missing import source".to_owned()))?;
+    let Some(source) = source else {
+        return Err(CliError::Usage(import_usage()));
+    };
     let source = if force_git || looks_like_git_source(&source) {
         ImportSource::Git(source)
     } else {
@@ -69,6 +70,30 @@ pub(super) fn parse_import_options(args: &[String]) -> CliResult<ImportOptions> 
         global,
         name,
     })
+}
+
+fn required_import_name_value(args: &[String], index: usize) -> CliResult<&str> {
+    let Some(value) = args.get(index + 1).map(String::as_str) else {
+        return Err(CliError::Usage(import_usage()));
+    };
+    if value.starts_with("--") {
+        return Err(CliError::Usage(import_usage()));
+    }
+    Ok(value)
+}
+
+fn import_usage() -> String {
+    [
+        "usage:",
+        "  lfw import <path-or-git-url> [--git] [--name <name>] [--global|-g]",
+        "",
+        "Imports a workflow repository or collection by scanning workflows/<category>/<crate> for workflow crates.",
+        "Use lfw add when the target is one known Cargo package.",
+        "Path imports record editable local path dependencies.",
+        "Git imports clone into the LightFlow repo cache, then record path dependencies to discovered workflow crates.",
+        "--name selects the local cache directory name for git imports; --global installs into the default LightFlow home workspace.",
+    ]
+    .join("\n")
 }
 
 pub(super) fn import_workflow_repo(

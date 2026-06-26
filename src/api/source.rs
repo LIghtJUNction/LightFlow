@@ -1,4 +1,5 @@
 use super::dsl::{read_optional_workflow_source, read_workflow_source};
+use super::project_config::default_project_workflow_sources;
 use super::util::{path_file_name, validate_id_segment};
 use super::{ApiError, ApiResult, LEGACY_LIGHTFLOW_DIR, WORKFLOW_DIR};
 use crate::workflow::WorkflowSpec;
@@ -29,6 +30,7 @@ pub(super) fn read_workflow_sources(
         &mut manifests,
         &mut visited_libs,
     )?;
+    read_project_workflow_collections(root, &mut workflows, &mut manifests, &mut visited_libs)?;
 
     for path in workflow_paths {
         read_workflow_search_path(path, &mut workflows, &mut manifests, &mut visited_libs)?;
@@ -41,6 +43,47 @@ pub(super) fn read_workflow_sources(
     read_path_dependency_workflows(&mut workflows, &mut manifests, &mut visited_libs)?;
 
     Ok(workflows)
+}
+
+fn read_project_workflow_collections(
+    root: &Path,
+    workflows: &mut Vec<WorkflowSpec>,
+    manifests: &mut BTreeSet<PathBuf>,
+    visited_libs: &mut BTreeSet<PathBuf>,
+) -> ApiResult<()> {
+    let projects = root.join("projects");
+    let default_sources = default_project_workflow_sources(root)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let paths = match read_dir_paths(&projects) {
+        Ok(paths) => paths,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(ApiError::from(error)),
+    };
+
+    for project in paths {
+        if !project.is_dir() {
+            continue;
+        }
+        let Some(name) = project.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        // Configured default sources are the baseline local node set. Other
+        // sibling projects remain opt-in through LFW_PATH, lfw import, or
+        // explicit workflow search paths.
+        if !default_sources.contains(name) {
+            continue;
+        }
+        read_workflow_collection(
+            &project.join(WORKFLOW_DIR),
+            true,
+            workflows,
+            manifests,
+            visited_libs,
+        )?;
+    }
+
+    Ok(())
 }
 
 fn read_workflow_search_path(

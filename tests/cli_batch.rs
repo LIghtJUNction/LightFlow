@@ -5,6 +5,49 @@ use std::fs;
 use support::*;
 
 #[test]
+fn batch_help_documents_run_and_resume_queues() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+
+    for args in [
+        vec!["batch", "--help"],
+        vec!["batch", "run", "--help"],
+        vec!["batch", "resume", "--help"],
+        vec!["batch", "run"],
+        vec!["batch", "run", "--bad"],
+        vec!["batch", "resume"],
+        vec!["batch", "resume", "--bad"],
+        vec!["batch", "run", "jobs.jsonl", "--workflow"],
+        vec!["batch", "run", "jobs.jsonl", "--workflow", "--retries", "1"],
+        vec!["batch", "run", "jobs.jsonl", "--max-gpu-jobs"],
+        vec!["batch", "resume", "batch-test", "--max-gpu-jobs"],
+    ] {
+        let output = lfw_command(&root).args(args).output()?;
+        assert!(!output.status.success());
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            text.contains("lfw batch run <jobs.jsonl>")
+                && text.contains("lfw batch resume <run_id>")
+                && text.contains("JSONL workflow job queues")
+                && text.contains("disabled_nodes")
+                && text.contains("--max-gpu-jobs")
+                && !text.contains("missing jobs jsonl")
+                && !text.contains("missing run id")
+                && !text.contains("missing value for")
+                && !text.contains("No such file or directory"),
+            "output:\n{text}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn batch_run_persists_jobs_and_resume_finishes_pending_work()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();

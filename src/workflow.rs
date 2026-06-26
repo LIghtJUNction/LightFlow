@@ -347,9 +347,22 @@ pub struct WorkflowExecution {
     pub version: String,
     pub inputs: serde_json::Map<String, serde_json::Value>,
     pub outputs: serde_json::Map<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<ExecutionRuntime>,
     #[serde(default)]
     pub artifacts: Vec<WorkflowArtifact>,
     pub nodes: Vec<NodeExecution>,
+}
+
+/// Runtime executor selected for a workflow or graph node execution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionRuntime {
+    pub executor_id: String,
+    pub executor_kind: String,
+    pub capabilities: Vec<String>,
+    pub data_policy: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared: Vec<RuntimeRequirement>,
 }
 
 /// Materialized file produced by a workflow run.
@@ -370,6 +383,8 @@ pub struct NodeExecution {
     pub workflow_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_workflow_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<ExecutionRuntime>,
     pub status: NodeExecutionStatus,
     #[serde(default)]
     pub duration_ms: u64,

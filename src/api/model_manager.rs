@@ -50,7 +50,21 @@ impl ModelManager {
         workflow_id: &str,
         requirement_id: &str,
     ) -> ApiResult<PathBuf> {
-        read_locked_model_path(&self.root, workflow_id, requirement_id)
+        read_locked_model_path(&self.root, workflow_id, requirement_id, None)
+    }
+
+    pub(super) fn locked_path_with_format(
+        &self,
+        workflow_id: &str,
+        requirement_id: &str,
+        expected_format: &str,
+    ) -> ApiResult<PathBuf> {
+        read_locked_model_path(
+            &self.root,
+            workflow_id,
+            requirement_id,
+            Some(expected_format),
+        )
     }
 
     #[allow(dead_code)]
@@ -254,12 +268,13 @@ fn read_locked_model_path(
     root: &Path,
     workflow_id: &str,
     requirement_id: &str,
+    expected_format: Option<&str>,
 ) -> ApiResult<PathBuf> {
     let lock_path = root.join(LFW_LOCK);
     let source = std::fs::read_to_string(&lock_path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             ApiError::InvalidRequest(format!(
-                "runtime requires synced models; run `lfw sync {workflow_id} --auto-model --apply` first"
+                "runtime requires synced models for workflow {workflow_id}; run `lfw sync {workflow_id} --auto-model --apply` or `lfw sync {workflow_id} --locked --apply` first"
             ))
         } else {
             ApiError::Io(error)
@@ -271,19 +286,40 @@ fn read_locked_model_path(
     let key = format!("{workflow_id}::{requirement_id}");
     let entry = lock.models.get(&key).ok_or_else(|| {
         ApiError::InvalidRequest(format!(
-            "runtime is missing model lock entry {key}; run `lfw sync {workflow_id} --auto-model --apply`"
+            "runtime is missing model lock entry {key}; run `lfw sync {workflow_id} --auto-model --apply` or verify the cache with `lfw sync {workflow_id} --locked --apply`"
         ))
     })?;
+    if let Some(expected_format) = expected_format {
+        let actual_format = entry
+            .format
+            .as_deref()
+            .or_else(|| entry.file.as_deref().and_then(file_extension));
+        if let Some(actual_format) = actual_format
+            && !actual_format.eq_ignore_ascii_case(expected_format)
+        {
+            return Err(ApiError::InvalidRequest(format!(
+                "model lock entry {key} has incompatible format {actual_format}; expected {expected_format}. Run `lfw sync {workflow_id} --model {requirement_id}=<variant> --apply` with a compatible variant"
+            )));
+        }
+    }
     let path = entry.local_paths.first().ok_or_else(|| {
-        ApiError::InvalidRequest(format!("model lock entry {key} has no local path"))
+        ApiError::InvalidRequest(format!(
+            "model lock entry {key} has no local path; run `lfw sync {workflow_id} --auto-model --apply` or `lfw sync {workflow_id} --locked --apply`"
+        ))
     })?;
     if !path.is_file() {
         return Err(ApiError::InvalidRequest(format!(
-            "model file for {key} is missing: {}",
-            path.display()
+            "model file for {key} is missing: {}; run `lfw sync {workflow_id} --locked --apply` to verify the locked cache or resync with `lfw sync {workflow_id} --auto-model --apply`",
+            path.display(),
         )));
     }
     Ok(path.clone())
+}
+
+fn file_extension(file: &str) -> Option<&str> {
+    Path::new(file)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
 }
 
 #[derive(Debug, Deserialize)]
@@ -296,6 +332,10 @@ struct LfwLock {
 struct LockedModel {
     #[serde(default)]
     local_paths: Vec<PathBuf>,
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    file: Option<String>,
 }
 
 #[cfg(test)]
@@ -331,6 +371,44 @@ mod tests {
         assert_eq!(manager.resident_len(), 1);
         assert!(manager.unload("lightflow.test", "flux_model"));
         assert_eq!(manager.resident_len(), 0);
+
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn model_manager_rejects_incompatible_locked_format() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root = std::env::temp_dir().join(format!(
+            "lightflow-model-manager-format-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("models"))?;
+        let model_path = root.join("models/model.safetensors");
+        fs::write(&model_path, b"tiny")?;
+        fs::write(
+            root.join(LFW_LOCK),
+            serde_json::json!({
+                "models": {
+                    "lightflow.test::flux_model": {
+                        "format": "safetensors",
+                        "local_paths": [model_path]
+                    }
+                }
+            })
+            .to_string(),
+        )?;
+
+        let manager = ModelManager::new(&root);
+        let error = manager
+            .locked_path_with_format("lightflow.test", "flux_model", "gguf")
+            .expect_err("format mismatch should fail");
+        let message = error.to_string();
+
+        assert!(message.contains("incompatible format safetensors"));
+        assert!(message.contains("expected gguf"));
+        assert!(message.contains("lfw sync lightflow.test --model flux_model=<variant> --apply"));
 
         let _ = fs::remove_dir_all(root);
         Ok(())

@@ -1,11 +1,28 @@
-use super::{CliError, CliResult, patches, request_json, required_arg, required_flag_value};
+use super::{CliError, CliResult, patches, request_json};
 use crate::workflow::WorkflowExecutionOptions;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub(super) fn lfx_usage() -> String {
-    "usage:\n  lfx <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] [--patch <json|-|@file|name>] ['|' <workflow_id> ...]"
-        .to_owned()
+pub(super) fn lfx_usage(command: &str) -> String {
+    run_usage_for(command)
+}
+
+fn run_usage_for(command: &str) -> String {
+    [
+        "usage:".to_owned(),
+        format!(
+            "  {command} <workflow_id> [--input|-i <name=json>] [--inputs <json|-|@file>] [--text <text>] [--image <path>] [--output <path>] [--disable <node>] [--enable <node>] [--patch <json|-|@file|name>] ['|' <workflow_id> ...]"
+        ),
+        String::new(),
+        "Runs one workflow or a pipeline of workflows and records execution under .lightflow/runs/."
+            .to_owned(),
+        "Use --input name=json-or-text for one input, --inputs for a JSON object, '-' for stdin, or '@file' for a file path."
+            .to_owned(),
+        "Use '|' between workflow ids to pipe outputs into the next stage.".to_owned(),
+        "Use --patch to apply an inline patch, '@file' patch, or saved patch name without editing workflow source."
+            .to_owned(),
+    ]
+    .join("\n")
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -20,31 +37,47 @@ pub(super) struct RunOptions {
 }
 
 pub(super) fn parse_run_options(root: &Path, args: &[String]) -> CliResult<RunOptions> {
+    parse_run_options_for_command(root, args, "lfw run")
+}
+
+pub(super) fn parse_run_options_for_command(
+    root: &Path,
+    args: &[String],
+    command: &str,
+) -> CliResult<RunOptions> {
+    let usage = lfx_usage(command);
+    if args.is_empty()
+        || args
+            .first()
+            .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+    {
+        return Err(CliError::Usage(usage));
+    }
     let mut stages = Vec::new();
     let mut stage_start = 0;
     for (index, arg) in args.iter().enumerate() {
         if arg == "|" {
-            stages.push(parse_run_stage(root, &args[stage_start..index])?);
+            stages.push(parse_run_stage(root, &args[stage_start..index], command)?);
             stage_start = index + 1;
         }
     }
-    stages.push(parse_run_stage(root, &args[stage_start..])?);
+    stages.push(parse_run_stage(root, &args[stage_start..], command)?);
     Ok(RunOptions { stages })
 }
 
-fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
-    let workflow_id = required_arg(args, 0, "workflow id")?.to_owned();
+fn parse_run_stage(root: &Path, args: &[String], command: &str) -> CliResult<RunStage> {
+    let workflow_id = required_run_workflow_id(args, command)?.to_owned();
     let mut execution = WorkflowExecutionOptions::default();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
             "--input" | "-i" => {
-                let value = required_flag_value(args, index, "--input")?;
+                let value = required_run_flag_value(args, index, command)?;
                 insert_input_assignment(&mut execution, value, "--input")?;
                 index += 2;
             }
             "--inputs" | "--json" => {
-                let value = required_flag_value(args, index, "--inputs")?;
+                let value = required_run_flag_value(args, index, command)?;
                 let inputs = request_json(value)?;
                 let Some(inputs) = inputs.as_object() else {
                     return Err(CliError::Usage("--inputs must be a JSON object".to_owned()));
@@ -57,7 +90,7 @@ fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
                     &mut execution,
                     "text",
                     serde_json::Value::String(
-                        required_flag_value(args, index, "--text")?.to_owned(),
+                        required_run_flag_value(args, index, command)?.to_owned(),
                     ),
                 )?;
                 index += 2;
@@ -67,7 +100,7 @@ fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
                     &mut execution,
                     "prompt",
                     serde_json::Value::String(
-                        required_flag_value(args, index, "--prompt")?.to_owned(),
+                        required_run_flag_value(args, index, command)?.to_owned(),
                     ),
                 )?;
                 index += 2;
@@ -77,7 +110,7 @@ fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
                     &mut execution,
                     "image_path",
                     serde_json::Value::String(
-                        required_flag_value(args, index, args[index].as_str())?.to_owned(),
+                        required_run_flag_value(args, index, command)?.to_owned(),
                     ),
                 )?;
                 index += 2;
@@ -87,7 +120,7 @@ fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
                     &mut execution,
                     "output_path",
                     serde_json::Value::String(
-                        required_flag_value(args, index, args[index].as_str())?.to_owned(),
+                        required_run_flag_value(args, index, command)?.to_owned(),
                     ),
                 )?;
                 index += 2;
@@ -95,23 +128,27 @@ fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
             "--disable" => {
                 execution
                     .disabled_nodes
-                    .push(required_flag_value(args, index, "--disable")?.to_owned());
+                    .push(required_run_flag_value(args, index, command)?.to_owned());
                 index += 2;
             }
             "--enable" => {
                 execution
                     .enabled_nodes
-                    .push(required_flag_value(args, index, "--enable")?.to_owned());
+                    .push(required_run_flag_value(args, index, command)?.to_owned());
                 index += 2;
             }
             "--patch" => {
-                let value = required_flag_value(args, index, "--patch")?;
+                let value = required_run_flag_value(args, index, command)?;
                 execution.patch = Some(patches::parse_patch_argument(root, value)?);
                 index += 2;
             }
             value => {
+                if value.starts_with('-') {
+                    return Err(CliError::Usage(lfx_usage(command)));
+                }
                 return Err(CliError::Usage(format!(
-                    "unexpected argument for run: {value}"
+                    "unexpected argument for {command}: {value}\n{}",
+                    lfx_usage(command)
                 )));
             }
         }
@@ -120,6 +157,30 @@ fn parse_run_stage(root: &Path, args: &[String]) -> CliResult<RunStage> {
         workflow_id,
         execution,
     })
+}
+
+fn required_run_workflow_id<'a>(args: &'a [String], command: &str) -> CliResult<&'a str> {
+    let Some(value) = args.first().map(String::as_str) else {
+        return Err(CliError::Usage(lfx_usage(command)));
+    };
+    if value.starts_with('-') || value == "|" {
+        return Err(CliError::Usage(lfx_usage(command)));
+    }
+    Ok(value)
+}
+
+fn required_run_flag_value<'a>(
+    args: &'a [String],
+    index: usize,
+    command: &str,
+) -> CliResult<&'a str> {
+    let Some(value) = args.get(index + 1).map(String::as_str) else {
+        return Err(CliError::Usage(lfx_usage(command)));
+    };
+    if value.starts_with("--") || value == "|" {
+        return Err(CliError::Usage(lfx_usage(command)));
+    }
+    Ok(value)
 }
 
 fn insert_input_assignment(

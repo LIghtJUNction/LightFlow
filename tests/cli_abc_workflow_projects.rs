@@ -151,6 +151,54 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
     let import_deps = lfw(&import_project, ["deps", "lightflow.a"])?;
     assert_eq!(import_deps["complete"], true);
 
+    let git_import_collection = base.join("git-import-collection");
+    write_empty_workspace(&git_import_collection)?;
+    write_leaf_project_in_workspace(&git_import_collection, "b", "lightflow.b", "B")?;
+    write_leaf_project_in_workspace(&git_import_collection, "c", "lightflow.c", "C")?;
+    init_git_repo(&git_import_collection)?;
+    let git_import_project = base.join("git-import-consumer");
+    write_a_project(&git_import_project, &project_b, &project_c)?;
+    let git_import_url = format!("file://{}", git_import_collection.display());
+    let git_imported = lfw(
+        &git_import_project,
+        [
+            "import",
+            "--git",
+            "--name",
+            "abc-import",
+            git_import_url.as_str(),
+        ],
+    )?;
+    assert_eq!(git_imported["source"]["git"], git_import_url);
+    let git_imported_packages = git_imported["imported"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["package"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(git_imported_packages, vec!["lightflow-b", "lightflow-c"]);
+    let git_imported_paths = git_imported["imported"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["path"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(
+        git_imported_paths
+            .iter()
+            .all(|path| path.contains(".lightflow/repos/abc-import/workflows/abc/")),
+        "git import paths should use the local repo cache: {git_imported_paths:?}"
+    );
+    assert!(
+        git_imported["imported"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["dependency"]["editable"] == false)
+    );
+    let git_import_deps = lfw(&git_import_project, ["deps", "lightflow.a"])?;
+    assert_eq!(git_import_deps["complete"], true);
+
     let registry_project = base.join("registry-install");
     write_empty_workspace(&registry_project)?;
     let registry = lfw(
@@ -295,6 +343,43 @@ pub fn define() -> WorkflowSpec {{
         ),
     )?;
     write_skill(root, short_name, workflow_id)?;
+    Ok(())
+}
+
+#[test]
+fn add_path_dependency_creates_missing_workspace_dependencies_table()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    fs::write(
+        root.join("Cargo.toml"),
+        r#"[workspace]
+members = []
+resolver = "2"
+"#,
+    )?;
+
+    let added = lfw(
+        &root,
+        [
+            "add",
+            "lightflow-local",
+            "--path",
+            "../lightflow-local/workflows/demo",
+            "--editable",
+        ],
+    )?;
+    assert_eq!(added["dependency"], "lightflow-local");
+    assert_eq!(added["source"]["path"], "../lightflow-local/workflows/demo");
+    assert_eq!(added["editable"], true);
+
+    let manifest = fs::read_to_string(root.join("Cargo.toml"))?;
+    assert!(manifest.contains("[workspace.dependencies]"));
+    assert!(
+        manifest.contains("lightflow-local = { path = \"../lightflow-local/workflows/demo\" }")
+    );
+
+    let _ = fs::remove_dir_all(root);
     Ok(())
 }
 

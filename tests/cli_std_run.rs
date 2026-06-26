@@ -3,6 +3,7 @@ mod support;
 use lightflow::api::ApiService;
 use serde_json::Value;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use support::*;
@@ -24,15 +25,53 @@ fn repository_std_workflow_is_library_only_and_abstract() -> Result<(), Box<dyn 
     assert!(workflow.edges.is_empty());
 
     assert_eq!(workflow.category.as_deref(), Some("std"));
-    let crate_dir = root.join("workflows/std/std");
+    let crate_dir = root.join("projects/lightflow-std/workflows/std/std");
     assert!(crate_dir.join("src/lib.rs").exists());
     assert!(!crate_dir.join("src/main.rs").exists());
 
     let manifest = fs::read_to_string(crate_dir.join("Cargo.toml"))?;
     assert!(manifest.contains("name = \"lightflow-std\""));
-    assert!(manifest.contains("lightflow = { version = \"0.1.1\", path = \"../../..\" }"));
-    assert!(manifest.contains("[workspace]"));
+    assert!(manifest.contains("lightflow = { workspace = true }"));
+    assert!(manifest.contains("repository = \"https://github.com/lightjunction/lightflow-std\""));
     assert!(!manifest.contains("publish = false"));
+
+    Ok(())
+}
+
+#[test]
+fn repository_std_project_workflows_are_discovered_by_default()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let service = ApiService::new(root);
+
+    assert_eq!(
+        service.get_workflow("lightflow.std")?.category.as_deref(),
+        Some("std")
+    );
+    assert!(service.get_workflow("lightflow.text.template").is_ok());
+
+    Ok(())
+}
+
+#[test]
+fn sibling_project_workflows_are_discovered_from_explicit_paths()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let lfw_path = format!(
+        "{}:{}",
+        root.join("projects/lightflow-flux").display(),
+        root.join("projects/lightflow-rig").display()
+    );
+    let output = lfw_with_env_values(root, ["list", "--brief"], [("LFW_PATH", lfw_path.as_str())])?;
+    let workflow_ids = output["workflows"]
+        .as_array()
+        .expect("workflow list")
+        .iter()
+        .filter_map(|workflow| workflow["id"].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(workflow_ids.contains(&"lightflow.flux.text_to_image"));
+    assert!(workflow_ids.contains(&"lightflow.rig.llm"));
 
     Ok(())
 }
@@ -48,8 +87,14 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
     assert_eq!(workflow_plan["target"]["workflow_id"], "lightflow.example");
     assert_eq!(workflow_plan["package"], "lightflow-example");
     assert_eq!(workflow_plan["version"], "0.1.0");
-    assert_eq!(workflow_plan["publishable"], true);
-    assert_eq!(workflow_plan["issues"], serde_json::json!([]));
+    assert_eq!(workflow_plan["publishable"], false);
+    assert!(
+        workflow_plan["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue == "workflow.description contains unresolved TODO")
+    );
     assert_eq!(
         workflow_plan["command"],
         serde_json::json!([
@@ -60,6 +105,105 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "--dry-run"
         ])
     );
+    complete_generated_workflow_metadata(&root, "examples", "example")?;
+    let workflow_plan = lfw(&root, ["publish", "lightflow.example"])?;
+    assert_eq!(workflow_plan["publishable"], true);
+    assert_eq!(workflow_plan["issues"], serde_json::json!([]));
+
+    let git_init = Command::new("git")
+        .arg("init")
+        .current_dir(&root)
+        .output()?;
+    assert!(
+        git_init.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&git_init.stderr)
+    );
+    let git_add = Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()?;
+    assert!(
+        git_add.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&git_add.stderr)
+    );
+    let git_commit = Command::new("git")
+        .args([
+            "-c",
+            "user.email=lightflow@example.invalid",
+            "-c",
+            "user.name=LightFlow Test",
+            "commit",
+            "-m",
+            "fixture",
+        ])
+        .current_dir(&root)
+        .output()?;
+    assert!(
+        git_commit.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&git_commit.stderr)
+    );
+
+    let fake_bin = root.join("fake-bin");
+    fs::create_dir_all(&fake_bin)?;
+    let cargo_log = root.join("cargo-publish.log");
+    let cargo_path = fake_bin.join("cargo");
+    fs::write(
+        &cargo_path,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
+            cargo_log.display()
+        ),
+    )?;
+    let mut permissions = fs::metadata(&cargo_path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&cargo_path, permissions)?;
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let applied = Command::new(env!("CARGO_BIN_EXE_lfw"))
+        .args(["publish", "lightflow.example", "--apply"])
+        .current_dir(&root)
+        .env("HOME", &root)
+        .env("SHELL", "/bin/zsh")
+        .env("XDG_CONFIG_HOME", root.join(".test-xdg/config"))
+        .env("XDG_DATA_HOME", root.join(".test-xdg/data"))
+        .env("PATH", path)
+        .env_remove("LFW_PATH")
+        .output()?;
+    assert!(
+        applied.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&applied.stdout),
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    let applied_json: serde_json::Value = serde_json::from_slice(&applied.stdout)?;
+    assert_eq!(applied_json["dry_run"], false);
+    assert_eq!(
+        applied_json["executed"].as_array().expect("executed").len(),
+        2
+    );
+    assert_eq!(
+        applied_json["preflight_commands"][0],
+        serde_json::json!([
+            "cargo",
+            "publish",
+            "--manifest-path",
+            "workflows/examples/example/Cargo.toml",
+            "--dry-run"
+        ])
+    );
+    let cargo_lines = fs::read_to_string(&cargo_log)?
+        .lines()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(cargo_lines.len(), 2);
+    assert!(cargo_lines[0].contains("--dry-run"));
+    assert!(!cargo_lines[1].contains("--dry-run"));
 
     let workspace_root_publish = Command::new(env!("CARGO_BIN_EXE_lfw"))
         .arg("publish")
@@ -332,6 +476,7 @@ fn lfw_run_records_trace_and_replays_history() -> Result<(), Box<dyn std::error:
     assert!(run_dir.join("events.jsonl").exists());
     assert_eq!(run["workflow_id"], "lightflow.parent");
     assert_eq!(run["outputs"]["out"], "hello");
+    assert_eq!(run["model_locks"], serde_json::json!([]));
 
     let trace = lfw(&root, ["trace", "last"])?;
     assert_eq!(trace["run_id"], run_id);
@@ -342,43 +487,248 @@ fn lfw_run_records_trace_and_replays_history() -> Result<(), Box<dyn std::error:
     assert_eq!(trace["execution"]["workflow_id"], "lightflow.parent");
     assert_eq!(trace["execution"]["outputs"]["out"], "hello");
     assert_eq!(trace["events"][0]["event"], "run_started");
+    assert_eq!(trace["events"][0]["surface"], "cli");
     assert_eq!(trace["events"][1]["event"], "node_completed");
     assert_eq!(trace["events"][1]["node_id"], "nested");
     assert_eq!(trace["events"][1]["workflow_id"], "lightflow.parent");
     assert_eq!(trace["events"][1]["attempts"], 1);
     assert!(trace["events"][1]["duration_ms"].is_number());
+    assert_eq!(
+        trace["execution"]["nodes"][0]["runtime"]["executor_id"],
+        "passthrough"
+    );
+    assert_eq!(
+        trace["execution"]["nodes"][0]["runtime"]["data_policy"],
+        "json_values"
+    );
+    assert_eq!(
+        trace["execution"]["nodes"][0]["runtime"]["capabilities"],
+        serde_json::json!(["lightflow.data.copy"])
+    );
+    assert_eq!(trace["events"][1]["runtime"]["executor_id"], "passthrough");
+    assert_eq!(trace["events"][1]["runtime"]["data_policy"], "json_values");
     assert_eq!(trace["events"][2]["event"], "node_completed");
     assert_eq!(trace["events"][2]["node_id"], "sink");
     assert_eq!(trace["events"][3]["event"], "run_finished");
+    assert_eq!(trace["events"][3]["surface"], "cli");
 
-    let replay = lfw(&root, ["replay", run_id.as_str()])?;
+    let replay = lfw(&root, ["replay"])?;
     assert_eq!(replay["workflow_id"], "lightflow.parent");
     assert_eq!(replay["outputs"]["out"], "hello");
     assert_ne!(replay["run_id"], run_id);
+    assert_eq!(replay["replayed_from"], "last");
+    assert_eq!(replay["replay"]["runtime_changed"], false);
+    assert_eq!(replay["replay"]["model_lock_changed"], false);
+    assert_eq!(
+        replay["replay"]["original_runtime"],
+        replay["replay"]["replayed_runtime"]
+    );
+    assert_eq!(
+        replay["replay"]["original_model_locks"],
+        replay["replay"]["replayed_model_locks"]
+    );
+    assert_eq!(
+        replay["replay"]["original_runtime"][0]["runtime"]["executor_id"],
+        "passthrough"
+    );
 
     let replay_trace = lfw(&root, ["trace", replay["run_id"].as_str().unwrap()])?;
     assert_eq!(replay_trace["execution"]["outputs"]["out"], "hello");
+    assert_eq!(
+        replay_trace["execution"]["replay"]["runtime_changed"],
+        false
+    );
+    assert_eq!(replay_trace["events"][0]["surface"], "cli");
 
     let runs = lfw(&root, ["runs", "list"])?;
     assert_eq!(runs["last"], replay["run_id"]);
+    assert_eq!(runs["total"], 2);
+    assert_eq!(runs["completed_count"], 2);
+    assert_eq!(runs["failed_count"], 0);
+    assert_eq!(runs["unknown_count"], 0);
+    assert_eq!(runs["unknown_run_ids"], serde_json::json!([]));
     let runs_array = runs["runs"].as_array().unwrap();
     assert_eq!(runs_array.len(), 2);
     assert_eq!(runs_array[0]["run_id"], replay["run_id"]);
     assert_eq!(runs_array[0]["status"], "completed");
+    assert!(runs_array[0]["duration_ms"].is_number());
+    assert_eq!(runs_array[0]["surface"], "cli");
     assert_eq!(runs_array[0]["workflow_id"], "lightflow.parent");
+    assert_eq!(
+        runs_array[0]["workflow_ids"],
+        serde_json::json!(["lightflow.parent"])
+    );
     assert_eq!(runs_array[1]["run_id"], run_id);
 
     let run_detail = lfw(&root, ["runs", "get", run_id.as_str()])?;
     assert_eq!(run_detail["run_id"], run_id);
     assert_eq!(run_detail["execution"]["outputs"]["out"], "hello");
 
+    let namespaced_replay = lfw(&root, ["runs", "replay", run_id.as_str()])?;
+    assert_eq!(namespaced_replay["workflow_id"], "lightflow.parent");
+    assert_eq!(namespaced_replay["outputs"]["out"], "hello");
+    assert_eq!(namespaced_replay["replayed_from"], run_id);
+    assert_ne!(namespaced_replay["run_id"], run_id);
+    assert_eq!(namespaced_replay["replay"]["runtime_changed"], false);
+    let namespaced_replay_trace = lfw(
+        &root,
+        [
+            "runs",
+            "get",
+            namespaced_replay["run_id"].as_str().expect("replay run id"),
+        ],
+    )?;
+    assert_eq!(namespaced_replay_trace["events"][0]["surface"], "cli");
+
     let removed = lfw(&root, ["runs", "rm", run_id.as_str()])?;
     assert_eq!(removed["removed"], true);
     assert!(!root.join(".lightflow/runs").join(&run_id).exists());
     let runs_after_remove = lfw(&root, ["runs", "list"])?;
-    assert_eq!(runs_after_remove["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(runs_after_remove["runs"].as_array().unwrap().len(), 2);
 
     let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn lfw_replay_reports_model_lock_drift() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    write_project_specs(&root)?;
+    write_workflow_crate(
+        &root,
+        "lightflow.model_passthrough",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.model_passthrough")
+        .version("0.1.0")
+        .name("Model Passthrough")
+        .input("value", "json")
+        .output("value", "json")
+        .model("weights", "text-to-image")
+        .build()
+}
+"#,
+    )?;
+    write_workflow_crate(
+        &root,
+        "lightflow.echo_value",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.echo_value")
+        .version("0.1.0")
+        .name("Echo Value")
+        .input("value", "json")
+        .output("value", "json")
+        .build()
+}
+"#,
+    )?;
+    let model_path = root.join("models/tiny.gguf");
+    fs::create_dir_all(model_path.parent().unwrap())?;
+    fs::write(&model_path, b"tiny")?;
+    write_model_lock(&root, &model_path, "abc123")?;
+
+    let run = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.model_passthrough",
+            "--input",
+            "value=hello",
+        ],
+    )?;
+    let run_id = run["run_id"].as_str().expect("run id").to_owned();
+    assert_eq!(run["outputs"]["value"], "hello");
+    assert_eq!(
+        run["model_locks"][0]["workflow_id"],
+        "lightflow.model_passthrough"
+    );
+    assert_eq!(run["model_locks"][0]["requirement_id"], "weights");
+    assert_eq!(run["model_locks"][0]["lock"]["status"], "available");
+    assert_eq!(run["model_locks"][0]["lock"]["sha256"], "abc123");
+
+    write_model_lock(&root, &model_path, "def456")?;
+    let replay = lfw(&root, ["replay", run_id.as_str()])?;
+    assert_eq!(replay["outputs"]["value"], "hello");
+    assert_eq!(replay["replay"]["runtime_changed"], false);
+    assert_eq!(replay["replay"]["model_lock_changed"], true);
+    assert_eq!(
+        replay["replay"]["original_model_locks"][0]["lock"]["sha256"],
+        "abc123"
+    );
+    assert_eq!(
+        replay["replay"]["replayed_model_locks"][0]["lock"]["sha256"],
+        "def456"
+    );
+
+    let replay_trace = lfw(&root, ["trace", replay["run_id"].as_str().unwrap()])?;
+    assert_eq!(
+        replay_trace["execution"]["replay"]["model_lock_changed"],
+        true
+    );
+
+    write_model_lock(&root, &model_path, "abc123")?;
+    let pipeline = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.echo_value",
+            "--input",
+            "value=hello",
+            "|",
+            "lightflow.model_passthrough",
+        ],
+    )?;
+    let pipeline_run_id = pipeline["run_id"].as_str().expect("pipeline run id");
+    assert_eq!(pipeline["model_locks"][0]["stage_index"], 1);
+    assert_eq!(
+        pipeline["model_locks"][0]["workflow_id"],
+        "lightflow.model_passthrough"
+    );
+
+    write_model_lock(&root, &model_path, "def456")?;
+    let pipeline_replay = lfw(&root, ["replay", pipeline_run_id])?;
+    assert_eq!(pipeline_replay["replay"]["model_lock_changed"], true);
+    assert_eq!(
+        pipeline_replay["replay"]["original_model_locks"][0]["stage_index"],
+        1
+    );
+    assert_eq!(
+        pipeline_replay["replay"]["replayed_model_locks"][0]["stage_index"],
+        1
+    );
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+fn write_model_lock(
+    root: &Path,
+    model_path: &Path,
+    sha256: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    fs::write(
+        root.join("lfw.lock"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 2,
+            "models": {
+                "lightflow.model_passthrough::weights": {
+                    "requirement_id": "weights",
+                    "variant_id": "tiny",
+                    "repo": "example/tiny",
+                    "file": "tiny.gguf",
+                    "format": "gguf",
+                    "sha256": sha256,
+                    "hash_algorithm": "sha256",
+                    "size_bytes": 4,
+                    "snapshot_revision": "rev1",
+                    "local_paths": [model_path],
+                }
+            }
+        }))?,
+    )?;
     Ok(())
 }
 
@@ -411,6 +761,37 @@ pub fn define() -> WorkflowSpec {
         .version("0.1.0")
         .name("Fallback")
         .input("in", "json")
+        .output("out", "json")
+        .build()
+}
+"#,
+    )?;
+    write_workflow_crate(
+        &root,
+        "lightflow.no_output",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.no_output")
+        .version("0.1.0")
+        .name("No Output")
+        .input("in", "json")
+        .build()
+}
+"#,
+    )?;
+    write_workflow_crate(
+        &root,
+        "lightflow.extra_required",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.extra_required")
+        .version("0.1.0")
+        .name("Extra Required")
+        .input("in", "json")
+        .input("extra", "json")
+        .input_required("extra", true)
         .output("out", "json")
         .build()
 }
@@ -454,9 +835,203 @@ pub fn define() -> WorkflowSpec {
     );
     let validated_patch = lfw(&root, ["patch", "validate", "qa-debug"])?;
     assert_eq!(validated_patch["valid"], true);
+    assert_eq!(validated_patch["issues"], serde_json::json!([]));
     assert_eq!(
         validated_patch["patch"]["nodes"]["nested"]["replace_with"],
         "lightflow.replacement"
+    );
+    let selected_validation = lfw(
+        &root,
+        [
+            "patch",
+            "validate",
+            "qa-debug",
+            "--workflow",
+            "lightflow.parent",
+        ],
+    )?;
+    assert_eq!(selected_validation["valid"], true);
+
+    lfw(
+        &root,
+        [
+            "patch",
+            "save",
+            "bad-debug",
+            r#"{"nodes":{"missing":{"replace_with":"lightflow.nope","retry":0}}}"#,
+        ],
+    )?;
+    let invalid_patch = lfw_command(&root)
+        .args(["patch", "validate", "bad-debug"])
+        .output()?;
+    assert!(!invalid_patch.status.success());
+    let invalid_stderr = String::from_utf8_lossy(&invalid_patch.stderr);
+    assert!(
+        invalid_stderr.contains("patch node missing does not match any available workflow node"),
+        "stderr:\n{invalid_stderr}"
+    );
+    assert!(
+        invalid_stderr
+            .contains("patch node missing replacement workflow lightflow.nope is not available"),
+        "stderr:\n{invalid_stderr}"
+    );
+    assert!(
+        invalid_stderr.contains("patch node missing retry must be greater than zero"),
+        "stderr:\n{invalid_stderr}"
+    );
+    let bad_loop = lfw_command(&root).args(["loop", "check"]).output()?;
+    assert!(!bad_loop.status.success());
+    let bad_loop_stderr = String::from_utf8_lossy(&bad_loop.stderr);
+    assert!(
+        bad_loop_stderr.contains("saved patches are invalid: bad-debug"),
+        "stderr:\n{bad_loop_stderr}"
+    );
+    assert!(
+        bad_loop_stderr.contains("patch node missing does not match any available workflow node"),
+        "stderr:\n{bad_loop_stderr}"
+    );
+    lfw(&root, ["patch", "rm", "bad-debug"])?;
+
+    let wrong_workflow_patch = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.child",
+            "--input",
+            "in=hello",
+            "--patch",
+            r#"{"nodes":{"nested":{"disable":true}}}"#,
+        ])
+        .output()?;
+    assert!(!wrong_workflow_patch.status.success());
+    let wrong_workflow_stderr = String::from_utf8_lossy(&wrong_workflow_patch.stderr);
+    assert!(
+        wrong_workflow_stderr
+            .contains("patch node nested does not match any node in workflow lightflow.child"),
+        "stderr:\n{wrong_workflow_stderr}"
+    );
+
+    let unknown_patch_node = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--patch",
+            r#"{"nodes":{"missing":{"disable":true}}}"#,
+        ])
+        .output()?;
+    assert!(!unknown_patch_node.status.success());
+    let unknown_patch_stderr = String::from_utf8_lossy(&unknown_patch_node.stderr);
+    assert!(
+        unknown_patch_stderr
+            .contains("patch node missing does not match any node in workflow lightflow.parent"),
+        "stderr:\n{unknown_patch_stderr}"
+    );
+
+    let unknown_toggle = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--disable",
+            "missing",
+        ])
+        .output()?;
+    assert!(!unknown_toggle.status.success());
+    let unknown_toggle_stderr = String::from_utf8_lossy(&unknown_toggle.stderr);
+    assert!(
+        unknown_toggle_stderr
+            .contains("disabled node missing does not match any node in workflow lightflow.parent"),
+        "stderr:\n{unknown_toggle_stderr}"
+    );
+
+    let incompatible_replacement = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--patch",
+            r#"{"nodes":{"nested":{"replace_with":"lightflow.no_output"}}}"#,
+        ])
+        .output()?;
+    assert!(!incompatible_replacement.status.success());
+    let incompatible_replacement_stderr = String::from_utf8_lossy(&incompatible_replacement.stderr);
+    assert!(
+        incompatible_replacement_stderr.contains(
+            "patch node nested replacement workflow lightflow.no_output is missing output port out"
+        ),
+        "stderr:\n{incompatible_replacement_stderr}"
+    );
+
+    let incompatible_preflight = lfw_command(&root)
+        .args([
+            "patch",
+            "validate",
+            r#"{"nodes":{"nested":{"replace_with":"lightflow.no_output"}}}"#,
+            "--workflow",
+            "lightflow.parent",
+        ])
+        .output()?;
+    assert!(!incompatible_preflight.status.success());
+    let incompatible_preflight_stderr = String::from_utf8_lossy(&incompatible_preflight.stderr);
+    assert!(
+        incompatible_preflight_stderr.contains(
+            "patch node nested replacement workflow lightflow.no_output is missing output port out"
+        ),
+        "stderr:\n{incompatible_preflight_stderr}"
+    );
+
+    lfw(
+        &root,
+        [
+            "patch",
+            "save",
+            "wrong-shape",
+            r#"{"nodes":{"nested":{"replace_with":"lightflow.no_output"}}}"#,
+        ],
+    )?;
+    let selected_loop_output = lfw_command(&root)
+        .args(["loop", "check", "lightflow.parent"])
+        .output()?;
+    assert!(!selected_loop_output.status.success());
+    let selected_loop = serde_json::from_slice::<serde_json::Value>(&selected_loop_output.stderr)?;
+    assert!(
+        selected_loop["checks"]
+            .as_array()
+            .expect("selected loop checks")
+            .iter()
+            .any(|check| {
+                check["id"] == "loop.selected.patches"
+                    && check["status"] == "warning"
+                    && check["message"].as_str().unwrap().contains("wrong-shape")
+                    && check["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("missing output port out")
+            }),
+        "selected loop checks:\n{selected_loop}"
+    );
+    lfw(&root, ["patch", "rm", "wrong-shape"])?;
+
+    let unsatisfied_extra_input = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.parent",
+            "--input",
+            "in=hello",
+            "--patch",
+            r#"{"nodes":{"nested":{"replace_with":"lightflow.extra_required"}}}"#,
+        ])
+        .output()?;
+    assert!(!unsatisfied_extra_input.status.success());
+    let unsatisfied_extra_input_stderr = String::from_utf8_lossy(&unsatisfied_extra_input.stderr);
+    assert!(
+        unsatisfied_extra_input_stderr.contains(
+            "patch node nested replacement workflow lightflow.extra_required has unsatisfied required input port extra"
+        ),
+        "stderr:\n{unsatisfied_extra_input_stderr}"
     );
 
     let patched = lfw(
@@ -638,6 +1213,22 @@ pub fn define() -> WorkflowSpec {
 }
 "#,
     )?;
+    write_workflow_crate(
+        &root,
+        "lightflow.broken",
+        r#"use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow("lightflow.broken")
+        .version("0.1.0")
+        .name("Broken")
+        .input("text", "text")
+        .output("text", "text")
+        .runtime("runtime", "lightflow.missing.executor")
+        .build()
+}
+"#,
+    )?;
 
     let chained = lfw(
         &root,
@@ -655,6 +1246,34 @@ pub fn define() -> WorkflowSpec {
     assert_eq!(chained["stages"][0]["workflow_id"], "lightflow.first");
     assert_eq!(chained["stages"][1]["workflow_id"], "lightflow.second");
     assert_eq!(chained["stages"][1]["inputs"]["text"], "hello");
+    let chained_run_id = chained["run_id"].as_str().expect("pipeline run id");
+    let chained_trace = lfw(&root, ["trace", chained_run_id])?;
+    assert_eq!(
+        chained_trace["manifest"]["stage_input_resolution"],
+        "resolved"
+    );
+    assert_eq!(
+        chained_trace["manifest"]["stages"][1]["execution"]["inputs"]["text"],
+        "hello"
+    );
+    let replayed = lfw(&root, ["replay", chained_run_id])?;
+    assert_eq!(replayed["outputs"]["text"], "hello");
+    let replayed_trace = lfw(&root, ["trace", replayed["run_id"].as_str().unwrap()])?;
+    assert_eq!(
+        replayed_trace["manifest"]["stages"][1]["execution"]["inputs"]["text"],
+        "hello"
+    );
+    let runs = lfw(&root, ["runs", "list"])?;
+    assert!(
+        runs["runs"].as_array().expect("runs").iter().any(|run| {
+            run["run_id"] == chained_run_id
+                && run["duration_ms"].is_number()
+                && run["surface"] == "cli"
+                && run["workflow_id"] == "lightflow.first"
+                && run["workflow_ids"] == serde_json::json!(["lightflow.first", "lightflow.second"])
+        }),
+        "runs:\n{runs}"
+    );
 
     let overridden = lfw(
         &root,
@@ -671,6 +1290,53 @@ pub fn define() -> WorkflowSpec {
     )?;
     assert_eq!(overridden["outputs"]["text"], "override");
     assert_eq!(overridden["stages"][1]["inputs"]["text"], "override");
+
+    let failed = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.first",
+            "-i",
+            "text=hello",
+            "|",
+            "lightflow.broken",
+        ])
+        .output()?;
+    assert!(!failed.status.success());
+    let failed_trace = lfw(&root, ["trace", "last"])?;
+    assert_eq!(failed_trace["manifest"]["status"], "failed");
+    assert_eq!(
+        failed_trace["manifest"]["stages"][1]["execution"]["inputs"]["text"],
+        "hello"
+    );
+    assert_eq!(
+        failed_trace["execution"]["partial_execution"]["stages"][0]["workflow_id"],
+        "lightflow.first"
+    );
+    assert_eq!(
+        failed_trace["execution"]["partial_execution"]["outputs"]["text"],
+        "hello"
+    );
+    assert!(
+        failed_trace["events"]
+            .as_array()
+            .expect("failed events")
+            .iter()
+            .any(|event| {
+                event["event"] == "stage_completed"
+                    && event["stage_index"] == 0
+                    && event["workflow_id"] == "lightflow.first"
+                    && event["outputs"]["text"] == "hello"
+            }),
+        "failed trace events:\n{failed_trace}"
+    );
+    assert_eq!(
+        failed_trace["events"]
+            .as_array()
+            .expect("failed events")
+            .last()
+            .expect("failed event tail")["event"],
+        "run_failed"
+    );
 
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -834,5 +1500,40 @@ pub fn define() -> WorkflowSpec {
     );
 
     let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+fn complete_generated_workflow_metadata(
+    root: &Path,
+    category: &str,
+    name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = root
+        .join("workflows")
+        .join(category)
+        .join(name)
+        .join("src/lib.rs");
+    let source = fs::read_to_string(&path)?
+        .replace(
+            "TODO: describe this workflow.",
+            "Publishes a completed test workflow.",
+        )
+        .replace(
+            "TODO: describe the input value.",
+            "Input value for the test workflow.",
+        )
+        .replace(
+            "TODO: describe the output value.",
+            "Output value from the test workflow.",
+        )
+        .replace(
+            "TODO: describe the runtime input value.",
+            "Runtime input value for the test workflow.",
+        )
+        .replace(
+            "TODO: describe the runtime output value.",
+            "Runtime output value from the test workflow.",
+        );
+    fs::write(path, source)?;
     Ok(())
 }

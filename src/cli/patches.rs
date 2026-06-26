@@ -1,73 +1,145 @@
-use super::{CliError, CliResult, request_json, required_arg};
+use super::{CliError, CliResult, request_json};
+use crate::api::ApiService;
 use crate::workflow::WorkflowPatch;
-use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const PATCHES_DIR: &str = ".lightflow/patches";
 
-pub(super) fn manage_patches(root: &Path, args: &[String]) -> CliResult<serde_json::Value> {
+pub(super) fn manage_patches(
+    service: &ApiService,
+    args: &[String],
+) -> CliResult<serde_json::Value> {
+    let root = service.repo_root();
     let action = args.first().map(String::as_str).unwrap_or("list");
     match action {
         "list" | "ls" => {
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(patch_usage()));
+            }
             ensure_no_patch_extra_args(args, 1, "patch list")?;
-            list_patches(root)
+            Ok(serde_json::to_value(service.list_patches()?)?)
         }
         "get" | "show" => {
-            let name = required_arg(args, 1, "patch name")?;
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(patch_usage()));
+            }
+            let Some(name) = args.get(1).map(String::as_str) else {
+                return Err(CliError::Usage(patch_usage()));
+            };
             ensure_no_patch_extra_args(args, 2, "patch get")?;
-            let patch = read_registered_patch(root, name)?;
-            Ok(json!({
-                "name": normalized_patch_name(name)?,
-                "path": patch_path(root, name)?,
-                "patch": patch,
-            }))
+            Ok(serde_json::to_value(service.get_patch(name)?)?)
         }
         "save" | "set" => {
-            let name = required_arg(args, 1, "patch name")?;
-            let value = required_arg(args, 2, "patch json")?;
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(patch_usage()));
+            }
+            let Some(name) = args.get(1).map(String::as_str) else {
+                return Err(CliError::Usage(patch_usage()));
+            };
+            let Some(value) = args.get(2).map(String::as_str) else {
+                return Err(CliError::Usage(patch_usage()));
+            };
             ensure_no_patch_extra_args(args, 3, "patch save")?;
             let patch = parse_patch_argument(root, value)?;
-            let path = write_registered_patch(root, name, &patch)?;
-            Ok(json!({
-                "saved": true,
-                "name": normalized_patch_name(name)?,
-                "path": path,
-                "patch": patch,
-            }))
+            Ok(serde_json::to_value(service.save_patch(name, &patch)?)?)
         }
         "rm" | "remove" | "delete" => {
-            let name = required_arg(args, 1, "patch name")?;
-            ensure_no_patch_extra_args(args, 2, "patch rm")?;
-            let path = patch_path(root, name)?;
-            let removed = if path.exists() {
-                fs::remove_file(&path)?;
-                true
-            } else {
-                false
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(patch_usage()));
+            }
+            let Some(name) = args.get(1).map(String::as_str) else {
+                return Err(CliError::Usage(patch_usage()));
             };
-            Ok(json!({
-                "removed": removed,
-                "name": normalized_patch_name(name)?,
-                "path": path,
-            }))
+            ensure_no_patch_extra_args(args, 2, "patch rm")?;
+            Ok(serde_json::to_value(service.remove_patch(name)?)?)
         }
         "validate" | "check" => {
-            let value = required_arg(args, 1, "patch json or name")?;
-            ensure_no_patch_extra_args(args, 2, "patch validate")?;
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(patch_usage()));
+            }
+            let (value, workflow_id) = parse_patch_validate_args(args)?;
             let patch = parse_patch_argument(root, value)?;
-            Ok(json!({
-                "valid": true,
-                "patch": patch,
-            }))
+            let validation = if let Some(workflow_id) = workflow_id {
+                service.validate_patch_for_workflow(workflow_id, patch)
+            } else {
+                service.validate_patch(patch)
+            };
+            let value = serde_json::to_value(validation)?;
+            if value
+                .get("valid")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                Ok(value)
+            } else {
+                Err(CliError::Usage(value.to_string()))
+            }
         }
         "-h" | "--help" | "help" => Err(CliError::Usage(patch_usage())),
         _ => Err(CliError::Usage(patch_usage())),
     }
 }
 
+fn parse_patch_validate_args(args: &[String]) -> CliResult<(&str, Option<&str>)> {
+    let Some(value) = args.get(1).map(String::as_str) else {
+        return Err(CliError::Usage(patch_usage()));
+    };
+    let mut workflow_id = None;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--workflow" | "--workflow-id" => {
+                if workflow_id.is_some() {
+                    return Err(CliError::Usage(
+                        "patch validate accepts only one workflow id".to_owned(),
+                    ));
+                }
+                workflow_id = Some(required_patch_workflow_id(args, index + 1)?);
+                index += 2;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(patch_usage()));
+            }
+            value => {
+                return Err(CliError::Usage(format!(
+                    "unexpected argument for patch validate: {value}"
+                )));
+            }
+        }
+    }
+    Ok((value, workflow_id))
+}
+
+fn required_patch_workflow_id(args: &[String], index: usize) -> CliResult<&str> {
+    let Some(value) = args.get(index).map(String::as_str) else {
+        return Err(CliError::Usage(patch_usage()));
+    };
+    if value.starts_with('-') || value == "|" {
+        return Err(CliError::Usage(patch_usage()));
+    }
+    Ok(value)
+}
+
 pub(super) fn parse_patch_argument(root: &Path, value: &str) -> CliResult<WorkflowPatch> {
-    serde_json::from_value::<WorkflowPatch>(patch_json_argument(root, value)?).map_err(Into::into)
+    let value = patch_json_argument(root, value)?;
+    serde_json::from_value::<WorkflowPatch>(value)
+        .map_err(|error| CliError::Usage(format!("invalid patch JSON: {error}\n{}", patch_usage())))
 }
 
 fn patch_json_argument(root: &Path, value: &str) -> CliResult<serde_json::Value> {
@@ -76,50 +148,18 @@ fn patch_json_argument(root: &Path, value: &str) -> CliResult<serde_json::Value>
         || value.trim_start().starts_with('{')
         || value.trim_start().starts_with('[')
     {
-        return request_json(value);
+        return request_json(value).map_err(|error| match error {
+            CliError::Usage(message) => CliError::Usage(message),
+            other => CliError::Usage(format!("invalid patch JSON: {other}\n{}", patch_usage())),
+        });
     }
     Ok(serde_json::to_value(read_registered_patch(root, value)?)?)
-}
-
-fn list_patches(root: &Path) -> CliResult<serde_json::Value> {
-    let patches_root = patches_root(root);
-    let mut patches = Vec::new();
-    if patches_root.exists() {
-        for entry in fs::read_dir(&patches_root)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
-                continue;
-            }
-            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-                continue;
-            };
-            patches.push(json!({
-                "name": stem,
-                "path": path,
-            }));
-        }
-    }
-    patches.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
-    Ok(json!({
-        "patches": patches,
-        "root": patches_root,
-    }))
 }
 
 fn read_registered_patch(root: &Path, name: &str) -> CliResult<WorkflowPatch> {
     let path = patch_path(root, name)?;
     let value = serde_json::from_slice(&fs::read(path)?)?;
     serde_json::from_value::<WorkflowPatch>(value).map_err(Into::into)
-}
-
-fn write_registered_patch(root: &Path, name: &str, patch: &WorkflowPatch) -> CliResult<PathBuf> {
-    let path = patch_path(root, name)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&path, format!("{}\n", serde_json::to_string_pretty(patch)?))?;
-    Ok(path)
 }
 
 fn patch_path(root: &Path, name: &str) -> CliResult<PathBuf> {
@@ -161,8 +201,12 @@ fn patch_usage() -> String {
         "  lfw patch list",
         "  lfw patch get <name>",
         "  lfw patch save <name> <json|-|@file|registered-name>",
-        "  lfw patch validate <json|-|@file|registered-name>",
+        "  lfw patch validate <json|-|@file|registered-name> [--workflow <workflow_id>]",
         "  lfw patch rm <name>",
+        "",
+        "Stores and validates reusable workflow run patches under .lightflow/patches/.",
+        "Patch JSON can be inline JSON, '-' for stdin, '@file', or a saved patch name.",
+        "Use validate before running with --patch to catch unknown nodes and port mismatches.",
     ]
     .join("\n")
 }

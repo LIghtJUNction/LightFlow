@@ -24,7 +24,9 @@ There are two common shapes:
 
 Every workflow or plugin project should also include an agent skill under
 `.agent/skills/<skill-name>/SKILL.md`. Update the skill whenever inputs,
-outputs, runtime behavior, model requirements, or common commands change.
+outputs, runtime behavior, model requirements, or common commands change. Keep
+the skill concrete: include at least one `lfw run` example and one HTTP
+`POST /workflows/{workflow_id}/run` example using the shared run body.
 
 ## Create A New Workflow Project
 
@@ -65,7 +67,8 @@ lfw new image_generate --category image --runtime lightflow.image.generate
 ```
 
 Runtime-aware templates include Node Schema metadata, a starter runtime
-declaration, an agent skill, and a contract test scaffold where applicable.
+declaration, an agent skill with CLI/API examples, and a contract test scaffold
+where applicable.
 
 Use a plugin project when a repository should be a single Cargo crate that can
 expose one workflow from `src/lib.rs`:
@@ -90,17 +93,19 @@ To add an external workflow crate as a dependency, use `lfw add`:
 
 ```bash
 lfw add lightflow-std --version 0.1.1
-lfw add lightflow-std --path ../lightflow-std --editable
+lfw add lightflow-std --path projects/lightflow-std/workflows/std/std --editable
 lfw add lightflow-std --git https://github.com/lightjunction/lightflow-std --package lightflow-std
 ```
 
 Use `--editable` for local development. It records a Cargo path dependency and
 keeps edits live.
+Use an external checkout path such as `../lightflow-std/workflows/std/std`
+only when `lightflow-std` is not checked out under `projects/`.
 
 To import a repository that contains many workflow crates, use `lfw import`:
 
 ```bash
-lfw import --global ../lightflow-flux
+lfw import --global projects/lightflow-flux
 lfw import --global https://github.com/lightjunction/lightflow-flux.git
 ```
 
@@ -110,9 +115,9 @@ should discover all workflow crates under `workflows/<category>/<crate>/`.
 
 In practice:
 
-- `lfw add lightflow-text-template --path ../lightflow-std/workflows/std/text_template`
+- `lfw add lightflow-text-template --path projects/lightflow-std/workflows/std/text_template`
   adds one workflow crate.
-- `lfw import ../lightflow-std` scans the repository and adds every workflow
+- `lfw import projects/lightflow-std` scans the repository and adds every workflow
   crate it finds under `workflows/std/*`.
 
 Global installs are written into the default LightFlow home, usually
@@ -228,6 +233,48 @@ lfw node test acme.image.preview
 
 This checks workflow validation, `lfw help`, Node Schema metadata, model
 bindings, runtime executor availability, and the workflow crate's agent skill.
+Generated placeholder descriptions are reported as `node.placeholders`
+warnings here, so agents can spot incomplete metadata before the stricter
+publish gate fails.
+Before publishing, replace generated `TODO` workflow, input, and output
+descriptions; `lfw publish` reports those placeholders as publish blockers for
+workflow crates.
+Before handing off agent-authored changes, run `lfw loop changes` to confirm
+workflow crate edits and colocated skill edits are paired in the same review.
+Tools can read the same report from `/loop/changes` or
+`lightflow.loop.changes`.
+Use `lfw dev check` for the broader developer gate plan before handoff. It
+reuses the release gate definitions, but presents them as a daily development
+workflow: local loop readiness, source-change safety, sibling project
+workspaces, publish readiness, formatting, clippy, tests, workflow skill
+coverage, and feature-specific runtime checks.
+Use `lfw dev check --project <name>` when the current change is scoped to one
+linked project workspace. The report still plans the normal developer gates,
+but the project workspace review and `lfw loop projects` commands are
+filtered to that workspace. A project name that matches no linked workspace
+fails the gate and reports the known workspace names and aliases.
+When a workflow skill is missing required usage guidance, run
+`lfw dev skill-template <workflow_id>` to generate a compliant starter
+`SKILL.md` with frontmatter, workflow contract notes, a CLI run example, and
+an HTTP run example. Add `--write` to create it under the workflow crate's
+`.agent/skills/<skill-name>/SKILL.md`; existing files are not overwritten
+unless `--force` is also passed.
+Use `lfw dev project-config-template` to inspect a starter
+`projects/lightflow-projects.toml`, and add `--write` to create it when a
+project set should stop relying on built-in compatibility defaults. Existing
+config files are not overwritten unless `--force` is passed. The command still
+returns a repair template when the existing config is invalid, so
+`--write --force` can replace a broken project-set config intentionally. The
+same response includes `project_config_template_command`,
+`project_config_write_command`, and `project_submodule_update_command` for
+repair prompts and configured submodule initialization.
+`lfw dev check` and `lfw release check` also expose `project_config_valid`,
+`project_config_error`, and the same template/write commands, so editor and
+agent clients can surface a repair action from the first gate report.
+The development profile skips release-only artifact and changelog-section
+checks; those remain part of `lfw release check`.
+`lfw publish <workflow_id> --apply` and `lfw publish --workflows --apply` run
+the same gate before invoking Cargo publish commands.
 
 ## Call Other Workflows From A Workflow
 
@@ -275,7 +322,12 @@ Use install hints when a dependency may not already be installed:
 
 ```rust
 workflow("acme.prompted_image")
-    .depends_on_path("lightflow.text_to_image", "0.1.0", "lightflow-text-to-image", "../lightflow-std/workflows/std/text_to_image")
+    .depends_on_path(
+        "lightflow.text_to_image",
+        "0.1.0",
+        "lightflow-text-to-image",
+        "projects/lightflow-std/workflows/std/text_to_image",
+    )
     .depends_on_git(
         "lightflow.text.template",
         "0.1.0",

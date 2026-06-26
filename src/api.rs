@@ -1,7 +1,9 @@
 //! Framework-independent LightFlow backend service.
 
+mod agent_skill;
 mod deps;
 mod dsl;
+mod error;
 mod execution;
 mod executors;
 mod flux;
@@ -9,9 +11,16 @@ mod flux;
 mod flux_native;
 mod history;
 mod llm_rig;
+mod loop_check;
+pub mod media_paths;
 mod model_manager;
 mod nodes;
+mod patches;
 mod plan;
+mod project_config;
+mod release;
+mod replay_fingerprints;
+mod run_history_service;
 mod source;
 mod util;
 mod validation;
@@ -21,12 +30,12 @@ use crate::workflow::{
     WorkflowDependencyReport, WorkflowExecution, WorkflowExecutionOptions, WorkflowList,
     WorkflowSpec, WorkflowSummary, WorkflowValidation,
 };
+pub(crate) use agent_skill::agent_skill_issues;
 use deps::dependency_report;
+pub(crate) use dsl::read_workflow_source;
 use execution::execute_workflow_spec as execute_workflow_spec_impl;
 use source::read_workflow_sources;
-use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter};
-use std::io;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use util::{validate_id_segment, workflow_crate_dir_name};
 use validation::{validate_workflow_shape, validate_workflow_spec};
@@ -35,11 +44,30 @@ use writer::{workflow_source, write_text_atomic};
 pub(super) const WORKFLOW_DIR: &str = "workflows";
 pub(super) const LEGACY_LIGHTFLOW_DIR: &str = "lightflow";
 
-pub use executors::{ExecutorInfo, executor_registry};
+pub use error::{ApiError, ApiResult};
+pub use executors::{ExecutorCatalog, ExecutorInfo, executor_registry};
 #[cfg(test)]
 pub(crate) use history::write_history_fixture;
-pub use history::{ArtifactCatalog, RunCatalog, RunEvents, RunTrace};
-pub use nodes::{ModelCatalog, NodeCard, NodeCatalog};
+pub use history::{
+    ArtifactCatalog, ArtifactListOptions, RecordedRun, RemovedRun, RunArtifact, RunCatalog,
+    RunEvents, RunListOptions, RunStageRecord, RunTrace,
+};
+pub use loop_check::{
+    LocalLoopCheck, LocalLoopReport, LocalLoopStatus, LoopChangeStatus, LoopChangesReport,
+    ProjectWorkspaceCatalog, ProjectWorkspaceOptions, ProjectWorkspaceSummary,
+    WorkflowChangeSummary, WorkflowPublishCatalog, WorkflowPublishCheck, WorkflowPublishOptions,
+};
+pub use nodes::{
+    ModelCatalog, ModelListOptions, ModelLockFingerprint, ModelLockState, ModelLockStatus,
+    ModelStatusFilter, NodeCard, NodeCatalog, NodeModelBinding, NodeModelCard, PortDirection,
+};
+pub use patches::{
+    PatchCatalog, PatchSummary, PatchValidation, RegisteredPatch, RemovedPatch, SavedPatch,
+};
+pub use plan::{
+    WorkflowPlan, WorkflowPlanAtom, WorkflowPlanNode, WorkflowPlannedModel, WorkflowRuntimePlan,
+};
+pub use release::{CheckProfile, ReleaseCheck, ReleaseCheckOptions, ReleaseCheckReport};
 
 /// Backend service state independent of any web framework.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -72,6 +100,42 @@ impl ApiService {
         &self.repo_root
     }
 
+    /// Path to the project workspace configuration file.
+    #[must_use]
+    pub fn project_workspace_config_path(&self) -> PathBuf {
+        project_config::project_workspace_config_path(self.repo_root())
+    }
+
+    /// Compatibility defaults used when the project workspace config is absent or being repaired.
+    #[must_use]
+    pub fn default_project_config_values(&self) -> (Vec<String>, Vec<String>, Vec<String>) {
+        (
+            project_config::default_expected_project_workspace_names(),
+            project_config::default_optional_project_workspace_names(),
+            project_config::default_project_workflow_source_names(),
+        )
+    }
+
+    /// Command that initializes the configured project submodules.
+    pub fn project_submodule_update_command<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<String> {
+        project_config::project_submodule_update_command(names)
+    }
+
+    /// Command that prints the effective project workspace config template.
+    #[must_use]
+    pub fn project_config_template_command(&self) -> Vec<String> {
+        project_config::project_config_template_command()
+    }
+
+    /// Command that writes the project workspace config template.
+    #[must_use]
+    pub fn project_config_write_command(&self) -> Vec<String> {
+        project_config::project_config_write_command()
+    }
+
     /// List workflow specs.
     pub fn list_workflows(&self) -> ApiResult<WorkflowList> {
         let workflows = self
@@ -101,30 +165,88 @@ impl ApiService {
         })
     }
 
+    /// List runtime executors in the shared backend registry.
+    pub fn list_executors(&self) -> ExecutorCatalog {
+        ExecutorCatalog {
+            executors: executor_registry(),
+        }
+    }
+
     /// List model requirements declared by available nodes.
     pub fn list_models(&self) -> ApiResult<ModelCatalog> {
+        self.list_models_with_options(&ModelListOptions::default())
+    }
+
+    /// List model requirements declared by available nodes with optional filters.
+    pub fn list_models_with_options(&self, options: &ModelListOptions) -> ApiResult<ModelCatalog> {
         let workflows = self.workflow_specs()?;
-        Ok(nodes::model_catalog(&workflows))
+        if let Some(workflow_id) = options.workflow_id.as_deref()
+            && !workflows.contains_key(workflow_id)
+        {
+            return Err(ApiError::NotFound(format!("workflow {workflow_id}")));
+        }
+        Ok(nodes::model_catalog(&self.repo_root, &workflows, options))
     }
 
-    /// List recorded local runs.
-    pub fn list_runs(&self) -> ApiResult<RunCatalog> {
-        history::list_runs(&self.repo_root)
+    /// List project-local reusable workflow patches.
+    pub fn list_patches(&self) -> ApiResult<PatchCatalog> {
+        patches::list_patches(&self.repo_root)
     }
 
-    /// Read a recorded run trace by id, or `last`.
-    pub fn get_run(&self, selector: &str) -> ApiResult<RunTrace> {
-        history::get_run(&self.repo_root, selector)
+    /// Read one project-local reusable workflow patch.
+    pub fn get_patch(&self, name: &str) -> ApiResult<RegisteredPatch> {
+        patches::get_patch(&self.repo_root, name)
     }
 
-    /// Read only events for a recorded run.
-    pub fn get_run_events(&self, selector: &str) -> ApiResult<RunEvents> {
-        history::get_run_events(&self.repo_root, selector)
+    /// Save one project-local reusable workflow patch.
+    pub fn save_patch(
+        &self,
+        name: &str,
+        patch: &crate::workflow::WorkflowPatch,
+    ) -> ApiResult<SavedPatch> {
+        patches::save_patch(&self.repo_root, name, patch)
     }
 
-    /// List artifacts produced by recorded runs.
-    pub fn list_artifacts(&self) -> ApiResult<ArtifactCatalog> {
-        history::list_artifacts(&self.repo_root)
+    /// Remove one project-local reusable workflow patch.
+    pub fn remove_patch(&self, name: &str) -> ApiResult<RemovedPatch> {
+        patches::remove_patch(&self.repo_root, name)
+    }
+
+    /// Validate a serializable workflow patch payload.
+    pub fn validate_patch(&self, patch: crate::workflow::WorkflowPatch) -> PatchValidation {
+        match self.workflow_specs() {
+            Ok(workflows) => patches::validate_patch(patch, Some(&workflows)),
+            Err(error) => PatchValidation {
+                valid: false,
+                issues: vec![format!("workflow catalog could not be inspected: {error}")],
+                patch,
+            },
+        }
+    }
+
+    /// Validate a serializable workflow patch against one selected workflow.
+    pub fn validate_patch_for_workflow(
+        &self,
+        workflow_id: &str,
+        patch: crate::workflow::WorkflowPatch,
+    ) -> PatchValidation {
+        match self.workflow_specs() {
+            Ok(workflows) => match workflows.get(workflow_id) {
+                Some(workflow) => {
+                    patches::validate_patch_for_workflow(&patch, workflow, &workflows)
+                }
+                None => PatchValidation {
+                    valid: false,
+                    issues: vec![format!("workflow {workflow_id} not found")],
+                    patch,
+                },
+            },
+            Err(error) => PatchValidation {
+                valid: false,
+                issues: vec![format!("workflow catalog could not be inspected: {error}")],
+                patch,
+            },
+        }
     }
 
     /// Read one workflow spec.
@@ -144,6 +266,22 @@ impl ApiService {
         let path = self.workflow_path(&workflow.id, workflow.category.as_deref())?;
         write_text_atomic(&path, &workflow_source(&workflow))?;
         Ok(workflow)
+    }
+
+    fn workflow_path(&self, workflow_id: &str, category: Option<&str>) -> ApiResult<PathBuf> {
+        validate_id_segment(workflow_id, "workflow id")?;
+        let path = self.repo_root.join(WORKFLOW_DIR);
+        let Some(category) = category else {
+            return Err(ApiError::InvalidRequest(
+                "workflow category is required for local workflow files".to_owned(),
+            ));
+        };
+        validate_id_segment(category, "workflow category")?;
+        Ok(path
+            .join(category)
+            .join(workflow_crate_dir_name(workflow_id))
+            .join("src")
+            .join("lib.rs"))
     }
 
     /// Validate a workflow against current workflow specs.
@@ -166,6 +304,16 @@ impl ApiService {
         Ok(dependency_report(workflow_id, &workflows))
     }
 
+    /// Build the executor/model plan for a workflow without executing it.
+    pub fn plan_workflow(&self, workflow_id: &str) -> ApiResult<WorkflowPlan> {
+        let workflows = self.workflow_specs()?;
+        let workflow = workflows
+            .get(workflow_id)
+            .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))?;
+        validate_workflow_dependencies(workflow_id, &workflows)?;
+        plan::build_workflow_plan(workflow, &workflows)
+    }
+
     /// Execute a workflow using the current lightweight graph runner.
     pub fn execute_workflow(
         &self,
@@ -177,6 +325,7 @@ impl ApiService {
             .get(workflow_id)
             .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))?;
         validate_workflow_dependencies(workflow_id, &workflows)?;
+        validate_execution_options(workflow, &workflows, &options)?;
         execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, options)
     }
 
@@ -201,21 +350,49 @@ impl ApiService {
         }
         Ok(workflows)
     }
+}
 
-    fn workflow_path(&self, workflow_id: &str, category: Option<&str>) -> ApiResult<PathBuf> {
-        validate_id_segment(workflow_id, "workflow id")?;
-        let path = self.repo_root.join(WORKFLOW_DIR);
-        let Some(category) = category else {
-            return Err(ApiError::InvalidRequest(
-                "workflow category is required for local workflow files".to_owned(),
+fn validate_execution_options(
+    workflow: &WorkflowSpec,
+    workflows: &BTreeMap<String, WorkflowSpec>,
+    options: &WorkflowExecutionOptions,
+) -> ApiResult<()> {
+    let node_ids = workflow
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut issues = Vec::new();
+
+    for node_id in &options.disabled_nodes {
+        if !node_ids.contains(node_id.as_str()) {
+            issues.push(format!(
+                "disabled node {node_id} does not match any node in workflow {}",
+                workflow.id
             ));
-        };
-        validate_id_segment(category, "workflow category")?;
-        Ok(path
-            .join(category)
-            .join(workflow_crate_dir_name(workflow_id))
-            .join("src")
-            .join("lib.rs"))
+        }
+    }
+    for node_id in &options.enabled_nodes {
+        if !node_ids.contains(node_id.as_str()) {
+            issues.push(format!(
+                "enabled node {node_id} does not match any node in workflow {}",
+                workflow.id
+            ));
+        }
+    }
+    if let Some(patch) = &options.patch {
+        let validation = patches::validate_patch_for_workflow(patch, workflow, workflows);
+        issues.extend(validation.issues);
+    }
+
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidRequest(format!(
+            "invalid execution options for workflow {}: {}",
+            workflow.id,
+            issues.join("; ")
+        )))
     }
 }
 
@@ -262,67 +439,3 @@ fn dependency_issues(dependencies: &WorkflowDependencyReport) -> Vec<String> {
     }
     issues
 }
-
-/// API-level error.
-#[derive(Debug)]
-pub enum ApiError {
-    InvalidRequest(String),
-    NotFound(String),
-    Io(io::Error),
-}
-
-impl ApiError {
-    /// HTTP-style status code for adapters.
-    #[must_use]
-    pub const fn status_code(&self) -> u16 {
-        match self {
-            Self::InvalidRequest(_) => 400,
-            Self::NotFound(_) => 404,
-            Self::Io(_) => 500,
-        }
-    }
-
-    /// Stable machine-readable error code for clients.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
-        match self {
-            Self::InvalidRequest(_) => "invalid_request",
-            Self::NotFound(_) => "not_found",
-            Self::Io(_) => "internal_error",
-        }
-    }
-
-    /// Human-readable error message without the adapter prefix.
-    #[must_use]
-    pub fn message(&self) -> String {
-        match self {
-            Self::InvalidRequest(message) | Self::NotFound(message) => message.clone(),
-            Self::Io(error) => error.to_string(),
-        }
-    }
-}
-
-impl Display for ApiError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidRequest(message) => write!(f, "invalid request: {message}"),
-            Self::NotFound(message) => write!(f, "not found: {message}"),
-            Self::Io(error) => Display::fmt(error, f),
-        }
-    }
-}
-
-impl std::error::Error for ApiError {}
-
-impl From<io::Error> for ApiError {
-    fn from(error: io::Error) -> Self {
-        if error.kind() == io::ErrorKind::NotFound {
-            Self::NotFound(error.to_string())
-        } else {
-            Self::Io(error)
-        }
-    }
-}
-
-/// Service result.
-pub type ApiResult<T> = Result<T, ApiError>;

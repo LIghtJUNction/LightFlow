@@ -4,6 +4,9 @@ This document describes the long-term direction for LightFlow after the v0.2
 backend foundation. It is intentionally strategic: release checklists and
 short-term task lists should stay in separate documents.
 
+For the tactical product loop that turns this direction into near-term
+verification gates, see [Local Workflow Loop](local-workflow-loop.md).
+
 ## North Star
 
 LightFlow should become a code-first, agent-editable workflow runtime for

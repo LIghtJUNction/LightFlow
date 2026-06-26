@@ -1,0 +1,14 @@
+[workspaces]
+expected = [
+  "lightflow-flux",
+  "lightflow-std",
+  "lightflow-rig",
+]
+optional = [
+  "lightflow-auto-editing",
+]
+
+[workflows]
+default_sources = [
+  "lightflow-std",
+]

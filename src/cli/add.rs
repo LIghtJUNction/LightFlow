@@ -1,9 +1,9 @@
 use super::project::workspace_manifest;
-use super::{CliError, CliResult, required_flag_value};
+use super::{CliError, CliResult};
 use serde_json::json;
 use std::fs;
 use std::path::Path;
-use toml_edit::{DocumentMut, InlineTable, Item, value};
+use toml_edit::{DocumentMut, InlineTable, Item, Table, value};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct AddDependencyOptions {
@@ -32,67 +32,67 @@ pub(super) fn parse_add_dependency_options(args: &[String]) -> CliResult<AddDepe
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            "-h" | "--help" | "help" => return Err(CliError::Usage(add_usage())),
             "--global" | "-g" => {
                 global = true;
                 index += 1;
             }
             "--editable" => {
                 if editable {
-                    return Err(CliError::Usage("duplicate flag --editable".to_owned()));
+                    return Err(CliError::Usage(add_usage()));
                 }
                 editable = true;
                 index += 1;
             }
             "--version" => {
                 if version.is_some() {
-                    return Err(CliError::Usage("duplicate flag --version".to_owned()));
+                    return Err(CliError::Usage(add_usage()));
                 }
-                version = Some(required_flag_value(args, index, "--version")?.to_owned());
+                version = Some(required_add_flag_value(args, index)?.to_owned());
                 index += 2;
             }
             "--path" => {
                 ensure_single_dependency_source(&source)?;
                 source = Some(DependencySource::Path(
-                    required_flag_value(args, index, "--path")?.to_owned(),
+                    required_add_flag_value(args, index)?.to_owned(),
                 ));
                 index += 2;
             }
             "--git" => {
                 ensure_single_dependency_source(&source)?;
                 source = Some(DependencySource::Git(
-                    required_flag_value(args, index, "--git")?.to_owned(),
+                    required_add_flag_value(args, index)?.to_owned(),
                 ));
                 index += 2;
             }
             "--package" => {
                 if package.is_some() {
-                    return Err(CliError::Usage("duplicate flag --package".to_owned()));
+                    return Err(CliError::Usage(add_usage()));
                 }
-                package = Some(required_flag_value(args, index, "--package")?.to_owned());
+                package = Some(required_add_flag_value(args, index)?.to_owned());
                 index += 2;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(add_usage()));
             }
             value => {
                 if crate_name.is_some() {
-                    return Err(CliError::Usage(format!(
-                        "unexpected argument for add: {value}"
-                    )));
+                    return Err(CliError::Usage(add_usage()));
                 }
                 crate_name = Some(value.to_owned());
                 index += 1;
             }
         }
     }
-    let crate_name = crate_name.ok_or_else(|| CliError::Usage("missing crate name".to_owned()))?;
+    let Some(crate_name) = crate_name else {
+        return Err(CliError::Usage(add_usage()));
+    };
     let source = source.unwrap_or(DependencySource::Registry);
-    if source == DependencySource::Registry && version.is_none() {
-        return Err(CliError::Usage(
-            "registry add requires --version <version>".to_owned(),
-        ));
-    }
     if editable && !matches!(source, DependencySource::Path(_)) {
-        return Err(CliError::Usage(
-            "editable add requires --path <path>".to_owned(),
-        ));
+        return Err(CliError::Usage(add_usage()));
+    }
+    if source == DependencySource::Registry && version.is_none() {
+        return Err(CliError::Usage(add_usage()));
     }
     Ok(AddDependencyOptions {
         crate_name,
@@ -104,11 +104,33 @@ pub(super) fn parse_add_dependency_options(args: &[String]) -> CliResult<AddDepe
     })
 }
 
+fn required_add_flag_value(args: &[String], index: usize) -> CliResult<&str> {
+    let Some(value) = args.get(index + 1).map(String::as_str) else {
+        return Err(CliError::Usage(add_usage()));
+    };
+    if value.starts_with("--") {
+        return Err(CliError::Usage(add_usage()));
+    }
+    Ok(value)
+}
+
+fn add_usage() -> String {
+    [
+        "usage:",
+        "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
+        "",
+        "Adds one workflow crate dependency to the local or global LightFlow workspace manifest.",
+        "Registry dependencies require --version <version>.",
+        "Use --path for local workflow crates and --editable when the path should remain editable.",
+        "Use --git for remote workflow crates; --package selects a package when the repository name differs.",
+        "Use lfw import when a repository contains multiple workflow crates.",
+    ]
+    .join("\n")
+}
+
 fn ensure_single_dependency_source(source: &Option<DependencySource>) -> CliResult<()> {
     if source.is_some() {
-        Err(CliError::Usage(
-            "add accepts only one dependency source".to_owned(),
-        ))
+        Err(CliError::Usage(add_usage()))
     } else {
         Ok(())
     }
@@ -152,11 +174,21 @@ pub(super) fn add_dependency(
 }
 
 fn ensure_workspace_dependencies_table(document: &mut DocumentMut) {
-    if !document["workspace"].is_table() {
-        document["workspace"] = Item::Table(toml_edit::Table::new());
+    let root = document.as_table_mut();
+    let needs_workspace = root
+        .get("workspace")
+        .is_none_or(|workspace| !workspace.is_table());
+    if needs_workspace {
+        root["workspace"] = Item::Table(Table::new());
     }
-    if !document["workspace"]["dependencies"].is_table() {
-        document["workspace"]["dependencies"] = Item::Table(toml_edit::Table::new());
+    let workspace = root["workspace"]
+        .as_table_mut()
+        .expect("workspace table was just ensured");
+    let needs_dependencies = workspace
+        .get("dependencies")
+        .is_none_or(|dependencies| !dependencies.is_table());
+    if needs_dependencies {
+        workspace["dependencies"] = Item::Table(Table::new());
     }
 }
 

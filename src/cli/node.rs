@@ -1,5 +1,5 @@
-use super::{CliError, CliResult, ensure_no_extra_args, required_arg};
-use crate::api::{ApiService, executor_registry};
+use super::{CliError, CliResult, ensure_no_extra_args};
+use crate::api::{ApiService, agent_skill_issues, executor_registry};
 use crate::workflow::{PortSpec, WorkflowSpec};
 use serde::Serialize;
 use std::fs;
@@ -54,10 +54,21 @@ impl NodeConformanceCheck {
 }
 
 pub(super) fn manage_nodes(service: &ApiService, args: &[String]) -> CliResult<serde_json::Value> {
-    let action = required_arg(args, 0, "node action")?;
+    let action = match args.first().map(String::as_str) {
+        Some("-h" | "--help" | "help") | None => {
+            return Err(CliError::Usage(node_usage()));
+        }
+        Some(action) => action,
+    };
     match action {
         "test" => {
-            let workflow_id = required_arg(args, 1, "workflow id")?;
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(node_usage()));
+            }
+            let workflow_id = required_node_workflow_id(args, 1)?;
             ensure_no_extra_args(args, 2, "node test")?;
             let report = node_conformance(service, workflow_id)?;
             let valid = report.valid;
@@ -68,8 +79,32 @@ pub(super) fn manage_nodes(service: &ApiService, args: &[String]) -> CliResult<s
                 Err(CliError::Usage(value.to_string()))
             }
         }
-        _ => Err(CliError::Usage("node action must be test".to_owned())),
+        _ => Err(CliError::Usage(format!(
+            "node action must be test\n{}",
+            node_usage()
+        ))),
     }
+}
+
+fn required_node_workflow_id(args: &[String], index: usize) -> CliResult<&str> {
+    let Some(value) = args.get(index).map(String::as_str) else {
+        return Err(CliError::Usage(node_usage()));
+    };
+    if value.starts_with('-') || value == "|" {
+        return Err(CliError::Usage(node_usage()));
+    }
+    Ok(value)
+}
+
+fn node_usage() -> String {
+    [
+        "usage:",
+        "  lfw node test <workflow_id>",
+        "",
+        "Runs workflow node conformance checks for developer handoff.",
+        "Checks validation, generated help, port schema metadata, placeholder text, model readiness, runtime executor metadata, and colocated agent skill coverage.",
+    ]
+    .join("\n")
 }
 
 fn node_conformance(service: &ApiService, workflow_id: &str) -> CliResult<NodeConformanceReport> {
@@ -79,6 +114,7 @@ fn node_conformance(service: &ApiService, workflow_id: &str) -> CliResult<NodeCo
     push_validation_check(service, &workflow, &mut checks);
     push_help_check(service, workflow_id, &mut checks);
     push_schema_check(&workflow, &mut checks);
+    push_placeholder_check(&workflow, &mut checks);
     push_model_check(&workflow, &mut checks);
     push_runtime_check(&workflow, &mut checks);
     push_skill_check(service.repo_root(), &workflow, &mut checks);
@@ -179,6 +215,48 @@ fn push_port_schema_issues(port: &PortSpec, issues: &mut Vec<String>) {
             port.name
         ));
     }
+}
+
+fn push_placeholder_check(workflow: &WorkflowSpec, checks: &mut Vec<NodeConformanceCheck>) {
+    let mut issues = Vec::new();
+    if unresolved_placeholder(workflow.description.as_deref()) {
+        issues.push("workflow.description contains unresolved TODO".to_owned());
+    }
+    for port in &workflow.inputs {
+        if unresolved_placeholder(port.description.as_deref()) {
+            issues.push(format!(
+                "workflow.input.{}.description contains unresolved TODO",
+                port.name
+            ));
+        }
+    }
+    for port in &workflow.outputs {
+        if unresolved_placeholder(port.description.as_deref()) {
+            issues.push(format!(
+                "workflow.output.{}.description contains unresolved TODO",
+                port.name
+            ));
+        }
+    }
+
+    if issues.is_empty() {
+        checks.push(NodeConformanceCheck::passed(
+            "node.placeholders",
+            "workflow metadata has no generated TODO placeholders",
+        ));
+    } else {
+        checks.push(NodeConformanceCheck::warning(
+            "node.placeholders",
+            format!(
+                "replace generated placeholders before publishing: {}",
+                issues.join("; ")
+            ),
+        ));
+    }
+}
+
+fn unresolved_placeholder(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.to_ascii_lowercase().contains("todo"))
 }
 
 fn push_model_check(workflow: &WorkflowSpec, checks: &mut Vec<NodeConformanceCheck>) {
@@ -298,20 +376,24 @@ fn push_skill_check(root: &Path, workflow: &WorkflowSpec, checks: &mut Vec<NodeC
         }
         checked_any = true;
         match fs::read_to_string(&skill_path) {
-            Ok(source) if skill_has_frontmatter(&source) && source.contains(&workflow.id) => {
-                checks.push(NodeConformanceCheck::passed(
+            Ok(source) => {
+                let issues = agent_skill_issues(&source, &workflow.id);
+                if issues.is_empty() {
+                    checks.push(NodeConformanceCheck::passed(
+                        "node.skill",
+                        format!("agent skill found at {}", skill_path.display()),
+                    ));
+                    return;
+                }
+                checks.push(NodeConformanceCheck::failed(
                     "node.skill",
-                    format!("agent skill found at {}", skill_path.display()),
+                    format!(
+                        "agent skill {} is missing: {}",
+                        skill_path.display(),
+                        issues.join(", ")
+                    ),
                 ));
-                return;
             }
-            Ok(_) => checks.push(NodeConformanceCheck::failed(
-                "node.skill",
-                format!(
-                    "agent skill {} is missing frontmatter or workflow id",
-                    skill_path.display()
-                ),
-            )),
             Err(error) => checks.push(NodeConformanceCheck::failed(
                 "node.skill",
                 format!("failed to read {}: {error}", skill_path.display()),
@@ -351,23 +433,4 @@ fn workflow_crate_dir_name_for_category(workflow_id: &str, category: Option<&str
         .and_then(|category| without_namespace.strip_prefix(&format!("{category}.")))
         .unwrap_or(without_namespace);
     short.replace('.', "_")
-}
-
-fn skill_has_frontmatter(source: &str) -> bool {
-    let mut lines = source.lines();
-    if lines.next() != Some("---") {
-        return false;
-    }
-    let mut has_name = false;
-    let mut has_description = false;
-    let mut has_version = false;
-    for line in lines {
-        if line == "---" {
-            return has_name && has_description && has_version;
-        }
-        has_name |= line.starts_with("name:");
-        has_description |= line.starts_with("description:");
-        has_version |= line.starts_with("version:");
-    }
-    false
 }

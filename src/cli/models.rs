@@ -1,4 +1,5 @@
 use super::{CliError, CliResult};
+use crate::api::{ApiService, ModelListOptions, ModelStatusFilter};
 use std::process::{Command, Stdio};
 
 const HF_CACHE_LIST_SCRIPT: &str = r#"
@@ -86,22 +87,47 @@ print(json.dumps({
 }))
 "#;
 
-pub(super) fn manage_models(args: &[String]) -> CliResult<serde_json::Value> {
+pub(super) fn manage_models(service: &ApiService, args: &[String]) -> CliResult<serde_json::Value> {
     let Some(command) = args.first().map(String::as_str) else {
         return Err(CliError::Usage(models_usage()));
     };
     match command {
         "list" | "ls" => {
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(models_usage()));
+            }
             ensure_no_extra_args(args, 1, "models list")?;
             run_python_json(HF_CACHE_LIST_SCRIPT, &[], false)
         }
+        "requirements" | "reqs" | "catalog" => {
+            let filter = parse_requirements_filter(&args[1..])?;
+            let catalog = service.list_models_with_options(&filter)?;
+            serde_json::to_value(catalog).map_err(CliError::from)
+        }
         "download" | "dl" => download_model(&args[1..]),
         "rm" | "remove" | "clean" => {
-            let target = required_arg(args, 1, "cache entry")?;
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(models_usage()));
+            }
+            let Some(target) = args.get(1).map(String::as_str) else {
+                return Err(CliError::Usage(models_usage()));
+            };
             ensure_no_extra_args(args, 2, "models rm")?;
             run_python_json(HF_CACHE_RM_SCRIPT, &[target], false)
         }
         "prune" => {
+            if args
+                .get(1)
+                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+            {
+                return Err(CliError::Usage(models_usage()));
+            }
             ensure_no_extra_args(args, 1, "models prune")?;
             run_python_json(HF_CACHE_PRUNE_SCRIPT, &[], false)
         }
@@ -111,7 +137,15 @@ pub(super) fn manage_models(args: &[String]) -> CliResult<serde_json::Value> {
 }
 
 fn download_model(args: &[String]) -> CliResult<serde_json::Value> {
-    let target = required_arg(args, 0, "repo or Hugging Face URL")?;
+    if args
+        .first()
+        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
+    {
+        return Err(CliError::Usage(models_usage()));
+    }
+    let Some(target) = args.first().map(String::as_str) else {
+        return Err(CliError::Usage(models_usage()));
+    };
     let (repo, file, consumed) = if target.starts_with("https://huggingface.co/")
         || target.starts_with("http://huggingface.co/")
     {
@@ -185,29 +219,82 @@ fn parse_hf_url(url: &str) -> CliResult<(String, Option<String>)> {
     Ok((path.trim_end_matches('/').to_owned(), None))
 }
 
-fn required_arg<'a>(args: &'a [String], index: usize, label: &str) -> CliResult<&'a str> {
-    args.get(index)
-        .map(String::as_str)
-        .ok_or_else(|| CliError::Usage(format!("missing {label}")))
-}
-
-fn ensure_no_extra_args(args: &[String], max_len: usize, command: &str) -> CliResult<()> {
-    if let Some(extra) = args.get(max_len) {
-        return Err(CliError::Usage(format!(
-            "unexpected argument for {command}: {extra}"
-        )));
+fn ensure_no_extra_args(args: &[String], max_len: usize, _command: &str) -> CliResult<()> {
+    if args.get(max_len).is_some() {
+        return Err(CliError::Usage(models_usage()));
     }
     Ok(())
+}
+
+fn parse_requirements_filter(args: &[String]) -> CliResult<ModelListOptions> {
+    let mut workflow_id = None;
+    let mut status = ModelStatusFilter::All;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" | "help" => return Err(CliError::Usage(models_usage())),
+            "--workflow" | "-w" => {
+                index += 1;
+                let Some(value) = args.get(index).filter(|value| !value.starts_with('-')) else {
+                    return Err(CliError::Usage(models_usage()));
+                };
+                set_workflow_filter(&mut workflow_id, value)?;
+            }
+            "--status" => {
+                index += 1;
+                let Some(value) = args.get(index).filter(|value| !value.starts_with('-')) else {
+                    return Err(CliError::Usage(models_usage()));
+                };
+                status = parse_model_status(value)?;
+            }
+            "--blocked" => status = ModelStatusFilter::Blocked,
+            "--available" => status = ModelStatusFilter::Available,
+            "--all" => status = ModelStatusFilter::All,
+            arg if arg.starts_with('-') => {
+                return Err(CliError::Usage(models_usage()));
+            }
+            arg => set_workflow_filter(&mut workflow_id, arg)?,
+        }
+        index += 1;
+    }
+    Ok(ModelListOptions {
+        workflow_id,
+        status,
+    })
+}
+
+fn set_workflow_filter(workflow_id: &mut Option<String>, value: &str) -> CliResult<()> {
+    if workflow_id.is_some() {
+        return Err(CliError::Usage(format!(
+            "unexpected argument for models requirements: {value}"
+        )));
+    }
+    *workflow_id = Some(value.to_owned());
+    Ok(())
+}
+
+fn parse_model_status(value: &str) -> CliResult<ModelStatusFilter> {
+    ModelStatusFilter::parse(value).ok_or_else(|| {
+        CliError::Usage(format!(
+            "unsupported model status {value}; expected all, available, or blocked"
+        ))
+    })
 }
 
 fn models_usage() -> String {
     [
         "usage:",
         "  lfw models list",
+        "  lfw models requirements [workflow_id|--workflow <workflow_id>] [--status all|available|blocked]",
+        "  lfw models requirements [workflow_id] --blocked",
         "  lfw models download <repo> [file]",
         "  lfw models download <huggingface-file-url>",
         "  lfw models rm <repo|cache_id|path>",
         "  lfw models prune",
+        "",
+        "Inspects workflow model requirements and manages the local Hugging Face cache.",
+        "Use requirements before running model-backed workflows to find missing locks,",
+        "blocked requirements, and the sync/verify commands needed to make them runnable.",
     ]
     .join("\n")
 }

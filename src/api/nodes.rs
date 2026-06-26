@@ -5,6 +5,13 @@ use crate::workflow::{
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod model_locks;
+pub use model_locks::{
+    ModelCatalog, ModelListOptions, ModelLockFingerprint, ModelLockState, ModelLockStatus,
+    ModelStatusFilter, NodeModelBinding, NodeModelCard, PortDirection,
+};
+pub(super) use model_locks::{model_catalog, model_lock_fingerprints};
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct NodeCatalog {
     pub nodes: Vec<NodeCard>,
@@ -77,41 +84,17 @@ pub struct NodeRuntimeStatus {
 pub struct NodeExecutorStatus {
     pub id: String,
     pub kind: String,
+    pub status: String,
+    pub status_reason: String,
     pub available: bool,
+    pub data_policy: String,
+    pub plans_models: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ModelCatalog {
-    pub models: Vec<NodeModelCard>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct NodeModelCard {
-    pub workflow_id: String,
-    pub workflow_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    pub requirement: ModelRequirement,
-    pub bindings: Vec<NodeModelBinding>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
-pub struct NodeModelBinding {
-    pub direction: PortDirection,
-    pub port: String,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PortDirection {
-    Input,
-    Output,
 }
 
 pub(super) fn node_catalog(
@@ -174,22 +157,6 @@ pub(super) fn get_node_card(
     Ok(node_card(workflow, executors, validate(workflow)))
 }
 
-pub(super) fn model_catalog(workflows: &BTreeMap<String, WorkflowSpec>) -> ModelCatalog {
-    let mut models = Vec::new();
-    for workflow in workflows.values() {
-        for requirement in &workflow.models {
-            models.push(NodeModelCard {
-                workflow_id: workflow.id.clone(),
-                workflow_name: workflow.name.clone(),
-                category: workflow.category.clone(),
-                requirement: requirement.clone(),
-                bindings: model_bindings(workflow, &requirement.id),
-            });
-        }
-    }
-    ModelCatalog { models }
-}
-
 fn node_card(
     workflow: &WorkflowSpec,
     executors: &[ExecutorInfo],
@@ -235,7 +202,11 @@ fn runtime_status(runtime: &RuntimeRequirement, executors: &[ExecutorInfo]) -> N
         .map(|executor| NodeExecutorStatus {
             id: executor.id.to_owned(),
             kind: executor.kind.to_owned(),
+            status: executor.status.to_owned(),
+            status_reason: executor.status_reason.clone(),
             available: executor.available,
+            data_policy: executor.data_policy.to_owned(),
+            plans_models: executor.plans_models,
             features: executor
                 .features
                 .iter()
@@ -252,27 +223,6 @@ fn runtime_status(runtime: &RuntimeRequirement, executors: &[ExecutorInfo]) -> N
         available: matches.iter().any(|executor| executor.available),
         executors: matches,
     }
-}
-
-fn model_bindings(workflow: &WorkflowSpec, requirement_id: &str) -> Vec<NodeModelBinding> {
-    let mut bindings = Vec::new();
-    for port in &workflow.inputs {
-        if port.model_requirement.as_deref() == Some(requirement_id) {
-            bindings.push(NodeModelBinding {
-                direction: PortDirection::Input,
-                port: port.name.clone(),
-            });
-        }
-    }
-    for port in &workflow.outputs {
-        if port.model_requirement.as_deref() == Some(requirement_id) {
-            bindings.push(NodeModelBinding {
-                direction: PortDirection::Output,
-                port: port.name.clone(),
-            });
-        }
-    }
-    bindings
 }
 
 #[derive(Default)]

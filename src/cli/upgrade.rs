@@ -15,15 +15,39 @@ pub(super) fn parse_cargo_workspace_options(
     let mut global = false;
     for arg in args {
         match arg.as_str() {
+            "-h" | "--help" | "help" => {
+                return Err(CliError::Usage(cargo_workspace_usage(command)));
+            }
             "--global" | "-g" => global = true,
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(cargo_workspace_usage(command)));
+            }
             value => {
                 return Err(CliError::Usage(format!(
-                    "unexpected argument for {command}: {value}"
+                    "unexpected argument for {command}: {value}\n{}",
+                    cargo_workspace_usage(command)
                 )));
             }
         }
     }
     Ok(CargoWorkspaceOptions { global })
+}
+
+fn cargo_workspace_usage(command: &str) -> String {
+    let cargo_action = match command {
+        "upgrade" => "cargo update",
+        _ => "cargo fetch",
+    };
+    [
+        "usage:",
+        &format!("  lfw {command} [--global|-g]"),
+        "",
+        &format!("Runs `{cargo_action}` in a LightFlow workflow Cargo workspace."),
+        "Without --global, the current directory is used.",
+        "--global targets the default LightFlow home workflow workspace used for global workflow discovery.",
+        "Use update to fetch dependency indexes and package data; use upgrade to update Cargo.lock resolution.",
+    ]
+    .join("\n")
 }
 
 pub(super) fn update_index(root: &Path) -> CliResult<serde_json::Value> {

@@ -10,6 +10,105 @@ paths:
       responses:
         "200":
           description: Backend is reachable.
+  /openapi.yaml:
+    get:
+      summary: Read OpenAPI contract
+      description: Returns the LightFlow HTTP API contract used by editor and tool clients.
+      responses:
+        "200":
+          description: OpenAPI YAML document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /loop:
+    get:
+      summary: Check local workflow loop readiness
+      description: Reports whether the project is ready for the edit, validate, run, trace, replay, and publish loop.
+      responses:
+        "200":
+          description: Project readiness report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalLoopReport"
+  /loop/changes:
+    get:
+      summary: Check workflow source change safety
+      description: Reports changed workflow crate files and whether each changed workflow has a colocated agent skill update.
+      responses:
+        "200":
+          description: Workflow source change safety report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoopChangesReport"
+  /loop/projects:
+    get:
+      summary: Inspect project workspaces
+      description: Reports the `projects/` sibling workspace catalog used for multi-repo workflow iteration.
+      parameters:
+        - name: dirty
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, returns only workspaces with changed paths or uninspectable git status.
+        - name: project
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional workspace filter matching a project name, label, path, or lightflow-* short alias, such as `lightflow-std`, `projects/lightflow-std`, or `std`.
+      responses:
+        "200":
+          description: Linked project workspace catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectWorkspaceCatalog"
+  /release:
+    get:
+      summary: Check release readiness
+      description: Returns a non-mutating release gate plan with required artifacts, document sections, source-change review, and command gates.
+      parameters:
+        - name: workflow_id
+          in: query
+          required: false
+          description: Selected workflow for the replay-required release gate. Defaults to lightflow.text_plan.
+          schema:
+            type: string
+        - name: project
+          in: query
+          required: false
+          description: Narrow project workspace review and project commands to one workspace by name, label, path, or lightflow-* short alias, such as lightflow-std or std.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Release readiness report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseCheckReport"
+  /publish:
+    get:
+      summary: List workflow publish readiness
+      description: Returns non-mutating Cargo publish dry-run preflights for local workflow crates, optionally narrowed to one linked project workspace.
+      parameters:
+        - in: query
+          name: project
+          schema:
+            type: string
+          description: Narrow publish readiness to one linked project workspace by full name, label, path, or lightflow-* short alias.
+      responses:
+        "200":
+          description: Workflow publish readiness catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowPublishCatalog"
   /workflows:
     get:
       summary: List workflows
@@ -63,10 +162,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NodeCard"
+  /executors:
+    get:
+      summary: List runtime executors
+      description: Returns the shared Executor Registry with status labels, availability reasons, data policies, and model-planning flags.
+      responses:
+        "200":
+          description: Runtime executor catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutorCatalog"
   /models:
     get:
       summary: List node model requirements
       description: Returns model requirements declared by visible nodes, including port bindings.
+      parameters:
+        - name: workflow_id
+          in: query
+          required: false
+          description: Return only model requirements declared by this workflow id.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: Return all, available, or blocked model requirements.
+          schema:
+            type: string
+            enum: [all, available, blocked]
       responses:
         "200":
           description: Model requirement catalog.
@@ -78,6 +202,27 @@ paths:
     get:
       summary: List recorded runs
       description: Lists local `.lightflow/runs` history for editor run browsers.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of newest run summaries to return after filtering.
+          schema:
+            type: integer
+            minimum: 0
+        - name: workflow_id
+          in: query
+          required: false
+          description: Return only runs whose recorded stages include this workflow id.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: Return only runs with this summary status, such as completed, failed, or unknown.
+          schema:
+            type: string
+            enum: [completed, failed, unknown]
       responses:
         "200":
           description: Run catalog.
@@ -102,6 +247,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunTrace"
+    delete:
+      summary: Remove a recorded run
+      description: Deletes one local run directory. The `last` selector resolves before deletion.
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Run id or `last`.
+      responses:
+        "200":
+          description: Removed run status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemovedRun"
   /runs/{run_id}/events:
     get:
       summary: Read recorded run events
@@ -119,10 +281,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunEvents"
+  /runs/{run_id}/replay:
+    post:
+      summary: Replay a recorded run
+      description: Executes the stages stored in a run manifest and records a new immutable run.
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Run id or `last`.
+      responses:
+        "200":
+          description: Replayed workflow or pipeline execution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayedRunExecution"
   /artifacts:
     get:
       summary: List recorded run artifacts
-      description: Lists artifact handles found in recorded run executions.
+      description: Lists artifact handles found in recorded run executions, optionally filtered for focused inspection.
+      parameters:
+        - in: query
+          name: run_id
+          schema:
+            type: string
+          description: Return only artifacts from this run id, or `last`.
+        - in: query
+          name: workflow_id
+          schema:
+            type: string
+          description: Return only artifacts produced by this workflow id.
+        - in: query
+          name: kind
+          schema:
+            type: string
+          description: Return only artifacts with this kind, such as `image` or `mask`.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+          description: Maximum number of artifact rows to return after filtering.
       responses:
         "200":
           description: Artifact catalog.
@@ -130,6 +332,92 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ArtifactCatalog"
+  /patches:
+    get:
+      summary: List reusable workflow patches
+      description: Lists project-local reusable patches stored under `.lightflow/patches`.
+      responses:
+        "200":
+          description: Patch catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatchCatalog"
+  /patches/{name}:
+    get:
+      summary: Read a reusable workflow patch
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Registered patch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisteredPatch"
+    post:
+      summary: Save a reusable workflow patch
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowPatch"
+      responses:
+        "200":
+          description: Saved patch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedPatch"
+    delete:
+      summary: Remove a reusable workflow patch
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removed patch status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemovedPatch"
+  /patches/validate:
+    post:
+      summary: Validate a workflow patch
+      parameters:
+        - name: workflow_id
+          in: query
+          required: false
+          description: Validate the patch against one selected workflow's node and replacement/fallback port contracts.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowPatch"
+      responses:
+        "200":
+          description: Patch validation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatchValidation"
   /workflows/{workflow_id}:
     get:
       summary: Read a workflow
@@ -162,6 +450,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkflowDependencyReport"
+  /workflows/{workflow_id}/loop:
+    get:
+      summary: Check workflow loop readiness
+      description: Reports whether one workflow is ready for validation, planning, execution, trace, replay, and publish dry-run.
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: require_replay
+          in: query
+          required: false
+          description: Fail the selected workflow readiness report when no completed run can be replayed.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Workflow readiness report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalLoopReport"
+  /workflows/{workflow_id}/plan:
+    get:
+      summary: Plan a workflow
+      description: Returns the selected executor, atom, and model plan for a workflow without executing it.
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Workflow execution plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowPlan"
+  /workflows/{workflow_id}/publish:
+    get:
+      summary: Check workflow publish readiness
+      description: Returns a non-mutating Cargo publish dry-run preflight for one local workflow crate.
+      parameters:
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Workflow publish preflight report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowPublishCheck"
   /workflows/{workflow_id}/run:
     post:
       summary: Execute a workflow
@@ -183,7 +529,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WorkflowExecution"
+                $ref: "#/components/schemas/RecordedWorkflowExecution"
   /workflows/validate:
     post:
       summary: Validate a workflow
@@ -229,6 +575,15 @@ components:
         status:
           type: integer
           description: HTTP status code.
+        run_id:
+          type: string
+          description: Failed run id when a workflow execution error was recorded.
+        run_dir:
+          type: string
+          description: Failed run directory when a workflow execution error was recorded.
+        trace_path:
+          type: string
+          description: Path to the recorded failed execution JSON when available.
     PortSpec:
       type: object
       required: [name, type]
@@ -426,6 +781,46 @@ components:
           type: integer
         available_executors:
           type: integer
+    ExecutorCatalog:
+      type: object
+      required: [executors]
+      properties:
+        executors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutorInfo"
+    ExecutorInfo:
+      type: object
+      required: [id, kind, status, status_reason, capabilities, available, data_policy, plans_models]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        status:
+          type: string
+          enum: [builtin, preview, mock, external, native, reserved]
+        status_reason:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        available:
+          type: boolean
+        data_policy:
+          type: string
+          enum: [json_values, artifact_handles, device_resident_preferred]
+        plans_models:
+          type: boolean
+        features:
+          type: array
+          items:
+            type: string
+        env:
+          type: string
+        command:
+          type: string
     NodeCard:
       type: object
       required:
@@ -514,14 +909,27 @@ components:
             $ref: "#/components/schemas/NodeExecutorStatus"
     NodeExecutorStatus:
       type: object
-      required: [id, kind, available]
+      required: [id, kind, status, status_reason, available, data_policy, plans_models]
       properties:
         id:
           type: string
         kind:
           type: string
+        status:
+          type: string
+          enum: [builtin, preview, mock, external, native, reserved]
+          description: Executor maturity/status label for UI and planning clients.
+        status_reason:
+          type: string
+          description: Human-readable reason the executor is or is not available.
         available:
           type: boolean
+        data_policy:
+          type: string
+          enum: [json_values, artifact_handles, device_resident_preferred]
+        plans_models:
+          type: boolean
+          description: True when this executor plans model resources through lockfile-backed requirements.
         features:
           type: array
           items:
@@ -532,15 +940,29 @@ components:
           type: string
     ModelCatalog:
       type: object
-      required: [models]
+      required: [total, available_count, blocked_count, issues, models]
       properties:
+        total:
+          type: integer
+          description: Number of model requirements declared by discovered workflows.
+        available_count:
+          type: integer
+          description: Number of model requirements whose locked local paths are available.
+        blocked_count:
+          type: integer
+          description: Number of model requirements blocked by missing, invalid, or incomplete lockfile state.
+        issues:
+          type: array
+          description: Model lock readiness issues in `<workflow_id>::<requirement_id>` form.
+          items:
+            type: string
         models:
           type: array
           items:
             $ref: "#/components/schemas/NodeModelCard"
     NodeModelCard:
       type: object
-      required: [workflow_id, workflow_name, requirement, bindings]
+      required: [workflow_id, workflow_name, requirement, bindings, lock, sync_command, verify_command]
       properties:
         workflow_id:
           type: string
@@ -554,6 +976,52 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NodeModelBinding"
+        lock:
+          $ref: "#/components/schemas/ModelLockStatus"
+        sync_command:
+          type: array
+          description: Command that can create or update the selected model lock and download/cache a model for this workflow.
+          items:
+            type: string
+        verify_command:
+          type: array
+          description: Command that verifies the existing lockfile and cached model paths for this workflow.
+          items:
+            type: string
+    ModelLockStatus:
+      type: object
+      required: [status, key, missing_paths]
+      properties:
+        status:
+          type: string
+          enum: [missing_lock, missing_entry, missing_path, available, invalid_lock]
+        key:
+          type: string
+          description: Lockfile key in `<workflow_id>::<requirement_id>` form.
+        variant_id:
+          type: string
+        repo:
+          type: string
+        file:
+          type: string
+        format:
+          type: string
+        sha256:
+          type: string
+        hash_algorithm:
+          type: string
+        size_bytes:
+          type: integer
+        snapshot_revision:
+          type: string
+        local_paths:
+          type: array
+          items:
+            type: string
+        missing_paths:
+          type: array
+          items:
+            type: string
     NodeModelBinding:
       type: object
       required: [direction, port]
@@ -565,17 +1033,43 @@ components:
           type: string
     RunCatalog:
       type: object
-      required: [runs]
+      required: [total, completed_count, failed_count, unknown_count, unknown_run_ids, issues, runs]
       properties:
         last:
           type: string
+        total:
+          type: integer
+          minimum: 0
+          description: Number of valid run summaries returned in this catalog.
+        completed_count:
+          type: integer
+          minimum: 0
+          description: Number of returned runs with completed status.
+        failed_count:
+          type: integer
+          minimum: 0
+          description: Number of returned runs with failed status.
+        unknown_count:
+          type: integer
+          minimum: 0
+          description: Number of returned runs with a status other than completed or failed, usually legacy or partially damaged local manifests.
+        unknown_run_ids:
+          type: array
+          description: Run ids whose summaries have a status other than completed or failed. Clients can use these ids for inspection or explicit deletion.
+          items:
+            type: string
+        issues:
+          type: array
+          description: Non-fatal local history inspection issues. Bad run directories are skipped from `runs` so the catalog remains usable.
+          items:
+            type: string
         runs:
           type: array
           items:
             $ref: "#/components/schemas/RunSummary"
     RunSummary:
       type: object
-      required: [run_id, status, started_at_ms, completed_at_ms, stages, run_dir]
+      required: [run_id, status, started_at_ms, completed_at_ms, duration_ms, workflow_ids, stages, run_dir]
       properties:
         run_id:
           type: string
@@ -585,8 +1079,20 @@ components:
           type: integer
         completed_at_ms:
           type: integer
+        duration_ms:
+          type: integer
+          description: Completed timestamp minus started timestamp in milliseconds.
+        surface:
+          type: string
+          description: Adapter surface that created the run, such as cli, http, or mcp, when present in run events.
         workflow_id:
           type: string
+          description: First workflow id in the run, preserved for clients that display a single primary workflow.
+        workflow_ids:
+          type: array
+          description: Workflow ids for every recorded run stage, in execution order.
+          items:
+            type: string
         stages:
           type: integer
         run_dir:
@@ -600,14 +1106,59 @@ components:
         run_dir:
           type: string
         manifest:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/RunManifest"
         execution:
-          type: object
-          additionalProperties: true
+          oneOf:
+            - $ref: "#/components/schemas/WorkflowExecution"
+            - $ref: "#/components/schemas/ReplayedRunExecution"
+            - $ref: "#/components/schemas/FailedRunExecution"
         events:
           type: array
-          items: true
+          items:
+            $ref: "#/components/schemas/RunEvent"
+    RunManifest:
+      type: object
+      required: [kind, run_id, status, started_at_ms, completed_at_ms, stages]
+      additionalProperties: true
+      properties:
+        kind:
+          type: string
+          enum: [workflow_run]
+        run_id:
+          type: string
+        status:
+          type: string
+          enum: [completed, failed]
+        stage_input_resolution:
+          type: string
+          enum: [resolved, legacy]
+          description: Present on new manifests. `resolved` means pipeline stage inputs were recorded after upstream outputs and explicit overrides were merged; older manifests omit this field and replay with legacy propagation.
+        started_at_ms:
+          type: integer
+        completed_at_ms:
+          type: integer
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunStageRecord"
+    RunStageRecord:
+      type: object
+      required: [workflow_id, execution]
+      properties:
+        workflow_id:
+          type: string
+        execution:
+          $ref: "#/components/schemas/WorkflowExecutionOptions"
+    RemovedRun:
+      type: object
+      required: [removed, run_id, run_dir]
+      properties:
+        removed:
+          type: boolean
+        run_id:
+          type: string
+        run_dir:
+          type: string
     RunEvents:
       type: object
       required: [run_id, events]
@@ -616,7 +1167,53 @@ components:
           type: string
         events:
           type: array
-          items: true
+          items:
+            $ref: "#/components/schemas/RunEvent"
+    RunEvent:
+      type: object
+      required: [event, run_id]
+      properties:
+        event:
+          type: string
+          enum: [run_started, stage_completed, node_completed, node_skipped, run_finished, run_failed]
+        run_id:
+          type: string
+        at_ms:
+          type: integer
+        surface:
+          type: string
+        stage_index:
+          type: integer
+        node_index:
+          type: integer
+        workflow_id:
+          type: string
+        node_id:
+          type: string
+        node_workflow_id:
+          type: string
+        selected_workflow_id:
+          type: string
+        status:
+          type: string
+        duration_ms:
+          type: integer
+        attempts:
+          type: integer
+        inputs:
+          type: object
+          additionalProperties: true
+        outputs:
+          type: object
+          additionalProperties: true
+        runtime:
+          $ref: "#/components/schemas/ExecutionRuntime"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowArtifact"
+        error:
+          $ref: "#/components/schemas/ErrorResponse"
     ArtifactCatalog:
       type: object
       required: [artifacts]
@@ -631,6 +1228,12 @@ components:
       properties:
         run_id:
           type: string
+        stage_index:
+          type: integer
+          description: Stage index in the recorded run; pipeline stages use their recorded order.
+        node_index:
+          type: integer
+          description: Node index within the stage when the artifact came from a node.
         workflow_id:
           type: string
         node_id:
@@ -717,6 +1320,633 @@ components:
             type: array
             items:
               type: string
+    LocalLoopReport:
+      type: object
+      required: [valid, project_root, project_config_path, project_config_present, project_config_valid, project_config_template_command, project_config_write_command, project_submodule_update_command, issues, warning_messages, passed, warnings, failed, checks, next_commands]
+      properties:
+        valid:
+          type: boolean
+        project_root:
+          type: string
+        project_config_path:
+          type: string
+          description: Path to the project workspace configuration file used for expected workspaces and default workflow sources.
+        project_config_present:
+          type: boolean
+          description: True when projects/lightflow-projects.toml exists; false when built-in compatibility defaults are used.
+        project_config_valid:
+          type: boolean
+          description: True when the project workspace config can be parsed and applied.
+        project_config_error:
+          type: string
+          description: Project workspace config parse or validation error, when the config is invalid.
+        project_config_template_command:
+          type: array
+          description: Command that prints the effective project config template.
+          items:
+            type: string
+        project_config_write_command:
+          type: array
+          description: Command that writes the project config template when the config file is absent.
+          items:
+            type: string
+        project_submodule_update_command:
+          type: array
+          description: Command that initializes configured project submodules for the active project set.
+          items:
+            type: string
+        workflow_id:
+          type: string
+        replay_run_id:
+          type: string
+          description: Latest completed run id used as replay evidence for a selected workflow report.
+        issues:
+          type: array
+          description: Failed loop readiness check summaries.
+          items:
+            type: string
+        warning_messages:
+          type: array
+          description: Non-blocking loop readiness warning summaries.
+          items:
+            type: string
+        passed:
+          type: integer
+          minimum: 0
+        warnings:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalLoopCheck"
+        next_commands:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+    LocalLoopCheck:
+      type: object
+      required: [id, status, message]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [passed, warning, failed]
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+        path:
+          type: string
+        count:
+          type: integer
+    ProjectWorkspaceCatalog:
+      type: object
+      required:
+        - valid
+        - project_root
+        - projects_dir
+        - project_config_path
+        - project_config_present
+        - project_config_valid
+        - project_config_template_command
+        - project_config_write_command
+        - project_submodule_update_command
+        - expected_count
+        - optional_count
+        - present_count
+        - linked_count
+        - missing_count
+        - directory_count
+        - symlink_count
+        - submodule_count
+        - not_symlink_count
+        - broken_count
+        - workflow_crate_count
+        - dirty_filter
+        - known_workspace_names
+        - known_workspace_aliases
+        - known_project_workspaces
+        - known_project_aliases
+        - known_optional_workspace_names
+        - optional_workspace_names
+        - default_workflow_sources
+        - issues
+        - workspaces
+      properties:
+        valid:
+          type: boolean
+          description: True when every configured expected LightFlow sibling project is present as a working project workspace, such as a submodule directory or symlink.
+        project_root:
+          type: string
+        projects_dir:
+          type: string
+        project_config_path:
+          type: string
+          description: Path to the project workspace configuration file used for expected workspaces and default workflow sources.
+        project_config_present:
+          type: boolean
+          description: True when projects/lightflow-projects.toml exists; false when built-in compatibility defaults are used.
+        project_config_valid:
+          type: boolean
+          description: True when the project workspace config can be parsed and applied.
+        project_config_error:
+          type: string
+          description: Project workspace config parse or validation error, when the config is invalid.
+        project_config_template_command:
+          type: array
+          description: Command that prints the effective project config template.
+          items:
+            type: string
+        project_config_write_command:
+          type: array
+          description: Command that writes the project config template when the config file is absent.
+          items:
+            type: string
+        project_submodule_update_command:
+          type: array
+          description: Command that initializes configured project submodules for the active project set.
+          items:
+            type: string
+        project_filter:
+          type: string
+          description: Project filter supplied by the caller, if any.
+        project_filter_matched:
+          type: boolean
+          description: Present when a project filter was supplied; true when it matched at least one known workspace record.
+        matched_project_workspace:
+          type: string
+          description: Canonical project workspace name matched by the project filter, if any.
+        dirty_filter:
+          type: boolean
+          description: True when the response was filtered to project workspaces needing git review.
+        expected_count:
+          type: integer
+          minimum: 0
+        optional_count:
+          type: integer
+          minimum: 0
+          description: Number of project workspaces declared as optional in projects/lightflow-projects.toml.
+        present_count:
+          type: integer
+          minimum: 0
+        linked_count:
+          type: integer
+          minimum: 0
+        missing_count:
+          type: integer
+          minimum: 0
+        directory_count:
+          type: integer
+          minimum: 0
+          description: Number of present project workspaces represented as directories, including git submodule checkouts.
+        symlink_count:
+          type: integer
+          minimum: 0
+          description: Number of present project workspaces represented as filesystem symlinks.
+        submodule_count:
+          type: integer
+          minimum: 0
+          description: Number of present project workspaces tracked by the parent repository as git submodules.
+        not_symlink_count:
+          type: integer
+          minimum: 0
+          description: Deprecated compatibility alias for directory_count. Expected project workspaces may now be directories/submodules or symlinks.
+        broken_count:
+          type: integer
+          minimum: 0
+        workflow_crate_count:
+          type: integer
+          minimum: 0
+        known_workspace_names:
+          type: array
+          description: Workspace names known before optional catalog filtering.
+          items:
+            type: string
+        known_workspace_aliases:
+          type: object
+          description: Conventional lightflow-* short aliases mapped to canonical project workspace names.
+          additionalProperties:
+            type: string
+        known_project_workspaces:
+          type: array
+          description: Compatibility alias for known_workspace_names, using release/dev report naming.
+          items:
+            type: string
+        known_project_aliases:
+          type: object
+          description: Compatibility alias for known_workspace_aliases, using release/dev report naming.
+          additionalProperties:
+            type: string
+        known_optional_workspace_names:
+          type: array
+          description: Configured optional workspace names known before optional catalog filtering.
+          items:
+            type: string
+        optional_workspace_names:
+          type: array
+          description: Optional project workspace names present in the returned workspace rows after any filters.
+          items:
+            type: string
+        default_workflow_sources:
+          type: array
+          description: Project workspace names whose workflow crates are loaded by default from projects/lightflow-projects.toml; these are treated as required workspaces.
+          items:
+            type: string
+        issues:
+          type: array
+          items:
+            type: string
+        workspaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectWorkspaceSummary"
+    ProjectWorkspaceSummary:
+      type: object
+      required: [name, label, aliases, expected, optional, path, exists, is_symlink, broken, workflow_crate_count, issues]
+      properties:
+        name:
+          type: string
+        label:
+          type: string
+        aliases:
+          type: array
+          description: Conventional short aliases that can be used to select this workspace.
+          items:
+            type: string
+        expected:
+          type: boolean
+          description: True when this workspace is required by [workspaces].expected or [workflows].default_sources.
+        optional:
+          type: boolean
+          description: True when this workspace is declared in [workspaces].optional and is not also required.
+        path:
+          type: string
+        target:
+          type: string
+        resolved_path:
+          type: string
+        exists:
+          type: boolean
+        is_symlink:
+          type: boolean
+        broken:
+          type: boolean
+        workflow_crate_count:
+          type: integer
+          minimum: 0
+        git_dirty:
+          type: boolean
+          description: Present for existing project workspaces when git status can be inspected.
+        git_changed_count:
+          type: integer
+          minimum: 0
+          description: Present for existing project workspaces when git status can be inspected.
+        git_changed_paths:
+          type: array
+          description: Changed paths from git status for dirty project workspaces, relative to the workspace root.
+          items:
+            type: string
+        git_branch:
+          type: string
+          description: Current git branch name for inspected project workspaces.
+        git_upstream:
+          type: string
+          description: Current upstream branch for inspected project workspaces, such as origin/main.
+        git_remote_url:
+          type: string
+          description: Origin remote URL for inspected project workspaces, when configured.
+        git_head:
+          type: string
+          description: Short HEAD commit for inspected project workspaces.
+        parent_gitlink_head:
+          type: string
+          description: Short commit recorded for this workspace in the parent repository gitlink, when the workspace is tracked as a submodule.
+        parent_gitlink_changed:
+          type: boolean
+          description: True when the parent repository gitlink commit differs from the inspected workspace HEAD.
+        git_status_command:
+          type: array
+          description: Command that inspects this workspace's short git status from the parent repository.
+          items:
+            type: string
+        git_stage_command:
+          type: array
+          description: Command that stages changed paths inside this child workspace.
+          items:
+            type: string
+        git_commit_command:
+          type: array
+          description: Command template that commits staged changes inside this child workspace.
+          items:
+            type: string
+        git_push_command:
+          type: array
+          description: Command that pushes the current branch of this child workspace.
+          items:
+            type: string
+        parent_gitlink_stage_command:
+          type: array
+          description: Command that stages this workspace's parent gitlink update.
+          items:
+            type: string
+        git_status_error:
+          type: string
+          description: Present when git status could not be inspected for the workspace.
+        issues:
+          type: array
+          items:
+            type: string
+    LoopChangesReport:
+      type: object
+      required: [valid, project_root, issues, blockers, warning_messages, passed, warnings, failed, changed_workflows]
+      properties:
+        valid:
+          type: boolean
+        project_root:
+          type: string
+        issues:
+          description: Inspection failures, such as git status errors, that may prevent source-change safety from being proven.
+          type: array
+          items:
+            type: string
+        blockers:
+          description: Review blockers derived from changed workflows, such as workflow source edits without colocated agent skill updates.
+          type: array
+          items:
+            type: string
+        warning_messages:
+          description: Non-blocking review warnings derived from changed workflows, such as skill-only or saved-patch-only edits.
+          type: array
+          items:
+            type: string
+        passed:
+          type: integer
+          minimum: 0
+        warnings:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        changed_workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowChangeSummary"
+    WorkflowChangeSummary:
+      type: object
+      required:
+        - workflow_key
+        - status
+        - message
+        - workflow_changed
+        - skill_changed
+        - patch_changed
+        - workflow_paths
+        - skill_paths
+        - patch_paths
+      properties:
+        workflow_key:
+          type: string
+        status:
+          type: string
+          enum: [passed, warning, failed]
+        message:
+          type: string
+        workflow_changed:
+          type: boolean
+        skill_changed:
+          type: boolean
+        patch_changed:
+          type: boolean
+        workflow_paths:
+          type: array
+          items:
+            type: string
+        skill_paths:
+          type: array
+          items:
+            type: string
+        patch_paths:
+          type: array
+          items:
+            type: string
+    ReleaseCheckReport:
+      type: object
+      required: [profile, dry_run, valid, project_root, workflow_id, project_config_path, project_config_present, project_config_valid, project_config_template_command, project_config_write_command, project_submodule_update_command, default_workflow_sources, known_optional_workspace_names, known_project_workspaces, known_project_aliases, issues, warnings, passed, warning_count, failed, planned, skipped, checks]
+      properties:
+        profile:
+          type: string
+          enum: [development, release]
+          description: Gate profile used to select development or release-specific checks.
+        dry_run:
+          type: boolean
+          description: True when command gates were planned but not executed.
+        valid:
+          type: boolean
+        project_root:
+          type: string
+        workflow_id:
+          type: string
+          description: Selected workflow used by the replay-required release gate.
+        project_config_path:
+          type: string
+          description: Path to the project workspace configuration file used for expected workspaces and default workflow sources.
+        project_config_present:
+          type: boolean
+          description: True when projects/lightflow-projects.toml exists; false when built-in compatibility defaults are used.
+        project_config_valid:
+          type: boolean
+          description: True when the project workspace config can be parsed and applied.
+        project_config_error:
+          type: string
+          description: Project workspace config parse or validation error, when the config is invalid.
+        project_config_template_command:
+          type: array
+          description: Command that prints the effective project config template.
+          items:
+            type: string
+        project_config_write_command:
+          type: array
+          description: Command that writes the project config template when the config file is absent.
+          items:
+            type: string
+        project_submodule_update_command:
+          type: array
+          description: Command that initializes configured project submodules for the active project set.
+          items:
+            type: string
+        default_workflow_sources:
+          type: array
+          description: Project workspace names whose workflow crates are discovered by default.
+          items:
+            type: string
+        known_optional_workspace_names:
+          type: array
+          description: Configured optional project workspace names known before release/dev project filtering.
+          items:
+            type: string
+        project:
+          type: string
+          description: Project workspace filter used by project workspace review and planned project catalog commands.
+        project_filter_matched:
+          type: boolean
+          description: Present when a project filter was supplied; true when it matched at least one known project workspace record.
+        matched_project_workspace:
+          type: string
+          description: Canonical project workspace name matched by the project filter, if any.
+        known_project_workspaces:
+          type: array
+          description: Known project workspace names available for release/dev project filters.
+          items:
+            type: string
+        known_project_aliases:
+          type: object
+          description: Conventional lightflow-* short aliases mapped to canonical project workspace names for release/dev project filters.
+          additionalProperties:
+            type: string
+        issues:
+          type: array
+          description: Failed release gate summaries. Planned or skipped gates remain in checks but are not blockers by themselves.
+          items:
+            type: string
+        warnings:
+          type: array
+          description: Non-blocking release gate summaries, such as source-change review warnings.
+          items:
+            type: string
+        passed:
+          type: integer
+          description: Number of release gates with passed status.
+        warning_count:
+          type: integer
+          description: Number of release gates with warning status.
+        failed:
+          type: integer
+          description: Number of release gates with failed status.
+        planned:
+          type: integer
+          description: Number of release command gates that are planned but not executed in dry-run mode.
+        skipped:
+          type: integer
+          description: Number of release command gates skipped after an earlier failure in apply mode.
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseCheck"
+    ReleaseCheck:
+      type: object
+      required: [id, kind, status, message]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [command, artifact, document, review]
+        status:
+          type: string
+          enum: [planned, passed, warning, failed, skipped]
+        message:
+          type: string
+        details:
+          type: array
+          description: Structured gate detail rows, such as underlying loop checks, source-change blockers, or publish issues.
+          items:
+            type: string
+        count:
+          type: integer
+          minimum: 0
+          description: Optional number of items represented by this gate, such as changed workflows, linked workspaces, workflow crates, or one planned command.
+        command:
+          type: array
+          items:
+            type: string
+        path:
+          type: string
+        exit_code:
+          type: integer
+        stdout_tail:
+          type: string
+        stderr_tail:
+          type: string
+    WorkflowPublishCheck:
+      type: object
+      required: [workflow_id, package, version, workspace, manifest, publishable, issues, command, internal_dependencies]
+      properties:
+        workflow_id:
+          type: string
+        package:
+          type: string
+        version:
+          type: string
+        workspace:
+          type: string
+          description: Workspace label that contributed the workflow crate, such as `root` or `projects/lightflow-flux`.
+        manifest:
+          type: string
+        publishable:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: string
+        command:
+          type: array
+          items:
+            type: string
+        internal_dependencies:
+          type: array
+          items:
+            type: string
+    WorkflowPublishCatalog:
+      type: object
+      required: [publishable, project_root, total, publishable_count, blocked_count, commands, checks, issues]
+      properties:
+        publishable:
+          type: boolean
+        project_root:
+          type: string
+        project:
+          type: string
+          description: Original project filter supplied by the client, when the catalog is scoped to one linked project workspace.
+        project_filter_matched:
+          type: boolean
+          description: Whether the project filter matched a known linked project workspace.
+        matched_project_workspace:
+          type: string
+          description: Canonical linked project workspace name matched by the project filter.
+        total:
+          type: integer
+          description: Number of local workflow crates included in the publish readiness catalog.
+        publishable_count:
+          type: integer
+          description: Number of workflow crates with no static publish blockers.
+        blocked_count:
+          type: integer
+          description: Number of workflow crates with static publish blockers.
+        commands:
+          type: array
+          description: Dependency-ordered dry-run publish commands for the workflow crates in this catalog.
+          items:
+            type: array
+            items:
+              type: string
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowPublishCheck"
+        issues:
+          type: array
+          items:
+            type: string
     ResolvedWorkflowDependency:
       type: object
       required: [workflow_id, version]
@@ -724,6 +1954,121 @@ components:
         workflow_id:
           type: string
         version:
+          type: string
+    WorkflowPlan:
+      type: object
+      required: [workflow_id, version, kind, nodes]
+      properties:
+        workflow_id:
+          type: string
+        version:
+          type: string
+        kind:
+          type: string
+          enum: [leaf, composite]
+        runtime:
+          $ref: "#/components/schemas/WorkflowRuntimePlan"
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowPlanNode"
+    WorkflowPlanNode:
+      type: object
+      required: [node_id, kind, workflow_id, candidate_workflow_ids, disabled]
+      properties:
+        node_id:
+          type: string
+        kind:
+          type: string
+          enum: [workflow, if]
+        workflow_id:
+          type: string
+          description: Authored workflow reference on the graph node.
+        candidate_workflow_ids:
+          type: array
+          items:
+            type: string
+          description: Workflows this node may execute before runtime input or patch selection.
+        selected_workflow_id:
+          type: string
+          description: Deterministic workflow selected without runtime inputs.
+        disabled:
+          type: boolean
+        child_kind:
+          type: string
+          enum: [leaf, composite]
+        runtime:
+          $ref: "#/components/schemas/WorkflowRuntimePlan"
+    WorkflowRuntimePlan:
+      type: object
+      required:
+        - plan_node_id
+        - executor_id
+        - executor_kind
+        - executor_status
+        - executor_status_reason
+        - executor_available
+        - capabilities
+        - data_policy
+        - plans_models
+        - recipe
+        - atoms
+        - models
+        - declared
+      properties:
+        plan_node_id:
+          type: string
+        executor_id:
+          type: string
+        executor_kind:
+          type: string
+        executor_status:
+          type: string
+          enum: [builtin, preview, mock, external, native, reserved]
+        executor_status_reason:
+          type: string
+        executor_available:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+        data_policy:
+          type: string
+          enum: [json_values, artifact_handles, device_resident_preferred]
+        plans_models:
+          type: boolean
+        recipe:
+          type: string
+        atoms:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowPlanAtom"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowPlannedModel"
+        declared:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeRequirement"
+    WorkflowPlanAtom:
+      type: object
+      required: [id, capability]
+      properties:
+        id:
+          type: string
+        capability:
+          type: string
+    WorkflowPlannedModel:
+      type: object
+      required: [requirement_id, capability]
+      properties:
+        requirement_id:
+          type: string
+        capability:
+          type: string
+        preferred_format:
           type: string
     ModelRequirement:
       type: object
@@ -812,6 +2157,68 @@ components:
           type: integer
         timeout_ms:
           type: integer
+    PatchCatalog:
+      type: object
+      required: [patches, root]
+      properties:
+        patches:
+          type: array
+          items:
+            $ref: "#/components/schemas/PatchSummary"
+        root:
+          type: string
+    PatchSummary:
+      type: object
+      required: [name, path]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+    RegisteredPatch:
+      type: object
+      required: [name, path, patch]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        patch:
+          $ref: "#/components/schemas/WorkflowPatch"
+    SavedPatch:
+      type: object
+      required: [saved, name, path, patch]
+      properties:
+        saved:
+          type: boolean
+        name:
+          type: string
+        path:
+          type: string
+        patch:
+          $ref: "#/components/schemas/WorkflowPatch"
+    RemovedPatch:
+      type: object
+      required: [removed, name, path]
+      properties:
+        removed:
+          type: boolean
+        name:
+          type: string
+        path:
+          type: string
+    PatchValidation:
+      type: object
+      required: [valid, issues, patch]
+      properties:
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: string
+        patch:
+          $ref: "#/components/schemas/WorkflowPatch"
     WorkflowExecution:
       type: object
       required: [workflow_id, version, inputs, outputs, nodes]
@@ -826,6 +2233,8 @@ components:
         outputs:
           type: object
           additionalProperties: true
+        runtime:
+          $ref: "#/components/schemas/ExecutionRuntime"
         artifacts:
           type: array
           items:
@@ -834,6 +2243,215 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NodeExecution"
+        model_locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelLockFingerprint"
+    RecordedWorkflowExecution:
+      type: object
+      required:
+        - workflow_id
+        - version
+        - inputs
+        - outputs
+        - nodes
+        - model_locks
+        - run_id
+        - run_dir
+        - trace_path
+      properties:
+        workflow_id:
+          type: string
+        version:
+          type: string
+        inputs:
+          type: object
+          additionalProperties: true
+        outputs:
+          type: object
+          additionalProperties: true
+        runtime:
+          $ref: "#/components/schemas/ExecutionRuntime"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowArtifact"
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeExecution"
+        model_locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelLockFingerprint"
+        run_id:
+          type: string
+          description: Project-local recorded run id.
+        run_dir:
+          type: string
+          description: Project-local recorded run directory.
+        trace_path:
+          type: string
+          description: Path to the recorded execution JSON.
+    ReplayedRunExecution:
+      type: object
+      required:
+        - run_id
+        - run_dir
+        - trace_path
+        - replayed_from
+        - replay
+        - model_locks
+      properties:
+        workflow_id:
+          type: string
+        version:
+          type: string
+        pipeline:
+          type: boolean
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowExecution"
+        inputs:
+          type: object
+          additionalProperties: true
+        outputs:
+          type: object
+          additionalProperties: true
+        runtime:
+          $ref: "#/components/schemas/ExecutionRuntime"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowArtifact"
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeExecution"
+        model_locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelLockFingerprint"
+        run_id:
+          type: string
+          description: New recorded run id created by replay.
+        run_dir:
+          type: string
+          description: New project-local recorded run directory.
+        trace_path:
+          type: string
+          description: Path to the new recorded execution JSON.
+        replayed_from:
+          type: string
+          description: Original run selector replayed by this request.
+        replay:
+          $ref: "#/components/schemas/ReplayReport"
+    FailedRunExecution:
+      type: object
+      description: Execution payload recorded when a run fails before producing a normal execution result.
+      properties:
+        status:
+          type: string
+          enum: [failed]
+        error:
+          type: object
+          additionalProperties: true
+          description: Failure message reported by the run surface.
+        pipeline:
+          type: boolean
+          description: True when the failed run was a pipeline.
+        stages:
+          type: array
+          description: Requested run stages, including effective inputs resolved before execution.
+          items:
+            $ref: "#/components/schemas/RunStageRecord"
+        partial_execution:
+          $ref: "#/components/schemas/PipelineExecution"
+    PipelineExecution:
+      type: object
+      description: Completed portion of a pipeline execution.
+      required: [pipeline, stages, outputs, artifacts]
+      properties:
+        pipeline:
+          type: boolean
+          enum: [true]
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowExecution"
+        outputs:
+          type: object
+          additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowArtifact"
+        model_locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelLockFingerprint"
+    ReplayReport:
+      type: object
+      required:
+        - replayed_from
+        - runtime_changed
+        - model_lock_changed
+        - original_runtime
+        - replayed_runtime
+        - original_model_locks
+        - replayed_model_locks
+      properties:
+        replayed_from:
+          type: string
+        runtime_changed:
+          type: boolean
+          description: True when selected runtime fingerprints differ between the original and replayed execution.
+        model_lock_changed:
+          type: boolean
+          description: True when model lock fingerprints differ between the original and replayed execution.
+        original_runtime:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReplayRuntimeFingerprint"
+        replayed_runtime:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReplayRuntimeFingerprint"
+        original_model_locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelLockFingerprint"
+        replayed_model_locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelLockFingerprint"
+    ReplayRuntimeFingerprint:
+      type: object
+      required: [workflow_id, runtime]
+      properties:
+        stage_index:
+          type: integer
+        workflow_id:
+          type: string
+        node_id:
+          type: string
+        runtime:
+          $ref: "#/components/schemas/ExecutionRuntime"
+    ModelLockFingerprint:
+      type: object
+      required: [workflow_id, requirement_id, lock]
+      properties:
+        stage_index:
+          type: integer
+        workflow_id:
+          type: string
+        node_id:
+          type: string
+        requirement_id:
+          type: string
+        lock:
+          $ref: "#/components/schemas/ModelLockStatus"
     WorkflowArtifact:
       type: object
       required: [id, kind, path, mime_type]
@@ -859,6 +2477,8 @@ components:
           type: string
         selected_workflow_id:
           type: string
+        runtime:
+          $ref: "#/components/schemas/ExecutionRuntime"
         status:
           type: string
           enum: [completed, skipped]
@@ -876,3 +2496,24 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkflowArtifact"
+    ExecutionRuntime:
+      type: object
+      required: [executor_id, executor_kind, capabilities, data_policy]
+      properties:
+        executor_id:
+          type: string
+          description: Executor selected by the backend runtime registry.
+        executor_kind:
+          type: string
+          description: Executor maturity/status label such as builtin, preview, mock, external, native, or reserved.
+        capabilities:
+          type: array
+          items:
+            type: string
+        data_policy:
+          type: string
+          enum: [json_values, artifact_handles, device_resident_preferred]
+        declared:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeRequirement"
