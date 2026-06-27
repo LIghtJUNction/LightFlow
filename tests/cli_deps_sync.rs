@@ -20,7 +20,7 @@ fn cargo_path_dependency_installs_workflow_for_dependency_resolution()
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -309,7 +309,7 @@ fn sync_applies_declared_workflow_module_dependencies() -> Result<(), Box<dyn st
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -382,7 +382,7 @@ fn sync_apply_writes_lfw_lock_with_model_hash() -> Result<(), Box<dyn std::error
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -547,7 +547,7 @@ fn sync_installs_agent_skills_once_and_locks_choice() -> Result<(), Box<dyn std:
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -570,7 +570,8 @@ pub fn define() -> WorkflowSpec {
 }
 "#,
     )?;
-    let skill_dir = project.join("workflows/tests/skillful/.agent/skills/lightflow-skillful");
+    let skill_dir =
+        project.join(".lightflow/workflows/tests/skillful/.agent/skills/lightflow-skillful");
     fs::create_dir_all(&skill_dir)?;
     fs::write(
         skill_dir.join("SKILL.md"),
@@ -651,7 +652,7 @@ fn sync_apply_reports_hf_repo_url_when_approval_is_required()
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}

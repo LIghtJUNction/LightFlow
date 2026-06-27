@@ -411,18 +411,21 @@ fn push_skill_check(root: &Path, workflow: &WorkflowSpec, checks: &mut Vec<NodeC
 
 fn workflow_skill_dir(root: &Path, workflow: &WorkflowSpec) -> Option<PathBuf> {
     let category = workflow.category.as_deref()?;
-    let crate_dir =
-        root.join("workflows")
+    [
+        root.join(".lightflow").join("workflows"),
+        root.join("workflows"),
+    ]
+    .into_iter()
+    .map(|collection| {
+        collection
             .join(category)
             .join(workflow_crate_dir_name_for_category(
                 &workflow.id,
                 Some(category),
-            ));
-    if crate_dir.exists() {
-        Some(crate_dir.join(".agent").join("skills"))
-    } else {
-        None
-    }
+            ))
+    })
+    .find(|crate_dir| crate_dir.exists())
+    .map(|crate_dir| crate_dir.join(".agent").join("skills"))
 }
 
 fn workflow_crate_dir_name_for_category(workflow_id: &str, category: Option<&str>) -> String {

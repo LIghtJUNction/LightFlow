@@ -179,12 +179,12 @@ pub fn assert_mcp_error(response: &Value, code: i64, message: &str) {
 }
 
 pub fn write_project_specs(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    fs::create_dir_all(root.join("workflows"))?;
+    fs::create_dir_all(root.join(".lightflow/workflows"))?;
     fs::write(
         root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
 lightflow = { path = "." }
@@ -311,7 +311,7 @@ pub fn write_workflow_crate(
     source: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let crate_dir = root
-        .join("workflows")
+        .join(".lightflow/workflows")
         .join("tests")
         .join(workflow_dir_name(workflow_id));
     fs::create_dir_all(crate_dir.join("src"))?;

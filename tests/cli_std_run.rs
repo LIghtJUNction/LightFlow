@@ -101,7 +101,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            "workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/examples/example/Cargo.toml",
             "--dry-run"
         ])
     );
@@ -193,7 +193,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            "workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/examples/example/Cargo.toml",
             "--dry-run"
         ])
     );
@@ -1509,7 +1509,7 @@ fn complete_generated_workflow_metadata(
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = root
-        .join("workflows")
+        .join(".lightflow/workflows")
         .join(category)
         .join(name)
         .join("src/lib.rs");

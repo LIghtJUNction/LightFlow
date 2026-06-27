@@ -160,7 +160,10 @@ struct WorkflowCrate {
 }
 
 fn discover_workflow_crates(root: &Path) -> CliResult<Vec<WorkflowCrate>> {
-    let collection = if root.join("workflows").is_dir() {
+    let project_workflows = root.join(".lightflow").join("workflows");
+    let collection = if project_workflows.is_dir() {
+        project_workflows
+    } else if root.join("workflows").is_dir() {
         root.join("workflows")
     } else {
         root.to_path_buf()

@@ -14,7 +14,7 @@ pub(super) fn push_agent_skill_check(
     if crates.is_empty() {
         checks.push(LocalLoopCheck::warning(
             "loop.workflow.agent_skills",
-            "no local workflow crates found under workflows/*/* or projects/*/workflows/*/*",
+            "no local workflow crates found under .lightflow/workflows/*/*, workflows/*/*, or projects/*/workflows/*/*",
         ));
         return Ok(());
     }

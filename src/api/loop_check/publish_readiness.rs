@@ -71,18 +71,25 @@ pub(super) fn categorized_workflow_manifest_path(
     root: &Path,
     workflow_id: &str,
 ) -> ApiResult<PathBuf> {
+    let project_workflows = root.join(".lightflow").join("workflows");
     let workflows = root.join("workflows");
     let legacy_workflows = root.join("lightflow").join("workflows");
-    let entries = match fs::read_dir(&workflows).or_else(|error| {
+    let entries = match fs::read_dir(&project_workflows).or_else(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            fs::read_dir(&legacy_workflows)
+            fs::read_dir(&workflows).or_else(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    fs::read_dir(&legacy_workflows)
+                } else {
+                    Err(error)
+                }
+            })
         } else {
             Err(error)
         }
     }) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(root.join("workflows").join(workflow_id).join("Cargo.toml"));
+            return Ok(project_workflows.join(workflow_id).join("Cargo.toml"));
         }
         Err(error) => return Err(ApiError::Io(error)),
     };
@@ -108,7 +115,7 @@ pub(super) fn categorized_workflow_manifest_path(
             }
         }
     }
-    Ok(root.join("workflows").join(workflow_id).join("Cargo.toml"))
+    Ok(project_workflows.join(workflow_id).join("Cargo.toml"))
 }
 
 fn workflow_category_short_name(workflow_id: &str, category: &str) -> Option<String> {

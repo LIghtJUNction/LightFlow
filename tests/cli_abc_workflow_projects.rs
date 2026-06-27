@@ -33,9 +33,15 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
         serde_json::json!(["lightflow.b", "lightflow.c"])
     );
 
-    let b_path = project_b.join("workflows/abc/b").display().to_string();
-    let c_path = project_c.join("workflows/abc/c").display().to_string();
-    let c_relative_path = "../lightflow-c/workflows/abc/c";
+    let b_path = project_b
+        .join(".lightflow/workflows/abc/b")
+        .display()
+        .to_string();
+    let c_path = project_c
+        .join(".lightflow/workflows/abc/c")
+        .display()
+        .to_string();
+    let c_relative_path = "../lightflow-c/.lightflow/workflows/abc/c";
     let editable_b = lfw(
         &project_a,
         [
@@ -60,7 +66,9 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
 
     let manifest = fs::read_to_string(project_a.join("Cargo.toml"))?;
     assert!(manifest.contains(&format!("lightflow-b = {{ path = \"{b_path}\" }}")));
-    assert!(manifest.contains("lightflow-c = { path = \"../lightflow-c/workflows/abc/c\" }"));
+    assert!(
+        manifest.contains("lightflow-c = { path = \"../lightflow-c/.lightflow/workflows/abc/c\" }")
+    );
     assert!(!manifest.contains("editable"));
 
     let listed = lfw(&project_a, ["list"])?;
@@ -124,8 +132,7 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
     )?;
     assert_eq!(global_c["global"], true);
 
-    let global_manifest =
-        fs::read_to_string(global_project.join(".test-xdg/data/lightflow/Cargo.toml"))?;
+    let global_manifest = fs::read_to_string(global_project.join(".lightflow/Cargo.toml"))?;
     assert!(global_manifest.contains("lightflow-b"));
     assert!(global_manifest.contains("lightflow-c"));
     let global_deps = lfw(&global_project, ["deps", "lightflow.a"])?;
@@ -186,7 +193,7 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
     assert!(
         git_imported_paths
             .iter()
-            .all(|path| path.contains(".lightflow/repos/abc-import/workflows/abc/")),
+            .all(|path| path.contains(".lightflow/repos/abc-import/.lightflow/workflows/abc/")),
         "git import paths should use the local repo cache: {git_imported_paths:?}"
     );
     assert!(
@@ -266,7 +273,7 @@ fn write_empty_workspace(root: &Path) -> Result<(), Box<dyn std::error::Error>> 
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -324,7 +331,7 @@ fn write_leaf_project_in_workspace(
     workflow_id: &str,
     display_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let crate_dir = root.join("workflows/abc").join(short_name);
+    let crate_dir = root.join(".lightflow/workflows/abc").join(short_name);
     write_workflow_crate_at(
         &crate_dir,
         &workflow_id.replace('.', "-"),
@@ -389,8 +396,8 @@ fn write_a_project(
     project_c: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write_empty_workspace(root)?;
-    let b_hint = relative_path(root, &project_b.join("workflows/abc/b"));
-    let c_hint = relative_path(root, &project_c.join("workflows/abc/c"));
+    let b_hint = relative_path(root, &project_b.join(".lightflow/workflows/abc/b"));
+    let c_hint = relative_path(root, &project_c.join(".lightflow/workflows/abc/c"));
     let source = format!(
         r#"use lightflow::preload::*;
 
@@ -408,7 +415,7 @@ pub fn define() -> WorkflowSpec {{
 }}
 "#
     );
-    let crate_dir = root.join("workflows/abc/a");
+    let crate_dir = root.join(".lightflow/workflows/abc/a");
     write_workflow_crate_at(&crate_dir, "lightflow-a", &source)?;
     write_skill(root, "a", "lightflow.a")?;
     Ok(())
@@ -517,7 +524,7 @@ fn write_skill(
     workflow_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let skill_dir = project
-        .join("workflows/abc")
+        .join(".lightflow/workflows/abc")
         .join(short_name)
         .join(".agent/skills")
         .join(workflow_id.replace('.', "-"));
@@ -542,7 +549,7 @@ Run with `lfw run {workflow_id}`.
 }
 
 fn workflow_manifest(project: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let abc = project.join("workflows/abc");
+    let abc = project.join(".lightflow/workflows/abc");
     let mut entries = fs::read_dir(abc)?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<Result<Vec<_>, _>>()?;

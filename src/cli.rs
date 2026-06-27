@@ -62,7 +62,7 @@ use sync::{parse_sync_options, sync_project};
 use upgrade::{
     cargo_workspace_root, parse_cargo_workspace_options, update_index, upgrade_workspace,
 };
-use workflow_help::workflow_help;
+use workflow_help::{workflow_help, workflow_help_json};
 
 /// Run the LightFlow CLI from process arguments.
 pub async fn run_from_env() -> CliResult<()> {
@@ -205,7 +205,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
         }
         "workflows" => {
             let action = match args.first().map(String::as_str) {
-                Some("-h" | "--help" | "help") | None => {
+                Some("-h" | "--help") | None => {
                     return Err(CliError::Usage(workflows_usage()));
                 }
                 Some(action) => action,
@@ -261,8 +261,11 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                     {
                         return Err(CliError::Usage(workflow_shortcuts_usage()));
                     }
-                    required_workflow_id_arg(args, 1, workflows_usage)?;
-                    print_json(&workflow_help(&service, &args[1..], "workflows help")?)?;
+                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
+                    ensure_no_extra_args(args, 2, "workflows help")?;
+                    let workflow = service.get_workflow(workflow_id)?;
+                    let dependencies = service.workflow_dependencies(workflow_id)?;
+                    print_json(&workflow_help_json(&workflow, dependencies))?;
                 }
                 "validate" => {
                     if args

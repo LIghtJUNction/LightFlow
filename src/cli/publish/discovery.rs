@@ -55,9 +55,12 @@ fn discover_workflow_manifests(
     workspace_root: &Path,
     project_name: Option<String>,
 ) -> CliResult<Vec<WorkflowManifestRef>> {
+    let project_workflows = root.join(".lightflow").join("workflows");
     let workflows = root.join("workflows");
     let legacy_workflows = root.join("lightflow").join("workflows");
-    let source_root = if workflows.exists() {
+    let source_root = if project_workflows.exists() {
+        project_workflows
+    } else if workflows.exists() {
         workflows
     } else {
         legacy_workflows

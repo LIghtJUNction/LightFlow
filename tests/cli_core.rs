@@ -462,7 +462,7 @@ fn lfw_release_check_dry_run_reports_source_change_blockers()
         ],
     )?;
 
-    let source_path = root.join("workflows/examples/reviewed/src/lib.rs");
+    let source_path = root.join(".lightflow/workflows/examples/reviewed/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// release-blocking behavior change\n",
@@ -542,8 +542,8 @@ fn lfw_release_check_dry_run_accepts_skill_only_source_changes()
         ],
     )?;
 
-    let skill_path =
-        root.join("workflows/examples/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
+    let skill_path = root
+        .join(".lightflow/workflows/examples/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: skill docs clarified.\n",
@@ -860,7 +860,7 @@ fn lfw_release_check_apply_skips_commands_after_source_change_blockers()
         ],
     )?;
 
-    let source_path = root.join("workflows/examples/reviewed/src/lib.rs");
+    let source_path = root.join(".lightflow/workflows/examples/reviewed/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// apply-blocking behavior change\n",
@@ -3155,7 +3155,9 @@ pub fn define() -> WorkflowSpec {
                     && parts
                         .get(3)
                         .and_then(serde_json::Value::as_str)
-                        .is_some_and(|path| path.ends_with("workflows/tests/parent/Cargo.toml"))
+                        .is_some_and(|path| {
+                            path.ends_with(".lightflow/workflows/tests/parent/Cargo.toml")
+                        })
                     && parts.get(4).and_then(serde_json::Value::as_str) == Some("--dry-run")
             }),
         "publish list:\n{publish_list:#?}"
@@ -4675,7 +4677,7 @@ fn complete_generated_workflow_metadata(
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = root
-        .join("workflows")
+        .join(".lightflow/workflows")
         .join(category)
         .join(name)
         .join("src/lib.rs");

@@ -261,7 +261,8 @@ one run directory.
 
 Installing a workflow means adding a Cargo dependency or creating a workflow
 crate in a project or global Cargo workspace. The backend reads project
-workflow crates from the current working directory's `workflows/` tree, reads
+workflow crates from the current working directory's `./.lightflow/workflows/`
+tree, reads legacy `./workflows/` collections for compatibility, reads
 the project workflow sources listed in
 `projects/lightflow-projects.toml` `[workflows].default_sources`, reads global
 homes from `LFW_PATH`, scans project and global home manifests for Cargo `path`
@@ -292,9 +293,9 @@ Workflow crates and plugin crates are both standard Rust packages that import
 `~/.config/lightflow/.lfwrc`, and appends a shell-specific source line to the
 detected bash, zsh, or fish startup file. At runtime `lfw` reads `LFW_PATH`
 from the process environment. If it is not set, the default workflow home is
-`$XDG_DATA_HOME/lightflow`, or `~/.local/share/lightflow` when `XDG_DATA_HOME`
-is not set. `lfw home` prints the active home, its `Cargo.toml`, its
-`workflows/` source tree, and its repo cache.
+`~/.lightflow`, and global workflows live under `~/.lightflow/workflows`.
+`lfw home` prints the active home, its `Cargo.toml`, its `workflows/` source
+tree, and its repo cache.
 
 ## Publishing Model
 

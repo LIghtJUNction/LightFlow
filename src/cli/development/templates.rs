@@ -161,6 +161,7 @@ pub(super) fn skill_template_json(
 
 fn find_workflow_crate_dir(root: &Path, workflow_id: &str) -> CliResult<Option<PathBuf>> {
     let mut collections = vec![
+        root.join(".lightflow").join("workflows"),
         root.join("workflows"),
         root.join("lightflow").join("workflows"),
     ];
@@ -169,12 +170,14 @@ fn find_workflow_crate_dir(root: &Path, workflow_id: &str) -> CliResult<Option<P
     for preferred in preferred_project_names(workflow_id) {
         let project = projects.join(&preferred);
         if project.is_dir() {
+            collections.push(project.join(".lightflow").join("workflows"));
             collections.push(project.join("workflows"));
             project_roots
                 .retain(|root| root.file_name().and_then(|name| name.to_str()) != Some(&preferred));
         }
     }
     for project in project_roots {
+        collections.push(project.join(".lightflow").join("workflows"));
         collections.push(project.join("workflows"));
     }
 

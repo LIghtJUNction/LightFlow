@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(in crate::cli) fn init_workflow_project(root: &Path) -> CliResult<serde_json::Value> {
-    let workflows = root.join("workflows");
+    let workflows = project_workflow_dir(root);
     let create_example = !root.join("Cargo.toml").exists();
     fs::create_dir_all(&workflows)?;
 
@@ -186,7 +186,7 @@ fn ensure_workspace_manifest(
 
 pub(in crate::cli) fn workspace_manifest() -> String {
     format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\"workflows/*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
+        "[workspace]\nresolver = \"3\"\nmembers = [\".lightflow/workflows/*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -257,13 +257,21 @@ fn workflow_crate_dir(
     root: &Path,
     workflow_id: &str,
     category: Option<&str>,
-    _global: bool,
+    global: bool,
 ) -> PathBuf {
-    let mut path = root.join("workflows");
+    let mut path = if global {
+        root.join("workflows")
+    } else {
+        project_workflow_dir(root)
+    };
     if let Some(category) = category {
         path = path.join(category);
     }
     path.join(workflow_crate_dir_name(workflow_id))
+}
+
+fn project_workflow_dir(root: &Path) -> PathBuf {
+    root.join(".lightflow").join("workflows")
 }
 
 pub(in crate::cli) fn workflow_crate_dir_name(workflow_id: &str) -> String {

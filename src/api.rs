@@ -42,6 +42,7 @@ use validation::{validate_workflow_shape, validate_workflow_spec};
 use writer::{workflow_source, write_text_atomic};
 
 pub(super) const WORKFLOW_DIR: &str = "workflows";
+pub(super) const PROJECT_LIGHTFLOW_DIR: &str = ".lightflow";
 pub(super) const LEGACY_LIGHTFLOW_DIR: &str = "lightflow";
 
 pub use error::{ApiError, ApiResult};

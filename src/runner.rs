@@ -232,7 +232,7 @@ fn required_value<'a>(args: &'a [String], index: usize, flag: &str) -> RunnerRes
 
 fn default_workflow_paths() -> Vec<PathBuf> {
     let data_home = xdg_data_home();
-    let default = data_home.join("lightflow");
+    let default = home_lightflow().unwrap_or_else(|| data_home.join("lightflow"));
     let lfw_path = env::var("LFW_PATH")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -242,6 +242,10 @@ fn default_workflow_paths() -> Vec<PathBuf> {
         paths.push(default);
     }
     paths
+}
+
+fn home_lightflow() -> Option<PathBuf> {
+    env::var_os("HOME").map(|home| Path::new(&home).join(".lightflow"))
 }
 
 fn xdg_data_home() -> PathBuf {

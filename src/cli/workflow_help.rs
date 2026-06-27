@@ -53,7 +53,7 @@ pub(super) fn workflow_help(
     Ok(workflow_help_json(&workflow, dependencies))
 }
 
-fn workflow_help_json(
+pub(super) fn workflow_help_json(
     workflow: &WorkflowSpec,
     dependencies: crate::workflow::WorkflowDependencyReport,
 ) -> serde_json::Value {

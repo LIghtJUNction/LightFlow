@@ -229,7 +229,7 @@ fn workflow_publish_check_from_search_path(
     if let Ok(check) = workflow_publish_check_from_crate(path, workflow_id) {
         return Ok(check);
     }
-    if path.join("workflows").is_dir() {
+    if path.join(".lightflow").join("workflows").is_dir() || path.join("workflows").is_dir() {
         if let Ok(check) = workflow_publish_check_at_root(path, workflow_id) {
             return Ok(check);
         }

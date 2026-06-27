@@ -314,7 +314,7 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     )?;
     assert_eq!(added["workflow_id"], "lightflow.extra");
     assert_eq!(added["category"], "examples");
-    let manifest = fs::read_to_string(root.join("workflows/examples/extra/Cargo.toml"))?;
+    let manifest = fs::read_to_string(root.join(".lightflow/workflows/examples/extra/Cargo.toml"))?;
     assert!(manifest.contains("name = \"lightflow-extra\""));
     assert!(!manifest.contains("publish = false"));
     let workspace = fs::read_to_string(root.join("Cargo.toml"))?;
@@ -324,8 +324,8 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert!(gitignore.contains("/lfw.lock"));
     let rc = fs::read_to_string(root.join(".test-xdg/config/lightflow/.lfwrc"))?;
     assert!(rc.contains("export LFW_PATH="));
-    assert!(rc.contains(".test-xdg/data/lightflow"));
-    let lfw_path_manifest = root.join(".test-xdg/data/lightflow/Cargo.toml");
+    assert!(rc.contains(".lightflow"));
+    let lfw_path_manifest = root.join(".lightflow/Cargo.toml");
     assert!(lfw_path_manifest.exists());
     let lfw_path_workspace = fs::read_to_string(&lfw_path_manifest)?;
     assert!(lfw_path_workspace.contains("members = [\"workflows/*/*\"]"));
@@ -346,7 +346,7 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert_eq!(second_init["config"]["rc_created"], false);
     assert_eq!(second_init["config"]["source_installed"], false);
     assert_eq!(second_init["config"]["workflow_workspace_created"], false);
-    let path = root.join("workflows/examples/extra/src/lib.rs");
+    let path = root.join(".lightflow/workflows/examples/extra/src/lib.rs");
     let source = fs::read_to_string(path)?;
     assert!(source.contains("workflow(\"lightflow.extra\")"));
     assert!(source.contains(".name(\"Extra Workflow\")"));
@@ -354,7 +354,7 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert!(source.contains(".input_required(\"value\", true)"));
     assert!(source.contains(".input_widget(\"value\", \"json\")"));
     let skill = fs::read_to_string(
-        root.join("workflows/examples/extra/.agent/skills/lightflow-extra/SKILL.md"),
+        root.join(".lightflow/workflows/examples/extra/.agent/skills/lightflow-extra/SKILL.md"),
     )?;
     assert!(skill.contains("Workflow id: `lightflow.extra`"));
     assert!(skill.contains("Input `value`: JSON value; required; widget `json`."));
@@ -362,7 +362,11 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert!(skill.contains("## API Usage"));
     assert!(skill.contains("POST http://127.0.0.1:5174/workflows/lightflow.extra/run"));
     assert!(skill.contains("-d '{\"inputs\":{\"value\":{\"hello\":\"world\"}}}'"));
-    assert!(!root.join("workflows/examples/extra/src/main.rs").exists());
+    assert!(
+        !root
+            .join(".lightflow/workflows/examples/extra/src/main.rs")
+            .exists()
+    );
     complete_generated_workflow_metadata(&root, "examples", "example")?;
     complete_generated_workflow_metadata(&root, "examples", "extra")?;
 
@@ -437,20 +441,12 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     );
 
     let home = lfw(&root, ["home"])?;
-    assert_eq!(
-        home["home"],
-        root.join(".test-xdg/data/lightflow").to_str().unwrap()
-    );
-    assert_eq!(
-        home["lfw_path"],
-        root.join(".test-xdg/data/lightflow").to_str().unwrap()
-    );
+    assert_eq!(home["home"], root.join(".lightflow").to_str().unwrap());
+    assert_eq!(home["lfw_path"], root.join(".lightflow").to_str().unwrap());
     assert_eq!(home["manifest"], lfw_path_manifest.to_str().unwrap());
     assert_eq!(
         home["workflows"],
-        root.join(".test-xdg/data/lightflow/workflows")
-            .to_str()
-            .unwrap()
+        root.join(".lightflow/workflows").to_str().unwrap()
     );
 
     let _ = fs::remove_dir_all(root);
@@ -477,7 +473,7 @@ fn lfw_new_and_add_support_global_workflow_workspace() -> Result<(), Box<dyn std
     )?;
     assert_eq!(global["workflow_id"], "lightflow.global_tool");
     assert_eq!(global["global"], true);
-    let global_root = root.join(".test-xdg/data/lightflow/workflows");
+    let global_root = root.join(".lightflow/workflows");
     assert!(global_root.join("tools/global_tool/src/lib.rs").exists());
     assert!(!root.join("workflows/tools/global_tool/src/lib.rs").exists());
 
@@ -503,7 +499,7 @@ fn lfw_new_and_add_support_global_workflow_workspace() -> Result<(), Box<dyn std
         ],
     )?;
     assert_eq!(added["global"], true);
-    let global_manifest = fs::read_to_string(root.join(".test-xdg/data/lightflow/Cargo.toml"))?;
+    let global_manifest = fs::read_to_string(root.join(".lightflow/Cargo.toml"))?;
     assert!(global_manifest.contains("members = [\"workflows/*/*\"]"));
     assert!(global_manifest.contains("lightflow-std"));
     let project_manifest = fs::read_to_string(root.join("Cargo.toml"))?;
@@ -550,7 +546,7 @@ fn lfw_new_runtime_template_creates_node_contract_files() -> Result<(), Box<dyn 
         ])
     );
 
-    let crate_dir = root.join("workflows/image/my_flux_sampler");
+    let crate_dir = root.join(".lightflow/workflows/image/my_flux_sampler");
     let source = fs::read_to_string(crate_dir.join("src/lib.rs"))?;
     assert!(source.contains(".runtime(\"image_runtime\", \"lightflow.image.generate\")"));
     assert!(source.contains(".model(\"image_model\", \"text-to-image\")"));
@@ -638,7 +634,7 @@ fn lfw_node_test_checks_schema_runtime_models_and_skill() -> Result<(), Box<dyn 
             .any(|check| { check["id"] == "node.skill" && check["status"] == "passed" })
     );
 
-    let crate_dir = root.join("workflows/image/my_flux_sampler");
+    let crate_dir = root.join(".lightflow/workflows/image/my_flux_sampler");
     fs::remove_dir_all(crate_dir.join(".agent/skills/lightflow-my-flux-sampler"))?;
     let failed = Command::new(env!("CARGO_BIN_EXE_lfw"))
         .args(["node", "test", "lightflow.my_flux_sampler"])
@@ -668,7 +664,9 @@ fn lfw_loop_check_rejects_unusable_workflow_agent_skills() -> Result<(), Box<dyn
     complete_generated_workflow_metadata(&root, "examples", "example")?;
     complete_generated_workflow_metadata(&root, "examples", "weak_skill")?;
     fs::write(
-        root.join("workflows/examples/weak_skill/.agent/skills/lightflow-weak-skill/SKILL.md"),
+        root.join(
+            ".lightflow/workflows/examples/weak_skill/.agent/skills/lightflow-weak-skill/SKILL.md",
+        ),
         "# Weak skill\n\nThis file exists but does not describe how to run the workflow.\n",
     )?;
 
@@ -733,7 +731,7 @@ fn lfw_dev_skill_template_writes_without_accidental_overwrite()
     lfw(&root, ["init"])?;
 
     let skill_path =
-        root.join("workflows/examples/example/.agent/skills/lightflow-example/SKILL.md");
+        root.join(".lightflow/workflows/examples/example/.agent/skills/lightflow-example/SKILL.md");
     fs::remove_file(&skill_path)?;
     let written = lfw(
         &root,
@@ -1060,7 +1058,7 @@ fn local_loop_agent_skill_failures_are_summarized() -> Result<(), Box<dyn std::e
         complete_generated_workflow_metadata(&root, "examples", &name)?;
         fs::write(
             root.join(format!(
-                "workflows/examples/{name}/.agent/skills/lightflow-weak-skill-{index}/SKILL.md"
+                ".lightflow/workflows/examples/{name}/.agent/skills/lightflow-weak-skill-{index}/SKILL.md"
             )),
             "# Weak skill\n\nThis file exists but does not describe how to run the workflow.\n",
         )?;
@@ -1117,7 +1115,7 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
         ],
     )?;
 
-    let source_path = root.join("workflows/examples/reviewed/src/lib.rs");
+    let source_path = root.join(".lightflow/workflows/examples/reviewed/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// reviewed behavior change\n",
@@ -1156,8 +1154,8 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
         "stderr:\n{publish_stderr}"
     );
 
-    let skill_path =
-        root.join("workflows/examples/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
+    let skill_path = root
+        .join(".lightflow/workflows/examples/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: behavior changed with source.\n",
@@ -1275,7 +1273,7 @@ fn lfw_loop_changes_tracks_untracked_workflow_files() -> Result<(), Box<dyn std:
         ],
     )?;
 
-    let source_path = root.join("workflows/examples/untracked/src/extra.rs");
+    let source_path = root.join(".lightflow/workflows/examples/untracked/src/extra.rs");
     fs::write(&source_path, "pub fn extra_behavior() {}\n")?;
     let missing_skill = lfw_command(&root).args(["loop", "changes"]).output()?;
     assert!(!missing_skill.status.success());
@@ -1287,8 +1285,8 @@ fn lfw_loop_changes_tracks_untracked_workflow_files() -> Result<(), Box<dyn std:
     );
     assert!(stderr.contains("extra.rs"), "stderr:\n{stderr}");
 
-    let skill_path =
-        root.join("workflows/examples/untracked/.agent/skills/lightflow-untracked/SKILL.md");
+    let skill_path = root
+        .join(".lightflow/workflows/examples/untracked/.agent/skills/lightflow-untracked/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: extra source file added.\n",
@@ -1353,7 +1351,7 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
     fs::create_dir_all(&projects)?;
     std::os::unix::fs::symlink(&sibling, projects.join("lightflow-std"))?;
 
-    let source_path = sibling.join("workflows/examples/linked/src/lib.rs");
+    let source_path = sibling.join(".lightflow/workflows/examples/linked/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// linked behavior change\n",
@@ -1367,12 +1365,12 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
         "stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("projects/lightflow-std/workflows/examples/linked/src/lib.rs"),
+        stderr.contains("projects/lightflow-std/.lightflow/workflows/examples/linked/src/lib.rs"),
         "stderr:\n{stderr}"
     );
 
-    let skill_path =
-        sibling.join("workflows/examples/linked/.agent/skills/lightflow-linked/SKILL.md");
+    let skill_path = sibling
+        .join(".lightflow/workflows/examples/linked/.agent/skills/lightflow-linked/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: linked behavior changed.\n",
@@ -1385,7 +1383,7 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
     );
     assert_eq!(
         paired["changed_workflows"][0]["workflow_paths"][0],
-        "projects/lightflow-std/workflows/examples/linked/src/lib.rs"
+        "projects/lightflow-std/.lightflow/workflows/examples/linked/src/lib.rs"
     );
     assert_eq!(paired["changed_workflows"][0]["status"], "passed");
 
@@ -1398,7 +1396,7 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
         "stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("projects/lightflow-std/workflows/examples/linked"),
+        stderr.contains("projects/lightflow-std/.lightflow/workflows/examples/linked"),
         "stderr:\n{stderr}"
     );
     assert!(
@@ -1457,7 +1455,7 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
     fs::create_dir_all(&projects)?;
     std::os::unix::fs::symlink(&sibling, projects.join("custom-workflows"))?;
 
-    let source_path = sibling.join("workflows/examples/extra/src/lib.rs");
+    let source_path = sibling.join(".lightflow/workflows/examples/extra/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// extra linked behavior change\n",
@@ -1470,7 +1468,7 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
         "stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("projects/custom-workflows/workflows/examples/extra/src/lib.rs"),
+        stderr.contains("projects/custom-workflows/.lightflow/workflows/examples/extra/src/lib.rs"),
         "stderr:\n{stderr}"
     );
     let publish_catalog = serde_json::to_value(ApiService::new(&root).workflow_publish_checks()?)?;
@@ -1480,7 +1478,9 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
         .iter()
         .find(|check| {
             check["manifest"].as_str().is_some_and(|manifest| {
-                manifest.contains("projects/custom-workflows/workflows/examples/extra/Cargo.toml")
+                manifest.contains(
+                    "projects/custom-workflows/.lightflow/workflows/examples/extra/Cargo.toml",
+                )
             })
         })
         .expect("extra linked workflow publish check");
@@ -1499,7 +1499,9 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
         .iter()
         .find(|plan| {
             plan["manifest"].as_str().is_some_and(|manifest| {
-                manifest.contains("projects/custom-workflows/workflows/examples/extra/Cargo.toml")
+                manifest.contains(
+                    "projects/custom-workflows/.lightflow/workflows/examples/extra/Cargo.toml",
+                )
             })
         })
         .expect("extra linked workflow publish plan");
@@ -1907,7 +1909,7 @@ fn lfw_loop_check_uses_project_workspaces_for_publish_crate_presence()
     fs::create_dir_all(&std)?;
 
     lfw(&root, ["init"])?;
-    fs::remove_dir_all(root.join("workflows"))?;
+    fs::remove_dir_all(root.join(".lightflow/workflows"))?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
     git_ok(
@@ -2779,7 +2781,7 @@ edition = "2024"
 fn lfw_uses_xdg_default_and_lfw_path_environment() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
-    let xdg_data_workflows = root.join(".test-xdg/data/lightflow/workflows");
+    let xdg_data_workflows = root.join(".lightflow/workflows");
     write_workflow_crate_in(
         &xdg_data_workflows,
         "lightflow.xdg_default",
@@ -2795,6 +2797,28 @@ pub fn define() -> WorkflowSpec {
 }
 "#,
     )?;
+    let xdg_skill_dir =
+        xdg_data_workflows.join("local/xdg_default/.agent/skills/lightflow-xdg-default");
+    fs::create_dir_all(&xdg_skill_dir)?;
+    fs::write(
+        xdg_skill_dir.join("SKILL.md"),
+        r#"---
+name: XDG Default
+description: Use this skill when working with the lightflow.xdg_default LightFlow workflow.
+version: 0.1.0
+---
+
+# XDG Default
+
+- Workflow id: `lightflow.xdg_default`
+
+```bash
+lfw run lightflow.xdg_default --input value=hello
+```
+
+HTTP `/workflows/lightflow.xdg_default/run` example.
+"#,
+    )?;
 
     let default_list = lfw(&root, ["list"])?;
     assert_eq!(default_list["workflows"][0]["id"], "lightflow.xdg_default");
@@ -2806,7 +2830,7 @@ pub fn define() -> WorkflowSpec {
     )?;
     assert_eq!(
         legacy_default_home["lfw_path"],
-        root.join(".test-xdg/data/lightflow").to_str().unwrap()
+        root.join(".lightflow").to_str().unwrap()
     );
     let legacy_default_list = lfw_with_env(
         &root,
@@ -2917,7 +2941,7 @@ fn lfw_init_installs_fish_source_when_shell_is_fish() -> Result<(), Box<dyn std:
 
     let rc = fs::read_to_string(root.join(".test-xdg/config/lightflow/.lfwrc"))?;
     assert!(rc.contains("set -gx LFW_PATH "));
-    assert!(root.join(".test-xdg/data/lightflow/Cargo.toml").exists());
+    assert!(root.join(".lightflow/Cargo.toml").exists());
     let fish_config = fs::read_to_string(root.join(".test-xdg/config/fish/config.fish"))?;
     assert!(fish_config.contains("source "));
     assert!(fish_config.contains(".test-xdg/config/lightflow/.lfwrc"));
@@ -2951,7 +2975,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            "workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/examples/example/Cargo.toml",
             "--dry-run"
         ])
     );
@@ -3008,7 +3032,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            "workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/examples/example/Cargo.toml",
             "--dry-run"
         ])
     );
@@ -3019,7 +3043,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            "workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/examples/example/Cargo.toml",
             "--allow-dirty",
             "--dry-run"
         ])
@@ -3034,7 +3058,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
     lfw(&root, ["new", "lightflow.top", "--category", "examples"])?;
     complete_generated_workflow_metadata(&root, "examples", "base")?;
     complete_generated_workflow_metadata(&root, "examples", "top")?;
-    let top_manifest_path = root.join("workflows/examples/top/Cargo.toml");
+    let top_manifest_path = root.join(".lightflow/workflows/examples/top/Cargo.toml");
     let mut top_manifest = fs::read_to_string(&top_manifest_path)?;
     top_manifest.push_str("lightflow-base = { path = \"../base\", version = \"0.1.0\" }\n");
     fs::write(&top_manifest_path, top_manifest)?;
@@ -3087,7 +3111,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
     let mut root_manifest = fs::read_to_string(&root_manifest_path)?;
     root_manifest.push_str("bad-workspace = { path = \"../bad-workspace\" }\n");
     fs::write(&root_manifest_path, root_manifest)?;
-    let example_manifest_path = root.join("workflows/examples/example/Cargo.toml");
+    let example_manifest_path = root.join(".lightflow/workflows/examples/example/Cargo.toml");
     let mut example_manifest = fs::read_to_string(&example_manifest_path)?;
     example_manifest.push_str("bad-workspace = { workspace = true }\n");
     fs::write(&example_manifest_path, example_manifest)?;
@@ -3210,7 +3234,7 @@ fn complete_generated_workflow_metadata(
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = root
-        .join("workflows")
+        .join(".lightflow/workflows")
         .join(category)
         .join(name)
         .join("src/lib.rs");

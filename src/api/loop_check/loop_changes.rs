@@ -199,11 +199,13 @@ pub(super) fn classify_workflow_change(
     let workflows_index = parts.iter().position(|part| *part == "workflows")?;
     let first = parts.get(workflows_index + 1)?;
     let second = parts.get(workflows_index + 2)?;
-    let direct_crate_manifest = root
-        .join("workflows")
-        .join(first)
-        .join("Cargo.toml")
-        .is_file();
+    let collection = if workflows_index > 0 && parts.get(workflows_index - 1) == Some(&".lightflow")
+    {
+        root.join(".lightflow").join("workflows")
+    } else {
+        root.join("workflows")
+    };
+    let direct_crate_manifest = collection.join(first).join("Cargo.toml").is_file();
     let (workflow_key, relative_start) =
         if direct_crate_manifest || is_direct_workflow_entry(second) {
             ((*first).to_owned(), workflows_index + 2)

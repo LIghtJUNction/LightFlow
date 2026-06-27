@@ -1,15 +1,17 @@
 # Data Layout
 
-LightFlow project files are ordinary source-controlled files under `workflows/`.
+LightFlow project workflow files are ordinary source-controlled files under
+`.lightflow/workflows/`.
 `lfw init --workflow` creates this layout:
 
 ```text
-workflows/
-  <category>/
-    <short-name>/
-      Cargo.toml
-      src/
-        lib.rs
+.lightflow/
+  workflows/
+    <category>/
+      <short-name>/
+        Cargo.toml
+        src/
+          lib.rs
 ```
 
 The core repository Cargo workspace contains only the backend crate and core
@@ -25,7 +27,8 @@ does not belong under `projects/`. The `projects/` directory is reserved for
 independent workflow/plugin repositories such as `lightflow-std`,
 `lightflow-flux`, and `lightflow-rig`.
 
-Shared user workflows follow XDG paths. The shell sources:
+Shared user workflow configuration still follows XDG config paths. The shell
+sources:
 
 ```text
 $XDG_CONFIG_HOME/lightflow/.lfwrc
@@ -35,24 +38,22 @@ $XDG_CONFIG_HOME/lightflow/.lfwrc
 For bash and zsh, the rc file uses shell-style export syntax:
 
 ```bash
-export LFW_PATH="$HOME/.local/share/lightflow"
+export LFW_PATH="$HOME/.lightflow"
 ```
 
 For fish, `lfw init` writes fish syntax instead:
 
 ```fish
-set -gx LFW_PATH "$HOME/.local/share/lightflow"
+set -gx LFW_PATH "$HOME/.lightflow"
 ```
 
 `lfw init` detects `SHELL` and appends `source <rc>` to `.bashrc`, `.zshrc`,
 or `$XDG_CONFIG_HOME/fish/config.fish`. Project workflows are discovered from
-the current working directory's `workflows/` tree and never need `LFW_PATH`.
-`LFW_PATH` is only for global or shared workflow collections. If there is no
-exported `LFW_PATH`, `lfw` uses the XDG default
-`$XDG_DATA_HOME/lightflow`, or
-`~/.local/share/lightflow` when `XDG_DATA_HOME` is not set. `lfw`
-does not parse `.lfwrc` directly at runtime; it reads the environment provided
-by the shell.
+the current working directory's `./.lightflow/workflows/` tree and never need
+`LFW_PATH`. `LFW_PATH` is only for global or shared workflow collections. If
+there is no exported `LFW_PATH`, `lfw` uses `~/.lightflow`. `lfw` does not
+parse `.lfwrc` directly at runtime; it reads the environment provided by the
+shell.
 
 Generated media outputs use the core `MediaPathProvider` so workflows do not
 hand-roll platform paths. Image outputs default to the user's XDG Pictures
@@ -222,7 +223,7 @@ Each `LFW_PATH` entry may be a LightFlow home or a legacy workflow collection.
 A LightFlow home is a normal Cargo workspace:
 
 ```text
-$XDG_DATA_HOME/lightflow/
+~/.lightflow/
   Cargo.toml
   repos/
   workflows/
@@ -233,8 +234,8 @@ $XDG_DATA_HOME/lightflow/
           lib.rs
 ```
 
-The default home at `$XDG_DATA_HOME/lightflow` is initialized as a Cargo
-workspace root. Its generated manifest uses `members = ["workflows/*/*"]`.
+The default home at `~/.lightflow` is initialized as a Cargo workspace root.
+Its generated manifest uses `members = ["workflows/*/*"]`.
 This gives globally imported workflows one shared dependency environment,
 analogous to a small language-specific environment for LightFlow workflows.
 `lfw home` prints this root, its `Cargo.toml`, the workflow source directory,
@@ -258,8 +259,9 @@ The directory name is a short slug, not the full workflow id. For example,
 `lightflow.text_plan` can live at `std/text_plan/src/lib.rs`; the Rust DSL
 still declares `workflow("lightflow.text_plan")`.
 
-Project workflows are read from `./workflows` before global `LFW_PATH`
-workflows. If both define the same workflow id, the project workflow wins.
+Project workflows are read from `./.lightflow/workflows` before global
+`LFW_PATH` workflows. Legacy `./workflows` collections are still read for
+compatibility. If both define the same workflow id, the project workflow wins.
 Cargo dependency workflows are then scanned as extension crates and cannot
 override a project workflow.
 

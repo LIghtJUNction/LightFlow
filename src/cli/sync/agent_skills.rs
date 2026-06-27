@@ -15,6 +15,10 @@ pub(super) struct AgentSkillCandidate {
 pub(super) fn discover_agent_skills(root: &Path) -> CliResult<Vec<AgentSkillCandidate>> {
     let mut skills = BTreeMap::<String, AgentSkillCandidate>::new();
     collect_agent_skill_roots(root, &mut skills)?;
+    collect_workflow_collection_agent_skills(
+        &root.join(".lightflow").join("workflows"),
+        &mut skills,
+    )?;
     collect_workflow_collection_agent_skills(&root.join("workflows"), &mut skills)?;
     collect_workflow_collection_agent_skills(
         &root.join("lightflow").join("workflows"),
@@ -24,6 +28,10 @@ pub(super) fn discover_agent_skills(root: &Path) -> CliResult<Vec<AgentSkillCand
         for path in std::env::split_paths(&lfw_path) {
             collect_agent_skill_roots(&path, &mut skills)?;
             collect_workflow_collection_agent_skills(&path, &mut skills)?;
+            collect_workflow_collection_agent_skills(
+                &path.join(".lightflow").join("workflows"),
+                &mut skills,
+            )?;
             collect_workflow_collection_agent_skills(&path.join("workflows"), &mut skills)?;
             collect_workflow_collection_agent_skills(
                 &path.join("lightflow").join("workflows"),

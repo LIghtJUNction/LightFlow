@@ -121,7 +121,7 @@ In practice:
   crate it finds under `workflows/std/*`.
 
 Global installs are written into the default LightFlow home, usually
-`~/.local/share/lightflow`, or another directory listed in `LFW_PATH`.
+`~/.lightflow`, or another directory listed in `LFW_PATH`.
 That home is a normal Cargo workspace, not a custom package database. Global
 install commands edit the home's `Cargo.toml`; Cargo still owns dependency
 resolution and `Cargo.lock`.

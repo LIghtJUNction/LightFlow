@@ -17,9 +17,8 @@ pub(super) struct RuntimeConfig {
 impl RuntimeConfig {
     pub(super) fn load() -> CliResult<Self> {
         let config_home = xdg_config_home()?;
-        let data_home = xdg_data_home()?;
         let rc_path = config_home.join("lightflow").join(".lfwrc");
-        let home_path = data_home.join("lightflow");
+        let home_path = lightflow_home()?;
         let default_workflow_path = home_path.join("workflows");
         let raw_lfw_path = env::var("LFW_PATH")
             .ok()
@@ -230,11 +229,10 @@ fn xdg_config_home() -> CliResult<PathBuf> {
         .ok_or_else(|| CliError::Usage("HOME is required to locate XDG_CONFIG_HOME".to_owned()))
 }
 
-fn xdg_data_home() -> CliResult<PathBuf> {
-    env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .ok_or_else(|| CliError::Usage("HOME is required to locate XDG_DATA_HOME".to_owned()))
+fn lightflow_home() -> CliResult<PathBuf> {
+    env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".lightflow"))
+        .ok_or_else(|| CliError::Usage("HOME is required to locate ~/.lightflow".to_owned()))
 }
 
 fn shell_quote(value: &str) -> String {

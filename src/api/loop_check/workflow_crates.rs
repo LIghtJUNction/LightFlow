@@ -3,8 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(super) fn discover_local_workflow_crates(root: &Path) -> ApiResult<Vec<PathBuf>> {
-    let workflows = root.join("workflows");
-    discover_workflow_collection_crates(&workflows)
+    let mut crates =
+        discover_workflow_collection_crates(&root.join(".lightflow").join("workflows"))?;
+    crates.extend(discover_workflow_collection_crates(
+        &root.join("workflows"),
+    )?);
+    crates.sort();
+    crates.dedup();
+    Ok(crates)
 }
 
 pub(super) fn discover_workflow_collection_crates(collection: &Path) -> ApiResult<Vec<PathBuf>> {

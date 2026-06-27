@@ -461,14 +461,15 @@ detected shell startup file (`.bashrc`, `.zshrc`, or fish `config.fish`):
 
 ```bash
 source ~/.config/lightflow/.lfwrc
-export LFW_PATH='/home/alice/.local/share/lightflow'
+export LFW_PATH='/home/alice/.lightflow'
 ```
 
 Project workflows are discovered automatically from the current working
-directory's `workflows/` tree. `LFW_PATH` is reserved for global or shared
-workflow homes. If `XDG_DATA_HOME` is not set, the default global home is
-`~/.local/share/lightflow`. Run `lfw home` to print the active home, manifest,
-workflow source directory, and repo cache. `LFW_PATH` uses the platform
+directory's `./.lightflow/workflows/` tree. Legacy `./workflows/` collections
+are still read for compatibility. `LFW_PATH` is reserved for global or shared
+workflow homes. The default global home is `~/.lightflow`, so global workflows
+live under `~/.lightflow/workflows`. Run `lfw home` to print the active home,
+manifest, workflow source directory, and repo cache. `LFW_PATH` uses the platform
 path-list format, so multiple global homes or legacy workflow collections can
 be searched. `lfw` itself reads the environment variable provided by the shell;
 it does not parse `.lfwrc` as a runtime config file. The default global home is
@@ -482,13 +483,13 @@ workflow crates as workspace members or dependencies. `lfw add --global` and
 `lfw upgrade --global` delegate to Cargo.
 
 `lfw init --workflow` creates a project workflow collection under
-`./workflows`. `lfw init --plugin` creates a single standard Cargo crate that
-can expose a workflow from `src/lib.rs`. `lfw new --global` creates a workflow
-crate under the default global home's `workflows/` tree; `lfw add --global`
+`./.lightflow/workflows`. `lfw init --plugin` creates a single standard Cargo
+crate that can expose a workflow from `src/lib.rs`. `lfw new --global` creates
+a workflow crate under the default global home's `workflows/` tree; `lfw add --global`
 writes dependencies to the default global home's `Cargo.toml`. Those global
 path dependencies are discovered from the global home manifest, so a workflow
 installed with `lfw add --global --path ...` can be used from any project that
-uses the same XDG data directory or `LFW_PATH`.
+uses the same global home or `LFW_PATH`.
 
 Use `lfw add` when the target is one known Cargo package. Use `lfw import`
 when the target is a workflow repository or collection and LightFlow should

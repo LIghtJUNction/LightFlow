@@ -1,7 +1,7 @@
 use super::dsl::{read_optional_workflow_source, read_workflow_source};
 use super::project_config::default_project_workflow_sources;
 use super::util::{path_file_name, validate_id_segment};
-use super::{ApiError, ApiResult, LEGACY_LIGHTFLOW_DIR, WORKFLOW_DIR};
+use super::{ApiError, ApiResult, LEGACY_LIGHTFLOW_DIR, PROJECT_LIGHTFLOW_DIR, WORKFLOW_DIR};
 use crate::workflow::WorkflowSpec;
 use std::collections::BTreeSet;
 use std::fs;
@@ -16,6 +16,13 @@ pub(super) fn read_workflow_sources(
     let mut workflows = Vec::new();
     let mut manifests = BTreeSet::new();
     let mut visited_libs = BTreeSet::new();
+    read_workflow_collection(
+        &project_workflow_collection(root),
+        true,
+        &mut workflows,
+        &mut manifests,
+        &mut visited_libs,
+    )?;
     read_workflow_collection(
         &root.join(WORKFLOW_DIR),
         true,
@@ -75,6 +82,13 @@ fn read_project_workflow_collections(
             continue;
         }
         read_workflow_collection(
+            &project_workflow_collection(&project),
+            true,
+            workflows,
+            manifests,
+            visited_libs,
+        )?;
+        read_workflow_collection(
             &project.join(WORKFLOW_DIR),
             true,
             workflows,
@@ -95,6 +109,20 @@ fn read_workflow_search_path(
     if !path.exists() {
         return Ok(());
     }
+    let project_workflows = project_workflow_collection(path);
+    if project_workflows.is_dir() {
+        let manifest = path.join("Cargo.toml");
+        if manifest.exists() {
+            manifests.insert(normalize_existing_path(&manifest)?);
+        }
+        return read_workflow_collection(
+            &project_workflows,
+            false,
+            workflows,
+            manifests,
+            visited_libs,
+        );
+    }
     if path.join(WORKFLOW_DIR).is_dir() {
         let manifest = path.join("Cargo.toml");
         if manifest.exists() {
@@ -108,7 +136,14 @@ fn read_workflow_search_path(
             visited_libs,
         );
     }
+    if path.file_name().and_then(|name| name.to_str()) == Some(PROJECT_LIGHTFLOW_DIR) {
+        return Ok(());
+    }
     read_workflow_collection(path, false, workflows, manifests, visited_libs)
+}
+
+fn project_workflow_collection(root: &Path) -> PathBuf {
+    root.join(PROJECT_LIGHTFLOW_DIR).join(WORKFLOW_DIR)
 }
 
 fn read_workflow_collection(
