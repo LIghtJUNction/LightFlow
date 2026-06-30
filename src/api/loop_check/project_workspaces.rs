@@ -7,6 +7,7 @@ use super::{
     project_config_template_command, project_config_write_command,
     project_submodule_update_command, project_workspace_config_path,
 };
+use crate::api::project_filter_matches;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
@@ -57,10 +58,11 @@ pub(super) fn filter_project_workspaces(
     let matched = catalog
         .workspaces
         .iter()
-        .any(|workspace| project_workspace_matches(workspace, project));
+        .any(|workspace| project_workspace_matches(catalog, workspace, project));
+    let project_root = catalog.project_root.clone();
     catalog
         .workspaces
-        .retain(|workspace| project_workspace_matches(workspace, project));
+        .retain(|workspace| project_workspace_matches_at_root(&project_root, workspace, project));
     recompute_project_workspace_issues(catalog);
     recompute_project_workspace_counts(catalog);
     matched
@@ -73,7 +75,7 @@ pub(super) fn matched_project_workspace(
     catalog
         .workspaces
         .iter()
-        .find(|workspace| project_workspace_matches(workspace, project))
+        .find(|workspace| project_workspace_matches(catalog, workspace, project))
         .map(|workspace| workspace.name.clone())
 }
 
@@ -98,13 +100,25 @@ pub(super) fn project_workspace_filter_alias_choices(catalog: &ProjectWorkspaceC
     }
 }
 
-fn project_workspace_matches(workspace: &ProjectWorkspaceSummary, project: &str) -> bool {
-    workspace.name == project
-        || workspace.label == project
-        || workspace.path.display().to_string() == project
-        || project_workspace_aliases(&workspace.name)
-            .iter()
-            .any(|alias| alias == project)
+fn project_workspace_matches(
+    catalog: &ProjectWorkspaceCatalog,
+    workspace: &ProjectWorkspaceSummary,
+    project: &str,
+) -> bool {
+    project_workspace_matches_at_root(&catalog.project_root, workspace, project)
+}
+
+fn project_workspace_matches_at_root(
+    project_root: &Path,
+    workspace: &ProjectWorkspaceSummary,
+    project: &str,
+) -> bool {
+    project_filter_matches(
+        project,
+        &workspace.name,
+        &workspace.label,
+        &project_root.join(&workspace.path),
+    )
 }
 
 pub(super) fn project_workspace_aliases(name: &str) -> Vec<String> {

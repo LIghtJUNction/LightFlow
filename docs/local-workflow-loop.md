@@ -167,11 +167,15 @@ this review-only slice.
 Use `--project <name>`, `GET /loop/projects?project=<name>`, MCP
 `project: "<name>"`, or `lightflow://loop/projects?project=<name>` when you
 only need one workspace. The filter accepts full workspace names, labels,
-paths, and conventional `lightflow-*` short aliases, such as `std` for
-`lightflow-std` or `custom-tools` for `lightflow-custom-tools`. A project
-filter that matches no known workspace is reported as a catalog issue so typos
-do not look like a clean workspace, and the issue lists the known workspace
-names and aliases. MCP clients can discover the parameterized resources through
+relative or absolute paths, and conventional `lightflow-*` short aliases, such
+as `std` for `lightflow-std` or `custom-tools` for
+`lightflow-custom-tools`. Relative path filters can use labels such as
+`projects/lightflow-std` or shell-style forms such as
+`./projects/lightflow-std`; MCP resource URI query values may be percent
+encoded. A project filter that matches no known workspace is reported as a
+catalog issue so typos do not look like a clean workspace, and the issue lists
+the known workspace names and aliases. MCP clients can discover the
+parameterized resources through
 `resources/templates/list` as `lightflow://loop?workflow_id={workflow_id}`,
 `lightflow://loop?workflow_id={workflow_id}&require_replay={require_replay}`,
 `lightflow://loop/projects?project={project}`, and
@@ -320,10 +324,17 @@ problems remain in `issues`, while unsafe changed workflows are listed in
 ### Slice 5: Publish And Reuse
 
 - `lfw publish --workflows` handles local path dependency order, dedupes linked
-  workspace duplicate workflow ids in favor of project-local definitions, and
-  reports top-level total, publishable, and blocked counts. Use
+  workspace duplicate workflow ids in favor of root workspace definitions in
+  the default catalog, and reports top-level total, publishable, and blocked
+  counts. Use
   `lfw publish --workflows --project <name>` to review one linked workflow
   project by full name, `projects/<name>` label, or short `lightflow-*` alias.
+  Project-scoped publish views return that linked workspace's matching workflow
+  crates even when the default catalog dedupes the same workflow id in favor of
+  the root workspace.
+  Path dependency order and crates.io blockers include dependencies inherited
+  from `[workspace.dependencies]` as `workspace = true`; blockers are checked in
+  normal, build, dev, and target-specific dependency sections.
   `lfw loop check` uses the same catalog for `loop.publish.workflow_crates` and
   `loop.publish.readiness`, so project-only workflow workspaces are treated as
   publishable workflow sources even when the root `workflows/` tree is empty.
@@ -334,7 +345,7 @@ problems remain in `issues`, while unsafe changed workflows are listed in
   dry-run command list, and top-level total, publishable, and blocked counts.
   `GET /publish?project=<name>`, MCP `lightflow.workflow.publish_list` with
   `project`, and `lightflow://publish?project=<name>` use the same full-name,
-  `projects/<name>` label, path, or short-alias filter as
+  `projects/<name>` label, relative or absolute path, or short-alias filter as
   `lfw publish --workflows --project <name>`, and return the original filter,
   match flag, and canonical matched workspace. MCP clients can discover the
   parameterized resource through `resources/templates/list` as

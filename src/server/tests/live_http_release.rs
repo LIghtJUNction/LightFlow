@@ -90,6 +90,102 @@ pub(crate) async fn verify_live_release_contracts(
         "release checks:\n{release_for_project}"
     );
 
+    let project_path = test_root.join("projects/lightflow-std");
+    let release_for_project_path = request_json(
+        app,
+        &format!(
+            "/release?workflow_id=lightflow.std&project={}",
+            project_path.display()
+        ),
+    )
+    .await;
+    assert_eq!(release_for_project_path["status"], 200);
+    assert_required_fields(
+        openapi,
+        "ReleaseCheckReport",
+        &release_for_project_path["body"],
+    );
+    assert_eq!(
+        release_for_project_path["body"]["project"],
+        project_path.display().to_string()
+    );
+    assert_eq!(
+        release_for_project_path["body"]["project_filter_matched"],
+        true
+    );
+    assert_eq!(
+        release_for_project_path["body"]["matched_project_workspace"],
+        "lightflow-std"
+    );
+    assert!(
+        release_for_project_path["body"]["checks"]
+            .as_array()
+            .expect("release checks")
+            .iter()
+            .any(|check| {
+                check["id"] == "release.command.project_workspaces"
+                    && check["command"]
+                        == serde_json::json!([
+                            "cargo",
+                            "run",
+                            "--bin",
+                            "lfw",
+                            "--",
+                            "loop",
+                            "projects",
+                            "--project",
+                            project_path.display().to_string()
+                        ])
+            }),
+        "release checks:\n{release_for_project_path}"
+    );
+
+    let release_for_relative_project_path = request_json(
+        app,
+        "/release?workflow_id=lightflow.std&project=./projects/lightflow-std",
+    )
+    .await;
+    assert_eq!(release_for_relative_project_path["status"], 200);
+    assert_required_fields(
+        openapi,
+        "ReleaseCheckReport",
+        &release_for_relative_project_path["body"],
+    );
+    assert_eq!(
+        release_for_relative_project_path["body"]["project"],
+        "./projects/lightflow-std"
+    );
+    assert_eq!(
+        release_for_relative_project_path["body"]["project_filter_matched"],
+        true
+    );
+    assert_eq!(
+        release_for_relative_project_path["body"]["matched_project_workspace"],
+        "lightflow-std"
+    );
+    assert!(
+        release_for_relative_project_path["body"]["checks"]
+            .as_array()
+            .expect("release checks")
+            .iter()
+            .any(|check| {
+                check["id"] == "release.command.project_workspaces"
+                    && check["command"]
+                        == serde_json::json!([
+                            "cargo",
+                            "run",
+                            "--bin",
+                            "lfw",
+                            "--",
+                            "loop",
+                            "projects",
+                            "--project",
+                            "./projects/lightflow-std"
+                        ])
+            }),
+        "release checks:\n{release_for_relative_project_path}"
+    );
+
     let release_for_unknown_project = request_json(
         app,
         "/release?workflow_id=lightflow.std&project=lightflow-typo",

@@ -1,19 +1,18 @@
 use super::{CliError, CliResult};
 use serde_json::json;
-use std::fs;
 use std::path::Path;
-use toml_edit::DocumentMut;
 
 mod cargo;
-mod checks;
 mod discovery;
 mod options;
 mod ordering;
 mod targets;
 mod workflow_crates;
 
-use cargo::{cargo_publish_command, run_cargo_command, workspace_document};
-use checks::{publish_issues, workflow_publish_metadata_issues};
+use crate::api::{cargo_publish_command, publish_issues, workflow_publish_metadata_issues};
+use cargo::{
+    cargo_manifest_error, run_cargo_command, workspace_document, workspace_root_for_manifest,
+};
 pub(super) use options::{PublishOptions, PublishTarget, parse_publish_options};
 use targets::{package_field, publish_manifest_path, publish_target_json};
 use workflow_crates::publish_workflow_crates;
@@ -35,13 +34,11 @@ pub(super) fn publish_crate(root: &Path, options: &PublishOptions) -> CliResult<
             manifest_path.display()
         )));
     }
-    let source = fs::read_to_string(&manifest_path)?;
-    let document = source
-        .parse::<DocumentMut>()
-        .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
+    let document = crate::api::read_cargo_manifest(&manifest_path).map_err(cargo_manifest_error)?;
     let package = package_field(&document, "name")?;
     let version = package_field(&document, "version")?;
-    let workspace_document = workspace_document(root)?;
+    let workspace_root = workspace_root_for_manifest(root, &manifest_path)?;
+    let workspace_document = workspace_document(&workspace_root)?;
     let mut issues = publish_issues(&document, workspace_document.as_ref());
     if matches!(options.target, PublishTarget::Workflow(_)) {
         issues.extend(workflow_publish_metadata_issues(&manifest_path));

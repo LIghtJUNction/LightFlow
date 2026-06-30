@@ -694,12 +694,17 @@ Repository-internal examples can still opt out with `publish = false`.
 `lfw publish` reports those as non-publishable instead of trying to upload
 them. Workflow publish checks also parse each workflow crate's `src/lib.rs` and
 block unresolved generated `TODO` placeholders in workflow, input, or output
-descriptions. `lfw publish --workflows` publishes a workflow workspace by
+descriptions. Crates.io dependency blockers are checked across normal, build,
+dev, and target-specific dependency sections, including inherited
+`workspace = true` entries from `[workspace.dependencies]`.
+`lfw publish --workflows` publishes a workflow workspace by
 publishing each workflow crate individually, including present linked workflow
 project workspaces under `projects/`. The plan is dependency ordered for local
-workflow `path` dependencies and includes top-level total/publishable/blocked
-counts alongside per-crate workflow ids, workspace labels, and blockers.
-Duplicate workflow ids are deduped in favor of project-local definitions.
+workflow `path` dependencies, including inherited workspace path dependencies,
+and includes top-level total/publishable/blocked counts alongside per-crate
+workflow ids, workspace labels, and blockers.
+Duplicate workflow ids are deduped in favor of root workspace definitions in
+the default catalog.
 `--apply` requires every workflow crate to pass publish checks and the
 `lfw loop changes` review gate before any upload is attempted. Every `--apply`
 path runs Cargo's publish dry-run command before the real upload command.
@@ -712,13 +717,16 @@ expose the same dependency-ordered workflow publish plan for HTTP, editor, and
 MCP clients, including present linked workflow project workspaces under
 `projects/` with top-level total/publishable/blocked counts, per-crate
 workflow ids and workspace labels, a top-level dependency-ordered dry-run
-command list, and duplicate workflow ids deduped in favor of project-local
-definitions. Use `GET /publish?project=<name>`, MCP
+command list, and duplicate workflow ids deduped in favor of root workspace
+definitions in the default catalog. Use `GET /publish?project=<name>`, MCP
 `lightflow.workflow.publish_list` with `project`, or
 `lightflow://publish?project=<name>` to narrow the catalog to one linked
 project workspace using the same full-name, `projects/<name>` label, path, or
-short-alias matching as the CLI. MCP `resources/templates/list` advertises the
-parameterized publish resource as `lightflow://publish?project={project}`.
+short-alias matching as the CLI; scoped publish views return that linked
+workspace's matching workflow crates even when the default catalog dedupes the
+same workflow id in favor of the root workspace. MCP `resources/templates/list`
+advertises the parameterized publish resource as
+`lightflow://publish?project={project}`.
 
 ## Versioning
 
