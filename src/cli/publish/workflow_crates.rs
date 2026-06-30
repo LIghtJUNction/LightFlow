@@ -1,16 +1,18 @@
-use super::cargo::{cargo_publish_command, run_cargo_command, workspace_document};
-use super::checks::{publish_issues, workflow_id_from_manifest, workflow_publish_metadata_issues};
-use super::discovery::{discover_workflow_manifest_refs, publish_project_matches};
+use super::cargo::{cargo_manifest_error, run_cargo_command, workspace_document};
+use super::discovery::discover_workflow_manifest_refs;
 use super::options::PublishTarget;
 use super::ordering::{
     dedupe_workflow_publish_plans, order_workflow_publish_plans, workflow_package_by_dir_from_plans,
 };
 use super::targets::{package_field, publish_target_json};
+use crate::api::{
+    cargo_publish_command, project_filter_matches, publish_issues, read_cargo_manifest,
+    workflow_id_from_manifest, workflow_publish_metadata_issues,
+};
 use crate::cli::loop_check;
 use crate::cli::{CliError, CliResult};
 use serde_json::json;
-use std::collections::BTreeSet;
-use std::fs;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
@@ -33,24 +35,39 @@ pub(super) fn publish_workflow_crates(
         || manifests.iter().any(|manifest| {
             manifest.project_name.as_deref().is_some_and(|name| {
                 project.is_some_and(|project| {
-                    publish_project_matches(project, name, &manifest.workspace)
+                    project_filter_matches(
+                        project,
+                        name,
+                        &manifest.workspace,
+                        &manifest.workspace_root,
+                    )
                 })
             })
         });
     let mut plans = Vec::new();
+    let mut workspace_documents = BTreeMap::new();
     for manifest in manifests {
-        let workspace_document = workspace_document(&manifest.workspace_root)?;
+        if !workspace_documents.contains_key(&manifest.workspace_root) {
+            workspace_documents.insert(
+                manifest.workspace_root.clone(),
+                workspace_document(&manifest.workspace_root)?,
+            );
+        }
+        let workspace_document = workspace_documents
+            .get(&manifest.workspace_root)
+            .and_then(Option::as_ref);
         plans.push(workflow_publish_plan(
             &manifest.path,
             &manifest.workspace,
-            workspace_document.as_ref(),
+            &manifest.workspace_root,
+            workspace_document,
             apply,
             allow_dirty,
         )?);
     }
     let package_by_dir = workflow_package_by_dir_from_plans(&plans);
     dedupe_workflow_publish_plans(&mut plans);
-    order_workflow_publish_plans(&mut plans, &package_by_dir)?;
+    order_workflow_publish_plans(&mut plans, &package_by_dir, &workspace_documents)?;
 
     let total = plans.len();
     let publishable_count = plans.iter().filter(|plan| plan.issues.is_empty()).count();
@@ -123,6 +140,8 @@ pub(super) fn publish_workflow_crates(
 #[derive(Debug)]
 pub(super) struct WorkflowPublishPlan {
     pub(super) manifest_path: PathBuf,
+    pub(super) workspace_root: PathBuf,
+    pub(super) manifest_document: DocumentMut,
     pub(super) workflow_id: Option<String>,
     pub(super) package: String,
     version: String,
@@ -151,26 +170,129 @@ impl WorkflowPublishPlan {
 pub(super) fn workflow_publish_plan(
     manifest_path: &Path,
     workspace: &str,
+    workspace_root: &Path,
     workspace_document: Option<&DocumentMut>,
     apply: bool,
     allow_dirty: bool,
 ) -> CliResult<WorkflowPublishPlan> {
-    let source = fs::read_to_string(manifest_path)?;
-    let document = source
-        .parse::<DocumentMut>()
-        .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
+    let document = read_cargo_manifest(manifest_path).map_err(cargo_manifest_error)?;
+    let package = package_field(&document, "name")?;
+    let version = package_field(&document, "version")?;
+    let mut issues = publish_issues(&document, workspace_document);
+    issues.extend(workflow_publish_metadata_issues(manifest_path));
     Ok(WorkflowPublishPlan {
         manifest_path: manifest_path.to_path_buf(),
+        workspace_root: workspace_root.to_path_buf(),
+        manifest_document: document,
         workflow_id: workflow_id_from_manifest(manifest_path),
-        package: package_field(&document, "name")?,
-        version: package_field(&document, "version")?,
+        package,
+        version,
         workspace: workspace.to_owned(),
-        issues: {
-            let mut issues = publish_issues(&document, workspace_document);
-            issues.extend(workflow_publish_metadata_issues(manifest_path));
-            issues
-        },
+        issues,
         command: cargo_publish_command(manifest_path, !apply, allow_dirty),
         internal_dependencies: BTreeSet::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn workflow_publish_plan_builds_command_from_apply_and_allow_dirty_flags() {
+        let root = test_dir("publish-plan-command");
+        let manifest = publishable_manifest(root.path());
+
+        let dry_run = workflow_publish_plan(&manifest, "root", root.path(), None, false, false)
+            .expect("dry-run publish plan");
+        assert_eq!(
+            dry_run.command,
+            vec![
+                "cargo".to_owned(),
+                "publish".to_owned(),
+                "--manifest-path".to_owned(),
+                manifest.display().to_string(),
+                "--dry-run".to_owned(),
+            ]
+        );
+
+        let apply = workflow_publish_plan(&manifest, "root", root.path(), None, true, true)
+            .expect("apply publish plan");
+        assert_eq!(
+            apply.command,
+            vec![
+                "cargo".to_owned(),
+                "publish".to_owned(),
+                "--manifest-path".to_owned(),
+                manifest.display().to_string(),
+                "--allow-dirty".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn workflow_publish_plan_reports_workflow_source_parse_error() {
+        let root = test_dir("publish-plan-source-error");
+        let manifest = publishable_manifest(root.path());
+        fs::create_dir_all(root.path().join("src")).expect("source dir");
+        fs::write(root.path().join("src/lib.rs"), "pub fn define(").expect("workflow source");
+
+        let plan = workflow_publish_plan(&manifest, "root", root.path(), None, false, false)
+            .expect("publish plan");
+
+        assert!(
+            plan.issues
+                .iter()
+                .any(|issue| issue.starts_with("workflow source cannot be parsed:"))
+        );
+        assert_eq!(plan.to_json()["publishable"], false);
+    }
+
+    fn publishable_manifest(root: &Path) -> PathBuf {
+        fs::create_dir_all(root).expect("publish test root");
+        let manifest = root.join("Cargo.toml");
+        fs::write(
+            &manifest,
+            r#"
+[package]
+name = "demo-workflow"
+version = "0.1.0"
+description = "Demo workflow."
+license = "MIT"
+"#,
+        )
+        .expect("manifest");
+        manifest
+    }
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn test_dir(name: &str) -> TestDir {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after unix epoch")
+            .as_nanos();
+        TestDir {
+            path: std::env::temp_dir().join(format!(
+                "lightflow-cli-workflow-publish-plan-{name}-{}-{nanos}",
+                std::process::id()
+            )),
+        }
+    }
 }

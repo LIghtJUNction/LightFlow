@@ -35,6 +35,23 @@ async fn loop_projects_endpoint_can_filter_dirty_workspaces() {
         serde_json::json!(["README.md"])
     );
 
+    let relative_path = request_json(
+        &app,
+        "/loop/projects?dirty=true&project=./projects/lightflow-std",
+    )
+    .await;
+    assert_eq!(relative_path["status"], 200);
+    assert_eq!(relative_path["body"]["project_filter_matched"], true);
+    assert_eq!(
+        relative_path["body"]["matched_project_workspace"],
+        "lightflow-std"
+    );
+    assert_eq!(relative_path["body"]["present_count"], 1);
+    assert_eq!(
+        relative_path["body"]["workspaces"][0]["name"],
+        "lightflow-std"
+    );
+
     let unknown = request_json(&app, "/loop/projects?project=lightflow-typo").await;
     assert_eq!(unknown["status"], 200);
     assert_eq!(unknown["body"]["valid"], false);

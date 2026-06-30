@@ -649,6 +649,9 @@ manifest for basic crates.io blockers such as `publish = false`, non-SemVer
 versions, git dependencies, and path dependencies without a version. Workflow
 crate publish checks also parse `src/lib.rs` and block unresolved generated
 `TODO` placeholders in workflow, input, or output descriptions.
+Dependency checks cover normal, build, dev, and target-specific dependency
+sections, including `workspace = true` entries inherited from
+`[workspace.dependencies]`.
 
 ```bash
 lfw publish                  # root lightflow crate plan
@@ -672,9 +675,10 @@ gates.
 workflow project workspaces under `projects/`, orders local path dependencies
 before dependents, and refuses to upload anything unless every workflow crate
 passes the static publish checks. Duplicate workflow ids are deduped in favor
-of project-local definitions. The dry-run plan includes top-level
-total/publishable/blocked counts plus per-crate workflow ids, workspace labels,
-and blockers.
+of root workspace definitions in the default catalog. The dependency order
+accounts for direct path dependencies and inherited workspace path dependencies.
+The dry-run plan includes top-level total/publishable/blocked counts plus
+per-crate workflow ids, workspace labels, and blockers.
 With `--apply`, workflow targets first run the `lfw loop changes` review gate,
 then run the dry-run publish commands, then run the real publish commands.
 `--allow-dirty` forwards Cargo's explicit dirty-worktree override to both
@@ -692,9 +696,11 @@ clients can read the same selected workflow preflight from
 Use `GET /publish?project=<name>`, MCP `lightflow.workflow.publish_list` with
 `project`, or `lightflow://publish?project=<name>` to inspect one linked
 project workspace by full name, `projects/<name>` label, path, or short
-`lightflow-*` alias. The HTTP and MCP inspection surfaces use the same
-linked-workspace, project-filter, and workflow-id dedupe rules as the CLI. MCP
-clients can discover the parameterized resource through
+`lightflow-*` alias. Project-scoped publish views return that linked
+workspace's matching workflow crates even when the default catalog dedupes the
+same workflow id in favor of the root workspace. The HTTP and MCP inspection
+surfaces use the same linked-workspace, project-filter, and workflow-id dedupe
+rules as the CLI. MCP clients can discover the parameterized resource through
 `resources/templates/list` as `lightflow://publish?project={project}`.
 
 ## Release Checks
@@ -814,10 +820,14 @@ Use `--project <name>`, `GET /loop/projects?project=<name>`, MCP
 `project: "<name>"`, or `lightflow://loop/projects?project=<name>` to inspect
 one workspace by name, label, path, or the conventional `lightflow-*` short
 alias, such as `std` for `lightflow-std` or `auto-editing` for
-`lightflow-auto-editing`. Unknown project filters are reported as catalog
-issues instead of returning a silent empty result, and include the known
-workspace names and aliases. MCP clients can discover the parameterized
-project catalog resources through `resources/templates/list` as
+`lightflow-auto-editing`. Path filters may be labels like
+`projects/lightflow-std`, relative forms like `./projects/lightflow-std`, or
+absolute checkout paths. MCP resource URI query values may be percent-encoded,
+for example `lightflow://loop/projects?project=%2Ftmp%2Flightflow-std`.
+Unknown project filters are reported as catalog issues instead of returning a
+silent empty result, and include the known workspace names and aliases. MCP
+clients can discover the parameterized project catalog resources through
+`resources/templates/list` as
 `lightflow://loop?workflow_id={workflow_id}`,
 `lightflow://loop?workflow_id={workflow_id}&require_replay={require_replay}`,
 `lightflow://loop/projects?project={project}` and
@@ -848,13 +858,14 @@ feature-specific runtime checks stay in one extensible contract.
 The development profile skips release-only artifact and document-section gates;
 `lfw release check` keeps those gates for publish readiness.
 Pass `--project <name>` to `lfw dev check` when iterating on one linked
-workspace. `<name>` accepts the same full names, paths, labels, and short
-aliases as `lfw loop projects`. The report records the project filter, narrows
-the project workspace review to that workspace, and plans `lfw loop projects
---project <name>` plus `lfw loop projects --dirty --project <name>`, while the
-selected workflow gate remains controlled by `--workflow`. Unknown project
-filters make the gate invalid and list the known workspace names and aliases,
-so typos do not look like clean project state. Release/dev reports also include
+workspace. `<name>` accepts the same full names, labels, relative or absolute
+paths, and short aliases as `lfw loop projects`. The report records the
+project filter, narrows the project workspace review to that workspace, and
+plans `lfw loop projects --project <name>` plus `lfw loop projects --dirty
+--project <name>`, while the selected workflow gate remains controlled by
+`--workflow`. Unknown project filters make the gate invalid and list the known
+workspace names and aliases, so typos do not look like clean project state.
+Release/dev reports also include
 `known_project_workspaces` and `known_project_aliases` as structured data for
 editor pickers and agent repair prompts, plus `project_filter_matched` when a
 project filter was supplied so clients can distinguish a typo from a matched

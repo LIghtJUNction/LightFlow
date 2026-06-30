@@ -28,6 +28,49 @@ async fn publish_endpoint_can_filter_project_workspaces() {
         "lightflow.http_publish"
     );
 
+    let project_path = test_root.join("projects/lightflow-std");
+    let path_response = request_json(
+        &app,
+        &format!("/publish?project={}", project_path.display()),
+    )
+    .await;
+    assert_eq!(path_response["status"], 200);
+    assert_eq!(
+        path_response["body"]["project"],
+        project_path.display().to_string()
+    );
+    assert_eq!(path_response["body"]["project_filter_matched"], true);
+    assert_eq!(
+        path_response["body"]["matched_project_workspace"],
+        "lightflow-std"
+    );
+    assert_eq!(path_response["body"]["total"], 1);
+    assert_eq!(
+        path_response["body"]["checks"][0]["workspace"],
+        "projects/lightflow-std"
+    );
+
+    let relative_path_response =
+        request_json(&app, "/publish?project=./projects/lightflow-std").await;
+    assert_eq!(relative_path_response["status"], 200);
+    assert_eq!(
+        relative_path_response["body"]["project"],
+        "./projects/lightflow-std"
+    );
+    assert_eq!(
+        relative_path_response["body"]["project_filter_matched"],
+        true
+    );
+    assert_eq!(
+        relative_path_response["body"]["matched_project_workspace"],
+        "lightflow-std"
+    );
+    assert_eq!(relative_path_response["body"]["total"], 1);
+    assert_eq!(
+        relative_path_response["body"]["checks"][0]["workspace"],
+        "projects/lightflow-std"
+    );
+
     let unknown = request_json(&app, "/publish?project=lightflow-typo").await;
     assert_eq!(unknown["status"], 400);
     assert!(

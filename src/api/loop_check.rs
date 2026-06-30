@@ -484,3 +484,5 @@ mod run_history_tests;
 mod selected_publish_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod workflow_publish_catalog_tests;

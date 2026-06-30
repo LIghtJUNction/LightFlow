@@ -238,7 +238,10 @@ warnings here, so agents can spot incomplete metadata before the stricter
 publish gate fails.
 Before publishing, replace generated `TODO` workflow, input, and output
 descriptions; `lfw publish` reports those placeholders as publish blockers for
-workflow crates.
+workflow crates. It also checks normal, build, dev, and target-specific Cargo
+dependency sections for crates.io blockers such as git dependencies and path
+dependencies without versions, including dependencies inherited from
+`[workspace.dependencies]` through `workspace = true`.
 Before handing off agent-authored changes, run `lfw loop changes` to confirm
 workflow crate edits and colocated skill edits are paired in the same review.
 Tools can read the same report from `/loop/changes` or
@@ -251,8 +254,11 @@ coverage, and feature-specific runtime checks.
 Use `lfw dev check --project <name>` when the current change is scoped to one
 linked project workspace. The report still plans the normal developer gates,
 but the project workspace review and `lfw loop projects` commands are
-filtered to that workspace. A project name that matches no linked workspace
-fails the gate and reports the known workspace names and aliases.
+filtered to that workspace. `<name>` may be a workspace name, short alias,
+label such as `projects/lightflow-std`, relative path such as
+`./projects/lightflow-std`, or absolute checkout path. A project name that
+matches no linked workspace fails the gate and reports the known workspace
+names and aliases.
 When a workflow skill is missing required usage guidance, run
 `lfw dev skill-template <workflow_id>` to generate a compliant starter
 `SKILL.md` with frontmatter, workflow contract notes, a CLI run example, and

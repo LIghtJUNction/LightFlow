@@ -7,7 +7,7 @@ mod templates;
 
 pub(super) use scaffold::{
     add_workflow, init_plugin_project, init_workflow_project, normalize_workflow_id,
-    validate_spec_id, workflow_collection_manifest, workflow_crate_dir_name, workspace_manifest,
+    validate_spec_id, workflow_collection_manifest, workspace_manifest,
 };
 
 #[derive(Clone, Copy)]

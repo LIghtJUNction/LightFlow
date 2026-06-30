@@ -62,7 +62,3 @@ fn extract_workflow_id(source: &str) -> Option<String> {
     let end = rest.find('"')?;
     Some(rest[..end].to_owned())
 }
-
-pub(super) fn display_path(path: &Path) -> String {
-    path.strip_prefix(".").unwrap_or(path).display().to_string()
-}

@@ -306,7 +306,10 @@ manifests for common crates.io blockers, and returns the exact
 `--apply` first executes Cargo's publish dry-run command and then the real
 publish command. Batch workflow publishing still publishes ordinary Cargo
 packages one by one, ordered so local workflow path dependencies are published
-before dependents. Dirty worktrees remain blocked by Cargo unless the caller
+before dependents. That order includes direct path dependencies and inherited
+`workspace = true` dependencies resolved from `[workspace.dependencies]`.
+Publish blockers are checked across normal, build, dev, and target-specific
+dependency sections. Dirty worktrees remain blocked by Cargo unless the caller
 passes `--allow-dirty`.
 
 This keeps workflow importing and workflow publishing on the same primitive:

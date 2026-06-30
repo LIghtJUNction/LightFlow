@@ -1,5 +1,5 @@
 use super::{CliError, CliResult, ensure_no_extra_args};
-use crate::api::{ApiService, agent_skill_issues, executor_registry};
+use crate::api::{ApiService, agent_skill_issues, executor_registry, workflow_placeholder_issues};
 use crate::workflow::{PortSpec, WorkflowSpec};
 use serde::Serialize;
 use std::fs;
@@ -218,26 +218,7 @@ fn push_port_schema_issues(port: &PortSpec, issues: &mut Vec<String>) {
 }
 
 fn push_placeholder_check(workflow: &WorkflowSpec, checks: &mut Vec<NodeConformanceCheck>) {
-    let mut issues = Vec::new();
-    if unresolved_placeholder(workflow.description.as_deref()) {
-        issues.push("workflow.description contains unresolved TODO".to_owned());
-    }
-    for port in &workflow.inputs {
-        if unresolved_placeholder(port.description.as_deref()) {
-            issues.push(format!(
-                "workflow.input.{}.description contains unresolved TODO",
-                port.name
-            ));
-        }
-    }
-    for port in &workflow.outputs {
-        if unresolved_placeholder(port.description.as_deref()) {
-            issues.push(format!(
-                "workflow.output.{}.description contains unresolved TODO",
-                port.name
-            ));
-        }
-    }
+    let issues = workflow_placeholder_issues(workflow);
 
     if issues.is_empty() {
         checks.push(NodeConformanceCheck::passed(
@@ -253,10 +234,6 @@ fn push_placeholder_check(workflow: &WorkflowSpec, checks: &mut Vec<NodeConforma
             ),
         ));
     }
-}
-
-fn unresolved_placeholder(value: Option<&str>) -> bool {
-    value.is_some_and(|value| value.to_ascii_lowercase().contains("todo"))
 }
 
 fn push_model_check(workflow: &WorkflowSpec, checks: &mut Vec<NodeConformanceCheck>) {

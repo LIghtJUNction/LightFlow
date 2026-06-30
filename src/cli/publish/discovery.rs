@@ -1,3 +1,4 @@
+use crate::api::project_filter_matches;
 use crate::cli::{CliError, CliResult};
 use std::fs;
 use std::io;
@@ -19,7 +20,7 @@ pub(super) fn discover_workflow_manifest_refs(
         let mut manifests = Vec::new();
         let mut matched = false;
         for workspace in discover_present_project_workspaces(root)? {
-            if publish_project_matches(project, &workspace.name, &workspace.label) {
+            if project_filter_matches(project, &workspace.name, &workspace.label, &workspace.root) {
                 matched = true;
                 manifests.extend(discover_workflow_manifests(
                     &workspace.root,
@@ -134,14 +135,6 @@ fn discover_present_project_workspaces(root: &Path) -> CliResult<Vec<PublishProj
     }
     workspaces.sort_by(|left, right| left.label.cmp(&right.label));
     Ok(workspaces)
-}
-
-pub(super) fn publish_project_matches(filter: &str, name: &str, label: &str) -> bool {
-    filter == name
-        || filter == label
-        || name
-            .strip_prefix("lightflow-")
-            .is_some_and(|alias| filter == alias)
 }
 
 fn sorted_dir_entries(path: &Path) -> CliResult<Vec<fs::DirEntry>> {

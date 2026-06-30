@@ -18,12 +18,15 @@ mod nodes;
 mod patches;
 mod plan;
 mod project_config;
+mod project_filter;
+mod publish_checks;
 mod release;
 mod replay_fingerprints;
 mod run_history_service;
 mod source;
 mod util;
 mod validation;
+mod workflow_metadata;
 mod writer;
 
 use crate::workflow::{
@@ -34,11 +37,21 @@ pub(crate) use agent_skill::agent_skill_issues;
 use deps::dependency_report;
 pub(crate) use dsl::read_workflow_source;
 use execution::execute_workflow_spec as execute_workflow_spec_impl;
+pub(crate) use project_filter::project_filter_matches;
+pub(crate) use publish_checks::{
+    CargoManifestReadError, cargo_manifest_api_error, cargo_publish_command,
+    internal_path_dependency_packages, package_field_value, publish_issues, read_cargo_manifest,
+    read_workspace_cargo_manifest,
+};
 use source::read_workflow_sources;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use util::{validate_id_segment, workflow_crate_dir_name};
 use validation::{validate_workflow_shape, validate_workflow_spec};
+pub(crate) use workflow_metadata::{
+    categorized_workflow_manifest_path, workflow_id_from_manifest, workflow_placeholder_issues,
+    workflow_publish_metadata_issues,
+};
 use writer::{workflow_source, write_text_atomic};
 
 pub(super) const WORKFLOW_DIR: &str = "workflows";
