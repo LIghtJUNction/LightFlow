@@ -15,6 +15,7 @@ mod history;
 mod llm_rig;
 mod loop_check;
 pub mod media_paths;
+mod model_backend;
 mod model_manager;
 mod nodes;
 mod patches;
