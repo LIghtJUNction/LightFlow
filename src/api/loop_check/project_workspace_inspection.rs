@@ -1,4 +1,5 @@
-use super::project_workspaces::{project_workspace_aliases, project_workspaces};
+use super::project_workspace_catalog::project_workspace_aliases;
+use super::project_workspaces::project_workspaces;
 use super::workflow_crates::discover_local_workflow_crates;
 use super::{
     ApiError, ApiResult, ProjectWorkspaceSummary, git_changed_paths, git_current_branch,
