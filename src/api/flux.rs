@@ -1,18 +1,17 @@
 use super::{ApiError, ApiResult};
 use crate::api::model_manager::ModelManager;
-use crate::api::plan::{
-    IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY, IMAGE_INPAINT_CAPABILITY,
-};
 use crate::workflow::{WorkflowArtifact, WorkflowSpec};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 mod io_contract;
+mod types;
 use io_contract::{
     flux_artifact, input_count, input_f32, input_i32, input_i64, input_string, output_paths,
     required_input_path,
 };
 use std::process::Command;
+use types::{FluxBackend, FluxBatchRunRequest, FluxModelHandles, FluxRunRequest, FluxTask};
 
 const FLUX_RUNNER_ENV: &str = "LIGHTFLOW_FLUX_RUNNER";
 const FLUX_BACKEND_ENV: &str = "LIGHTFLOW_FLUX_BACKEND";
@@ -21,94 +20,6 @@ const FLUX_BACKEND_ENV: &str = "LIGHTFLOW_FLUX_BACKEND";
 pub(super) struct FluxExecution {
     pub(super) outputs: serde_json::Map<String, serde_json::Value>,
     pub(super) artifacts: Vec<WorkflowArtifact>,
-}
-
-#[derive(Debug, Clone)]
-struct FluxModelHandles {
-    diffusion_model: PathBuf,
-    llm: PathBuf,
-    vae: PathBuf,
-}
-
-struct FluxRunRequest<'a> {
-    task: FluxTask,
-    prompt: &'a str,
-    negative: &'a str,
-    width: i32,
-    height: i32,
-    seed: i64,
-    steps: i32,
-    guidance: f32,
-    cfg_scale: f32,
-    strength: f32,
-    image_path: Option<&'a Path>,
-    mask_path: Option<&'a Path>,
-    output_path: &'a Path,
-    models: &'a FluxModelHandles,
-}
-
-#[allow(dead_code)]
-struct FluxBatchRunRequest<'a> {
-    task: FluxTask,
-    prompt: &'a str,
-    negative: &'a str,
-    width: i32,
-    height: i32,
-    seed: i64,
-    steps: i32,
-    guidance: f32,
-    cfg_scale: f32,
-    strength: f32,
-    output_paths: &'a [PathBuf],
-    models: &'a FluxModelHandles,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum FluxTask {
-    TextToImage,
-    ImageEdit,
-    Inpaint,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum FluxBackend {
-    Native,
-    ExternalRunner,
-}
-
-impl FluxBackend {
-    fn engine(self) -> &'static str {
-        match self {
-            Self::Native => "diffusion-rs.native.v1",
-            Self::ExternalRunner => "flux2-klein.gguf.runner.v1",
-        }
-    }
-}
-
-impl FluxTask {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::TextToImage => "text-to-image",
-            Self::ImageEdit => "image-edit",
-            Self::Inpaint => "inpaint",
-        }
-    }
-
-    fn default_strength(self) -> f32 {
-        match self {
-            Self::TextToImage => 0.0,
-            Self::ImageEdit => 0.75,
-            Self::Inpaint => 0.85,
-        }
-    }
-
-    fn capability(self) -> &'static str {
-        match self {
-            Self::TextToImage => IMAGE_GENERATE_CAPABILITY,
-            Self::ImageEdit => IMAGE_EDIT_CAPABILITY,
-            Self::Inpaint => IMAGE_INPAINT_CAPABILITY,
-        }
-    }
 }
 
 pub(super) fn workflow_declares_flux_assets(workflow: &WorkflowSpec) -> bool {
