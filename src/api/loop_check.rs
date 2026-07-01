@@ -19,6 +19,7 @@ mod project_workspace_inspection;
 mod project_workspaces;
 mod publish_readiness;
 mod repository_checks;
+mod selected_publish;
 mod selected_workflow;
 mod types;
 mod workflow_crates;
@@ -44,10 +45,8 @@ use project_workspaces::{
 use repository_checks::{
     push_document_checks, push_project_set_check, push_source_change_safety_check,
 };
-use selected_workflow::{
-    push_selected_replay_required_check, push_selected_workflow_checks,
-    selected_local_publish_plan_count,
-};
+use selected_publish::selected_local_publish_plan_count;
+use selected_workflow::{push_selected_replay_required_check, push_selected_workflow_checks};
 pub use types::{
     LocalLoopCheck, LocalLoopReport, LocalLoopStatus, LoopChangeStatus, LoopChangesReport,
     ProjectWorkspaceCatalog, ProjectWorkspaceOptions, ProjectWorkspaceSummary,
