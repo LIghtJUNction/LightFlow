@@ -1,60 +1,11 @@
 use super::dsl::read_workflow_source;
-use super::{LEGACY_LIGHTFLOW_DIR, PROJECT_LIGHTFLOW_DIR, WORKFLOW_DIR, util};
-use crate::workflow::{PortSpec, WorkflowSpec};
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+pub(crate) use paths::categorized_workflow_manifest_path;
+use paths::workflow_lib_path;
+pub(crate) use placeholders::workflow_placeholder_issues;
+use std::path::Path;
 
-pub(crate) fn categorized_workflow_manifest_path(
-    root: &Path,
-    workflow_id: &str,
-) -> io::Result<PathBuf> {
-    let project_workflows = root.join(PROJECT_LIGHTFLOW_DIR).join(WORKFLOW_DIR);
-    let workflows = root.join(WORKFLOW_DIR);
-    let legacy_workflows = root.join(LEGACY_LIGHTFLOW_DIR).join(WORKFLOW_DIR);
-    let entries = match fs::read_dir(&project_workflows).or_else(|error| {
-        if error.kind() == io::ErrorKind::NotFound {
-            fs::read_dir(&workflows).or_else(|error| {
-                if error.kind() == io::ErrorKind::NotFound {
-                    fs::read_dir(&legacy_workflows)
-                } else {
-                    Err(error)
-                }
-            })
-        } else {
-            Err(error)
-        }
-    }) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(project_workflows.join(workflow_id).join("Cargo.toml"));
-        }
-        Err(error) => return Err(error),
-    };
-    for entry in entries {
-        let path = entry?.path();
-        if !path.is_dir() || path.join("src").join("lib.rs").exists() {
-            continue;
-        }
-        let category = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        let manifest = path
-            .join(util::workflow_crate_dir_name(workflow_id))
-            .join("Cargo.toml");
-        if manifest.exists() {
-            return Ok(manifest);
-        }
-        if let Some(short_name) = workflow_category_short_name(workflow_id, category) {
-            let manifest = path.join(short_name).join("Cargo.toml");
-            if manifest.exists() {
-                return Ok(manifest);
-            }
-        }
-    }
-    Ok(project_workflows.join(workflow_id).join("Cargo.toml"))
-}
+mod paths;
+mod placeholders;
 
 pub(crate) fn workflow_publish_metadata_issues(manifest: &Path) -> Vec<String> {
     let Some(lib) = workflow_lib_path(manifest) else {
@@ -74,46 +25,11 @@ pub(crate) fn workflow_id_from_manifest(manifest: &Path) -> Option<String> {
     read_workflow_source(&lib).ok().map(|workflow| workflow.id)
 }
 
-pub(crate) fn workflow_placeholder_issues(workflow: &WorkflowSpec) -> Vec<String> {
-    let mut issues = Vec::new();
-    if unresolved_placeholder(workflow.description.as_deref()) {
-        issues.push("workflow.description contains unresolved TODO".to_owned());
-    }
-    collect_port_placeholder_issues("input", &workflow.inputs, &mut issues);
-    collect_port_placeholder_issues("output", &workflow.outputs, &mut issues);
-    issues
-}
-
-fn collect_port_placeholder_issues(kind: &str, ports: &[PortSpec], issues: &mut Vec<String>) {
-    for port in ports {
-        if unresolved_placeholder(port.description.as_deref()) {
-            issues.push(format!(
-                "workflow.{kind}.{}.description contains unresolved TODO",
-                port.name
-            ));
-        }
-    }
-}
-
-fn unresolved_placeholder(value: Option<&str>) -> bool {
-    value.is_some_and(|value| value.to_ascii_lowercase().contains("todo"))
-}
-
-fn workflow_lib_path(manifest: &Path) -> Option<std::path::PathBuf> {
-    Some(manifest.parent()?.join("src").join("lib.rs"))
-}
-
-fn workflow_category_short_name(workflow_id: &str, category: &str) -> Option<String> {
-    let prefixed = workflow_id
-        .strip_prefix("lightflow.")
-        .unwrap_or(workflow_id);
-    let short = prefixed.strip_prefix(category)?.strip_prefix('.')?;
-    Some(short.replace('.', "_"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::{LEGACY_LIGHTFLOW_DIR, PROJECT_LIGHTFLOW_DIR, WORKFLOW_DIR};
+    use crate::workflow::{PortSpec, WorkflowSpec};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
