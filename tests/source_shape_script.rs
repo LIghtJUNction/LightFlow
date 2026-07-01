@@ -47,6 +47,30 @@ fn source_shape_check_covers_first_party_rust_files() -> Result<(), Box<dyn std:
     Ok(())
 }
 
+#[test]
+fn source_shape_self_test_passes() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new("sh")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/check-source-shape.sh"))
+        .arg("--self-test")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("scripts/check-source-shape.sh --self-test: ok"),
+        "stdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    Ok(())
+}
+
 struct SourceShapeFixture {
     root: PathBuf,
 }
