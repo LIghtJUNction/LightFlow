@@ -15,6 +15,7 @@ mod git_worktree;
 mod local_readiness_checks;
 mod loop_changes;
 mod loop_report;
+mod project_workspace_catalog;
 mod project_workspace_inspection;
 mod project_workspaces;
 mod publish_readiness;
