@@ -43,6 +43,8 @@ fn source_shape_check_covers_first_party_rust_files() -> Result<(), Box<dyn std:
         stdout.contains("src/123_generated_fixture.rs"),
         "stdout:\n{stdout}"
     );
+    assert!(stdout.contains("src/mod.rs"), "stdout:\n{stdout}");
+    assert!(stdout.contains("mod.rs filename"), "stdout:\n{stdout}");
     assert!(
         !stdout.contains("vendor/123_source_shape_fixture.rs"),
         "stdout:\n{stdout}"
@@ -122,6 +124,7 @@ impl SourceShapeFixture {
             root.join("src/123_generated_fixture.rs"),
             "// @generated\nfn fixture() {}\n",
         )?;
+        fs::write(root.join("src/mod.rs"), "fn fixture() {}\n")?;
         fs::write(
             root.join("vendor/123_source_shape_fixture.rs"),
             "fn fixture() {}\n",
