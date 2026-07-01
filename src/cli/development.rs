@@ -2,6 +2,7 @@ use super::{CliError, CliResult};
 use crate::api::{ApiService, CheckProfile, ReleaseCheckOptions};
 
 mod templates;
+mod workflow_locator;
 
 use templates::{project_config_template_json, skill_template_json};
 
