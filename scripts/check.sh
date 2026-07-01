@@ -12,6 +12,7 @@ Default mode is the fast handoff loop:
   scripts/check-source-shape.sh
   cargo fmt --check
   cargo check
+  cargo test --test source_shape_script
   cargo test project_setup_commands_are_stable_and_deduped
   cargo test project_set_config_matches_git_submodules
   cargo test --test standard_workflow_skills repository_workflow_crates_have_agent_skills
@@ -106,6 +107,7 @@ run() {
 run scripts/check-source-shape.sh
 run cargo fmt --check
 run cargo check
+run cargo test --test source_shape_script
 run cargo test project_setup_commands_are_stable_and_deduped
 run cargo test project_set_config_matches_git_submodules
 run cargo test --test standard_workflow_skills repository_workflow_crates_have_agent_skills
