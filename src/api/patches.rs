@@ -1,6 +1,8 @@
-use super::util::{node_inputs, node_outputs};
 use super::{ApiError, ApiResult};
-use crate::workflow::{PortSpec, WorkflowNode, WorkflowPatch, WorkflowSpec};
+mod contract;
+
+use self::contract::validate_candidate_contract;
+use crate::workflow::{WorkflowPatch, WorkflowSpec};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -260,94 +262,6 @@ pub(super) fn validate_patch_for_workflow(
         valid: issues.is_empty(),
         issues,
         patch: patch.clone(),
-    }
-}
-
-fn validate_candidate_contract(
-    node_id: &str,
-    role: &str,
-    candidate_id: &str,
-    node: &WorkflowNode,
-    workflows: &BTreeMap<String, WorkflowSpec>,
-    issues: &mut Vec<String>,
-) {
-    let Some(candidate) = workflows.get(candidate_id) else {
-        return;
-    };
-    push_missing_ports(
-        node_id,
-        role,
-        candidate_id,
-        "input",
-        &node_inputs(node, workflows),
-        &candidate.inputs,
-        issues,
-    );
-    push_unsatisfied_extra_required_inputs(
-        node_id,
-        role,
-        candidate_id,
-        &node_inputs(node, workflows),
-        &candidate.inputs,
-        issues,
-    );
-    push_missing_ports(
-        node_id,
-        role,
-        candidate_id,
-        "output",
-        &node_outputs(node, workflows),
-        &candidate.outputs,
-        issues,
-    );
-}
-
-fn push_missing_ports(
-    node_id: &str,
-    role: &str,
-    candidate_id: &str,
-    direction: &str,
-    required: &[PortSpec],
-    available: &[PortSpec],
-    issues: &mut Vec<String>,
-) {
-    for port in required {
-        match available.iter().find(|candidate| candidate.name == port.name) {
-            Some(candidate) if candidate.ty == port.ty => {}
-            Some(candidate) => issues.push(format!(
-                "patch node {node_id} {role} workflow {candidate_id} {direction} port {} has type {}, expected {}",
-                port.name, candidate.ty, port.ty
-            )),
-            None => issues.push(format!(
-                "patch node {node_id} {role} workflow {candidate_id} is missing {direction} port {}",
-                port.name
-            )),
-        }
-    }
-}
-
-fn push_unsatisfied_extra_required_inputs(
-    node_id: &str,
-    role: &str,
-    candidate_id: &str,
-    original_inputs: &[PortSpec],
-    candidate_inputs: &[PortSpec],
-    issues: &mut Vec<String>,
-) {
-    let original_names = original_inputs
-        .iter()
-        .map(|port| port.name.as_str())
-        .collect::<BTreeSet<_>>();
-    for port in candidate_inputs {
-        if original_names.contains(port.name.as_str()) {
-            continue;
-        }
-        if port.required == Some(true) && port.default.is_none() {
-            issues.push(format!(
-                "patch node {node_id} {role} workflow {candidate_id} has unsatisfied required input port {}",
-                port.name
-            ));
-        }
     }
 }
 
