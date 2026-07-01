@@ -922,7 +922,8 @@ scripts/check.sh --full
 scripts/check.sh --full --project lightflow-std
 scripts/check.sh --full --workflow lightflow.text_plan
 scripts/check.sh --full --project lightflow-std --workflow lightflow.text_plan
-cargo test --test standard_nodes repository_workflow_crates_have_agent_skills
+scripts/check-source-shape.sh
+cargo test --test standard_workflow_skills repository_workflow_crates_have_agent_skills
 cargo test publish_endpoint_can_filter_project_workspaces
 cargo test mcp_exposes_backend_tools
 lfw dev check

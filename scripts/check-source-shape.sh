@@ -6,7 +6,7 @@ usage() {
 usage:
   scripts/check-source-shape.sh
 
-Checks first-party source files under src/ for:
+Checks first-party Rust files in the repository for:
   - files over 500 lines
   - meaningless numeric filenames with a 3+ digit prefix (e.g. 001_foo.rs)
 
@@ -16,7 +16,6 @@ USAGE
 }
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-src_root=$repo_root/src
 max_lines=500
 failed=0
 
@@ -32,11 +31,6 @@ if [ "$#" -gt 0 ]; then
       exit 2
       ;;
   esac
-fi
-
-if [ ! -d "$src_root" ]; then
-  echo "Source root not found: $src_root" >&2
-  exit 1
 fi
 
 is_generated_file() {
@@ -79,7 +73,13 @@ check_file() {
 while IFS= read -r file; do
   check_file "$file"
 done <<EOF
-$(find "$src_root" -type f -name '*.rs')
+$(find "$repo_root" \
+  \( -path "$repo_root/.git" \
+    -o -path "$repo_root/.codegraph" \
+    -o -path "$repo_root/target" \
+    -o -path "$repo_root/vendor" \
+  \) -prune \
+  -o -type f -name '*.rs' -print)
 EOF
 
 if [ "$failed" -ne 0 ]; then

@@ -70,7 +70,8 @@ scripts/check.sh --full --project lightflow-std --workflow lightflow.text_plan
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-cargo test --test standard_nodes repository_workflow_crates_have_agent_skills
+scripts/check-source-shape.sh
+cargo test --test standard_workflow_skills repository_workflow_crates_have_agent_skills
 cargo test publish_endpoint_can_filter_project_workspaces
 cargo test mcp_exposes_backend_tools
 cargo test --features rig --test llm_rig

@@ -18,8 +18,13 @@ cargo test
 
 Relevant coverage:
 
-- `tests/standard_nodes.rs`
-- `tests/text_to_image.rs`
+- `tests/standard_text_nodes.rs`
+- `tests/standard_image_nodes.rs`
+- `tests/standard_control_nodes.rs`
+- `tests/standard_model_runtime_nodes.rs`
+- `tests/text_to_image_preview.rs`
+- `tests/text_to_image_runtime_errors.rs`
+- `tests/text_to_image_pipeline.rs`
 - `tests/llm_rig.rs`
 
 ## RIG LLM Runtime

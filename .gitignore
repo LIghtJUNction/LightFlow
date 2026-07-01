@@ -7,3 +7,6 @@
 docs-site/node_modules/
 docs-site/.next/
 docs-site/out/
+
+# Local CodeGraph index and daemon state.
+.codegraph/
