@@ -1,39 +1,41 @@
 use super::project_workspace_inspection::discover_present_project_workspaces;
 use super::publish_readiness::{
-    categorized_workflow_manifest_path, internal_path_dependencies_from_document,
-    order_workflow_publish_checks, read_publish_workspace_document, workflow_package_by_dir,
-    workflow_publish_check_from_manifest, workflow_publish_check_from_manifest_document,
+    internal_path_dependencies_from_document, order_workflow_publish_checks,
+    read_publish_workspace_document, workflow_package_by_dir,
+    workflow_publish_check_from_manifest_document,
 };
-use super::workflow_crates::{
-    discover_local_workflow_crates, discover_workflow_collection_crates, workflow_id_from_crate,
-};
+use super::workflow_crates::{discover_local_workflow_crates, workflow_id_from_crate};
 use super::{
     ApiError, ApiResult, ApiService, LocalLoopCheck, WorkflowPublishCatalog, WorkflowPublishCheck,
     WorkflowPublishOptions,
 };
 use crate::api::{cargo_manifest_api_error, project_filter_matches, read_cargo_manifest};
 use std::collections::{BTreeMap, btree_map::Entry};
-use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
+
+mod publish_check_lookup;
 
 pub(super) fn workflow_publish_check_for_service(
     service: &ApiService,
     workflow_id: &str,
 ) -> ApiResult<WorkflowPublishCheck> {
-    match workflow_publish_check_at_root(service.repo_root(), workflow_id) {
+    match publish_check_lookup::workflow_publish_check_at_root(service.repo_root(), workflow_id) {
         Ok(check) => Ok(check),
         Err(root_error) => {
             for workspace in discover_present_project_workspaces(service.repo_root())? {
-                if let Ok(mut check) =
-                    workflow_publish_check_from_search_path(&workspace.root, workflow_id)
-                {
+                if let Ok(mut check) = publish_check_lookup::workflow_publish_check_from_search_path(
+                    &workspace.root,
+                    workflow_id,
+                ) {
                     check.workspace = workspace.display_prefix.display().to_string();
                     return Ok(check);
                 }
             }
             for path in &service.workflow_paths {
-                if let Ok(check) = workflow_publish_check_from_search_path(path, workflow_id) {
+                if let Ok(check) =
+                    publish_check_lookup::workflow_publish_check_from_search_path(path, workflow_id)
+                {
                     return Ok(check);
                 }
             }
@@ -307,66 +309,4 @@ pub(super) fn push_publish_check(
         )),
     }
     Ok(())
-}
-
-fn workflow_publish_check_at_root(
-    root: &Path,
-    workflow_id: &str,
-) -> ApiResult<WorkflowPublishCheck> {
-    let manifest = categorized_workflow_manifest_path(root, workflow_id)?;
-    workflow_publish_check_from_manifest(workflow_id, manifest, root)
-}
-
-fn workflow_publish_check_from_search_path(
-    path: &Path,
-    workflow_id: &str,
-) -> ApiResult<WorkflowPublishCheck> {
-    if let Ok(check) = workflow_publish_check_from_crate(path, workflow_id) {
-        return Ok(check);
-    }
-    if path.join(".lightflow").join("workflows").is_dir() || path.join("workflows").is_dir() {
-        if let Ok(check) = workflow_publish_check_at_root(path, workflow_id) {
-            return Ok(check);
-        }
-        for crate_dir in discover_local_workflow_crates(path)? {
-            if workflow_id_from_crate(&crate_dir)? == workflow_id {
-                return workflow_publish_check_from_manifest(
-                    workflow_id,
-                    crate_dir.join("Cargo.toml"),
-                    path,
-                );
-            }
-        }
-    }
-    for crate_dir in discover_workflow_collection_crates(path)? {
-        if workflow_id_from_crate(&crate_dir)? == workflow_id {
-            return workflow_publish_check_from_manifest(
-                workflow_id,
-                crate_dir.join("Cargo.toml"),
-                path,
-            );
-        }
-    }
-    Err(ApiError::NotFound(format!("workflow {workflow_id}")))
-}
-
-fn workflow_publish_check_from_crate(
-    crate_dir: &Path,
-    workflow_id: &str,
-) -> ApiResult<WorkflowPublishCheck> {
-    let manifest = crate_dir.join("Cargo.toml");
-    let lib = crate_dir.join("src").join("lib.rs");
-    if !manifest.exists() || !lib.exists() {
-        return Err(ApiError::NotFound(format!(
-            "workflow crate does not exist: {}",
-            crate_dir.display()
-        )));
-    }
-    let source = fs::read_to_string(&lib)?;
-    let needle = format!("workflow(\"{workflow_id}\")");
-    if !source.contains(&needle) {
-        return Err(ApiError::NotFound(format!("workflow {workflow_id}")));
-    }
-    let root = crate_dir.parent().unwrap_or(crate_dir);
-    workflow_publish_check_from_manifest(workflow_id, manifest, root)
 }
