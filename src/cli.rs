@@ -29,6 +29,7 @@ mod support;
 mod sync;
 mod upgrade;
 mod workflow_help;
+mod workflows;
 
 use add::{add_dependency, parse_add_dependency_options};
 use artifacts::list_artifacts;
@@ -51,19 +52,19 @@ use release::{parse_release_options, release_check};
 use run::{lfx_usage, parse_run_options, parse_run_options_for_command};
 use run_execution::execute_and_record_run_options;
 use runtime::{RuntimeConfig, ensure_lfw_shell_setup};
+use support::parse_bind_addr;
 pub(crate) use support::{
     CliError, CliResult, ensure_no_extra_args, home_usage, print_json, request_json, required_arg,
     run_status, usage, validate_path_segment,
-};
-use support::{
-    parse_bind_addr, required_workflow_id_arg, required_workflow_json_arg, workflow_json_argument,
-    workflow_shortcuts_usage, workflows_usage,
 };
 use sync::{parse_sync_options, sync_project};
 use upgrade::{
     cargo_workspace_root, parse_cargo_workspace_options, update_index, upgrade_workspace,
 };
-use workflow_help::{workflow_help, workflow_help_json};
+use workflows::{
+    workflow_dependencies_shortcut, workflow_help_shortcut, workflow_plan_shortcut,
+    workflow_subcommand,
+};
 
 /// Run the LightFlow CLI from process arguments.
 pub async fn run_from_env() -> CliResult<()> {
@@ -205,137 +206,16 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             print_json(&list_workflows(&service, &options)?)?;
         }
         "workflows" => {
-            let action = match args.first().map(String::as_str) {
-                Some("-h" | "--help") | None => {
-                    return Err(CliError::Usage(workflows_usage()));
-                }
-                Some(action) => action,
-            };
-            match action {
-                "list" => {
-                    if args
-                        .get(1)
-                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-                    {
-                        return Err(CliError::Usage(workflows_usage()));
-                    }
-                    ensure_no_extra_args(args, 1, "workflows list")?;
-                    print_json(&service.list_workflows()?)?;
-                }
-                "get" => {
-                    if args
-                        .get(1)
-                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-                    {
-                        return Err(CliError::Usage(workflows_usage()));
-                    }
-                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
-                    ensure_no_extra_args(args, 2, "workflows get")?;
-                    print_json(&service.get_workflow(workflow_id)?)?;
-                }
-                "deps" | "dependencies" => {
-                    if args
-                        .get(1)
-                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-                    {
-                        return Err(CliError::Usage(workflows_usage()));
-                    }
-                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
-                    ensure_no_extra_args(args, 2, "workflows deps")?;
-                    print_json(&service.workflow_dependencies(workflow_id)?)?;
-                }
-                "plan" => {
-                    if args
-                        .get(1)
-                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-                    {
-                        return Err(CliError::Usage(workflows_usage()));
-                    }
-                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
-                    ensure_no_extra_args(args, 2, "workflows plan")?;
-                    print_json(&service.plan_workflow(workflow_id)?)?;
-                }
-                "help" => {
-                    if args
-                        .get(1)
-                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-                    {
-                        return Err(CliError::Usage(workflow_shortcuts_usage()));
-                    }
-                    let workflow_id = required_workflow_id_arg(args, 1, workflows_usage)?;
-                    ensure_no_extra_args(args, 2, "workflows help")?;
-                    let workflow = service.get_workflow(workflow_id)?;
-                    let dependencies = service.workflow_dependencies(workflow_id)?;
-                    print_json(&workflow_help_json(&workflow, dependencies))?;
-                }
-                "validate" => {
-                    if args
-                        .get(1)
-                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-                    {
-                        return Err(CliError::Usage(workflows_usage()));
-                    }
-                    let workflow: WorkflowSpec = workflow_json_argument(
-                        required_workflow_json_arg(args, 1)?,
-                        "workflows validate",
-                    )?;
-                    ensure_no_extra_args(args, 2, "workflows validate")?;
-                    print_json(&service.validate_workflow(&workflow))?;
-                }
-                "save" => {
-                    if args
-                        .get(1)
-                        .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-                    {
-                        return Err(CliError::Usage(workflows_usage()));
-                    }
-                    let workflow: WorkflowSpec = workflow_json_argument(
-                        required_workflow_json_arg(args, 1)?,
-                        "workflows save",
-                    )?;
-                    ensure_no_extra_args(args, 2, "workflows save")?;
-                    print_json(&service.save_workflow(workflow)?)?;
-                }
-                _ => {
-                    return Err(CliError::Usage(format!(
-                        "workflow action must be list|get|help|deps|plan|validate|save\n{}",
-                        workflows_usage()
-                    )));
-                }
-            }
+            print_json(&workflow_subcommand(&service, args)?)?;
         }
         "deps" | "dependencies" => {
-            if args
-                .first()
-                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-            {
-                return Err(CliError::Usage(workflow_shortcuts_usage()));
-            }
-            let workflow_id = required_workflow_id_arg(args, 0, workflow_shortcuts_usage)?;
-            ensure_no_extra_args(args, 1, "deps")?;
-            print_json(&service.workflow_dependencies(workflow_id)?)?;
+            print_json(&workflow_dependencies_shortcut(&service, args)?)?;
         }
         "plan" => {
-            if args
-                .first()
-                .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-            {
-                return Err(CliError::Usage(workflow_shortcuts_usage()));
-            }
-            let workflow_id = required_workflow_id_arg(args, 0, workflow_shortcuts_usage)?;
-            ensure_no_extra_args(args, 1, "plan")?;
-            print_json(&service.plan_workflow(workflow_id)?)?;
+            print_json(&workflow_plan_shortcut(&service, args)?)?;
         }
         "help" => {
-            if args.is_empty()
-                || args
-                    .first()
-                    .is_some_and(|arg| matches!(arg.as_str(), "-h" | "--help" | "help"))
-            {
-                return Err(CliError::Usage(workflow_shortcuts_usage()));
-            }
-            required_workflow_id_arg(args, 0, workflow_shortcuts_usage)?;
-            print_json(&workflow_help(&service, args, "help")?)?;
+            print_json(&workflow_help_shortcut(&service, args)?)?;
         }
         "sync" => {
             let options = parse_sync_options(args)?;
