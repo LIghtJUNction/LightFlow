@@ -11,8 +11,8 @@ Checks first-party Rust files in the repository for:
   - files over 500 lines
   - meaningless numeric filenames with a 3+ digit prefix (e.g. 001_foo.rs)
 
-Files can be opted out when they are generated and explicitly documented with a
-top-of-file marker comment such as `@generated`.
+Generated files with a top-of-file marker comment such as `@generated` can opt
+out of the line-count check. Numeric-prefix filenames are always rejected.
 USAGE
 }
 
@@ -59,14 +59,12 @@ is_numeric_prefix_file() {
 check_file() {
   file=$1
 
-  if is_generated_file "$file"; then
-    return 0
-  fi
-
-  line_count=$(wc -l < "$file" | tr -d ' ')
-  if [ "$line_count" -gt "$max_lines" ]; then
-    echo "source-shape: over $max_lines lines ($line_count): $file"
-    failed=1
+  if ! is_generated_file "$file"; then
+    line_count=$(wc -l < "$file" | tr -d ' ')
+    if [ "$line_count" -gt "$max_lines" ]; then
+      echo "source-shape: over $max_lines lines ($line_count): $file"
+      failed=1
+    fi
   fi
 
   if is_numeric_prefix_file "$file"; then
@@ -82,13 +80,15 @@ run_self_test() {
   ok_file="$tmp_dir/semantic_name.rs"
   long_file="$tmp_dir/large_semantic_name.rs"
   numeric_file="$tmp_dir/001_generated_name.rs"
-  generated_file="$tmp_dir/999_generated.rs"
+  generated_file="$tmp_dir/generated_over_limit.rs"
+  generated_numeric_file="$tmp_dir/999_generated.rs"
 
   printf 'fn main() {}\n' > "$ok_file"
   awk 'BEGIN { for (i = 0; i < 501; i++) print "// line" }' > "$long_file"
   printf 'fn main() {}\n' > "$numeric_file"
   printf '//@generated\n' > "$generated_file"
   awk 'BEGIN { for (i = 0; i < 501; i++) print "// generated line" }' >> "$generated_file"
+  printf '//@generated\n' > "$generated_numeric_file"
 
   check_file "$ok_file"
   [ "$failed" -eq 0 ] || return 1
@@ -103,6 +103,10 @@ run_self_test() {
   failed=0
   check_file "$generated_file"
   [ "$failed" -eq 0 ] || return 1
+
+  failed=0
+  check_file "$generated_numeric_file" >/dev/null
+  [ "$failed" -eq 1 ] || return 1
 
   echo "scripts/check-source-shape.sh --self-test: ok"
 }
