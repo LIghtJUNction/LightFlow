@@ -4,9 +4,13 @@ use super::templates::{
     workflow_skill_name,
 };
 use crate::cli::{CliError, CliResult};
+use manifests::{plugin_manifest, project_gitignore, workflow_manifest};
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+mod manifests;
+pub(in crate::cli) use manifests::{workflow_collection_manifest, workspace_manifest};
 
 pub(in crate::cli) fn init_workflow_project(root: &Path) -> CliResult<serde_json::Value> {
     let workflows = project_workflow_dir(root);
@@ -184,49 +188,6 @@ fn ensure_workspace_manifest(
     write_new_text(&manifest_path, &manifest, created)
 }
 
-pub(in crate::cli) fn workspace_manifest() -> String {
-    format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\".lightflow/workflows/*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
-        env!("CARGO_PKG_VERSION")
-    )
-}
-
-pub(in crate::cli) fn workflow_collection_manifest() -> String {
-    format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\"workflows/*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
-        env!("CARGO_PKG_VERSION")
-    )
-}
-
-fn project_gitignore() -> String {
-    [
-        "/target/",
-        "/.cache/",
-        "/.test-xdg/",
-        "/lfw.lock",
-        "",
-        "# Local editor and OS files",
-        ".DS_Store",
-        "*.swp",
-        "*.swo",
-        "",
-    ]
-    .join("\n")
-}
-
-fn plugin_manifest(root: &Path) -> String {
-    let package = root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(package_name_from_id)
-        .unwrap_or_else(|| "lightflow-plugin".to_owned());
-    format!(
-        "[package]\nname = {:?}\nversion = \"0.1.0\"\nedition = \"2024\"\ndescription = \"LightFlow workflow plugin.\"\nlicense = \"MIT OR Apache-2.0\"\n\n[dependencies]\nlightflow = {:?}\n",
-        package,
-        env!("CARGO_PKG_VERSION")
-    )
-}
-
 fn plugin_workflow_id(root: &Path) -> String {
     let suffix = root
         .file_name()
@@ -241,15 +202,6 @@ fn plugin_title(root: &Path) -> String {
         root.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("plugin"),
-    )
-}
-
-fn workflow_manifest(workflow_id: &str) -> String {
-    format!(
-        "[package]\nname = {:?}\nversion = \"0.1.0\"\nedition = \"2024\"\ndescription = {:?}\nlicense = \"MIT OR Apache-2.0\"\nrepository = {:?}\n\n[dependencies]\nlightflow = {{ workspace = true }}\n",
-        package_name_from_id(workflow_id),
-        format!("LightFlow workflow {}", workflow_id),
-        env!("CARGO_PKG_REPOSITORY")
     )
 }
 
