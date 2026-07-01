@@ -9,6 +9,7 @@ mod agent_skills;
 mod cache_metadata;
 mod hf_downloads;
 mod lockfile;
+mod model_auto;
 mod model_sources;
 mod models;
 mod modules;
@@ -17,10 +18,10 @@ mod options;
 use agent_skills::{discover_agent_skills, plan_agent_skills, sync_agent_skills};
 use hf_downloads::execute_hf_downloads_parallel;
 use lockfile::{LFW_LOCK, verify_locked_downloads, write_lfw_lock};
+use model_auto::{AutoModelSelection, HardwareInfo, auto_select_model_variants};
 use models::{
-    AutoModelSelection, HardwareInfo, auto_select_model_variants, custom_hf_download_plan,
-    hf_download_plan, model_variant_json, prompt_model_selections, select_custom_hf_models,
-    select_model_variants,
+    custom_hf_download_plan, hf_download_plan, model_variant_json, prompt_model_selections,
+    select_custom_hf_models, select_model_variants,
 };
 use modules::{module_install_json, module_install_plans};
 pub(super) use options::{SyncOptions, parse_sync_options};
