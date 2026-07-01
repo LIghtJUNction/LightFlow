@@ -4,13 +4,21 @@ use super::templates::{
     workflow_skill_name,
 };
 use crate::cli::{CliError, CliResult};
+use files::{write_init_text, write_new_text};
 use manifests::{plugin_manifest, project_gitignore, workflow_manifest};
+use paths::{
+    plugin_title, plugin_workflow_id, project_workflow_dir, workflow_crate_dir,
+    workflow_manifest_path, workflow_skill_path, workflow_source_path,
+};
 use serde_json::json;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+mod files;
 mod manifests;
+mod paths;
 pub(in crate::cli) use manifests::{workflow_collection_manifest, workspace_manifest};
+pub(in crate::cli) use paths::{normalize_workflow_id, validate_spec_id};
 
 pub(in crate::cli) fn init_workflow_project(root: &Path) -> CliResult<serde_json::Value> {
     let workflows = project_workflow_dir(root);
@@ -186,131 +194,4 @@ fn ensure_workspace_manifest(
         workspace_manifest()
     };
     write_new_text(&manifest_path, &manifest, created)
-}
-
-fn plugin_workflow_id(root: &Path) -> String {
-    let suffix = root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("plugin")
-        .replace('-', "_");
-    format!("lightflow.{suffix}")
-}
-
-fn plugin_title(root: &Path) -> String {
-    title_from_id(
-        root.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("plugin"),
-    )
-}
-
-fn workflow_crate_dir(
-    root: &Path,
-    workflow_id: &str,
-    category: Option<&str>,
-    global: bool,
-) -> PathBuf {
-    let mut path = if global {
-        root.join("workflows")
-    } else {
-        project_workflow_dir(root)
-    };
-    if let Some(category) = category {
-        path = path.join(category);
-    }
-    path.join(workflow_crate_dir_name(workflow_id))
-}
-
-fn project_workflow_dir(root: &Path) -> PathBuf {
-    root.join(".lightflow").join("workflows")
-}
-
-pub(in crate::cli) fn workflow_crate_dir_name(workflow_id: &str) -> String {
-    workflow_id
-        .strip_prefix("lightflow.")
-        .unwrap_or(workflow_id)
-        .replace('.', "_")
-}
-
-fn workflow_manifest_path(
-    root: &Path,
-    workflow_id: &str,
-    category: Option<&str>,
-    global: bool,
-) -> PathBuf {
-    workflow_crate_dir(root, workflow_id, category, global).join("Cargo.toml")
-}
-
-fn workflow_source_path(
-    root: &Path,
-    workflow_id: &str,
-    category: Option<&str>,
-    global: bool,
-) -> PathBuf {
-    workflow_crate_dir(root, workflow_id, category, global)
-        .join("src")
-        .join("lib.rs")
-}
-
-fn workflow_skill_path(
-    root: &Path,
-    workflow_id: &str,
-    category: Option<&str>,
-    skill_name: &str,
-    global: bool,
-) -> PathBuf {
-    workflow_crate_dir(root, workflow_id, category, global)
-        .join(".agent")
-        .join("skills")
-        .join(skill_name)
-        .join("SKILL.md")
-}
-
-pub(in crate::cli) fn validate_spec_id(value: &str, label: &str) -> CliResult<()> {
-    if value.is_empty()
-        || value == "."
-        || value == ".."
-        || value.contains('/')
-        || value.contains('\\')
-    {
-        return Err(CliError::Usage(format!("invalid {label}: {value}")));
-    }
-    Ok(())
-}
-
-pub(in crate::cli) fn normalize_workflow_id(value: &str) -> String {
-    let value = value.strip_suffix(".rs").unwrap_or(value);
-    if value.starts_with("lightflow.") {
-        value.to_owned()
-    } else {
-        format!("lightflow.{value}")
-    }
-}
-
-fn write_new_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResult<()> {
-    if path.exists() {
-        return Err(CliError::Usage(format!(
-            "{} already exists; refusing to overwrite",
-            path.display()
-        )));
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, body)?;
-    created.push(path.to_string_lossy().into_owned());
-    Ok(())
-}
-
-fn write_init_text(path: &Path, body: &str, created: &mut Vec<String>) -> CliResult<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, body)?;
-    created.push(path.to_string_lossy().into_owned());
-    Ok(())
 }
