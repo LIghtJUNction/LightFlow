@@ -17,6 +17,7 @@ pub(crate) mod loop_check;
 pub mod mcp;
 mod models;
 mod node;
+mod node_conformance;
 mod patches;
 mod project;
 mod publish;
