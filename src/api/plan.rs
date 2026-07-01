@@ -1,167 +1,23 @@
 use super::{ApiError, ApiResult};
 use crate::api::executors::select_leaf_executor;
-use crate::workflow::{RuntimeRequirement, WorkflowNode, WorkflowNodeKind, WorkflowSpec};
-use serde::Serialize;
+use crate::workflow::{WorkflowNode, WorkflowNodeKind, WorkflowSpec};
 use std::collections::BTreeMap;
 
-pub(super) const IMAGE_GENERATE_CAPABILITY: &str = "lightflow.image.generate";
-pub(super) const IMAGE_EDIT_CAPABILITY: &str = "lightflow.image.edit";
-pub(super) const IMAGE_INPAINT_CAPABILITY: &str = "lightflow.image.inpaint";
-pub(super) const IMAGE_INVERT_CAPABILITY: &str = "lightflow.image.invert";
-pub(super) const IMAGE_LOAD_CAPABILITY: &str = "lightflow.image.load";
-pub(super) const IMAGE_SAVE_CAPABILITY: &str = "lightflow.image.save";
-pub(super) const IMAGE_RESIZE_CAPABILITY: &str = "lightflow.image.resize";
-pub(super) const IMAGE_CROP_CAPABILITY: &str = "lightflow.image.crop";
-pub(super) const LLM_GENERATE_CAPABILITY: &str = "lightflow.llm.generate";
-pub(super) const TEXT_CONCAT_CAPABILITY: &str = "lightflow.text.concat";
-pub(super) const TEXT_TEMPLATE_CAPABILITY: &str = "lightflow.text.template";
-pub(super) const TEXT_REGEX_CAPABILITY: &str = "lightflow.text.regex";
-pub(super) const JSON_EXTRACT_CAPABILITY: &str = "lightflow.json.extract";
-pub(super) const CONTROL_IF_CAPABILITY: &str = "lightflow.control.if";
-pub(super) const CONTROL_SWITCH_CAPABILITY: &str = "lightflow.control.switch";
-pub(super) const CONTROL_MERGE_CAPABILITY: &str = "lightflow.control.merge";
-pub(super) const CONTROL_SPLIT_CAPABILITY: &str = "lightflow.control.split";
-pub(super) const MODEL_SELECT_CAPABILITY: &str = "lightflow.model.select";
-pub(super) const MODEL_LOCK_CHECK_CAPABILITY: &str = "lightflow.model.lock.check";
-pub(super) const IMAGE_UPSCALE_CAPABILITY: &str = "lightflow.image.upscale";
-pub(super) const MASK_COMPOSE_CAPABILITY: &str = "lightflow.mask.compose";
-pub(super) const LLM_CLASSIFY_CAPABILITY: &str = "lightflow.llm.classify";
-pub(super) const LLM_STRUCTURED_OUTPUT_CAPABILITY: &str = "lightflow.llm.structured_output";
-pub(super) const PREVIEW_ENGINE: &str = "builtin.preview.v1";
-pub(super) const PREVIEW_EDIT_ENGINE: &str = "builtin.preview.edit.v1";
-pub(super) const PREVIEW_INPAINT_ENGINE: &str = "builtin.preview.inpaint.v1";
-pub(super) const INVERT_ENGINE: &str = "builtin.image.invert.v1";
-pub(super) const LLM_MOCK_ENGINE: &str = "builtin.llm.mock.v1";
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct ExecutionPlan {
-    pub(super) workflow_id: String,
-    pub(super) node: ExecutionPlanNode,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct ExecutionPlanNode {
-    pub(super) id: String,
-    pub(super) executor_id: String,
-    pub(super) executor_kind: String,
-    pub(super) executor_status: String,
-    pub(super) executor_status_reason: String,
-    pub(super) executor_available: bool,
-    pub(super) capabilities: Vec<String>,
-    pub(super) plans_models: bool,
-    pub(super) recipe: ExecutionRecipe,
-    pub(super) atoms: Vec<ExecutionAtom>,
-    pub(super) models: Vec<PlannedModel>,
-    pub(super) data_policy: DataPolicy,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(super) enum ExecutionRecipe {
-    Passthrough,
-    PreviewTextToImage,
-    FluxTextToImage,
-    FluxImageEdit,
-    FluxInpaint,
-    ImageInvert,
-    ImageLoad,
-    ImageSave,
-    ImageResize,
-    ImageCrop,
-    PreviewImageEdit,
-    PreviewInpaint,
-    RigLlmGenerate,
-    TextConcat,
-    TextTemplate,
-    TextRegex,
-    JsonExtract,
-    ControlIf,
-    ControlSwitch,
-    ControlMerge,
-    ControlSplit,
-    ModelSelect,
-    ModelLockCheck,
-    ImageUpscale,
-    MaskCompose,
-    BuiltinLlmGenerate,
-    LlmClassify,
-    LlmStructuredOutput,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct ExecutionAtom {
-    pub(super) id: String,
-    pub(super) capability: String,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct PlannedModel {
-    pub(super) requirement_id: String,
-    pub(super) capability: String,
-    pub(super) preferred_format: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(super) enum DataPolicy {
-    JsonValues,
-    ArtifactHandles,
-    DeviceResidentPreferred,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
-pub struct WorkflowPlan {
-    pub workflow_id: String,
-    pub version: String,
-    pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<WorkflowRuntimePlan>,
-    pub nodes: Vec<WorkflowPlanNode>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
-pub struct WorkflowPlanNode {
-    pub node_id: String,
-    pub kind: String,
-    pub workflow_id: String,
-    pub candidate_workflow_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selected_workflow_id: Option<String>,
-    pub disabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub child_kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<WorkflowRuntimePlan>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
-pub struct WorkflowRuntimePlan {
-    pub plan_node_id: String,
-    pub executor_id: String,
-    pub executor_kind: String,
-    pub executor_status: String,
-    pub executor_status_reason: String,
-    pub executor_available: bool,
-    pub capabilities: Vec<String>,
-    pub data_policy: String,
-    pub plans_models: bool,
-    pub recipe: String,
-    pub atoms: Vec<WorkflowPlanAtom>,
-    pub models: Vec<WorkflowPlannedModel>,
-    pub declared: Vec<RuntimeRequirement>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
-pub struct WorkflowPlanAtom {
-    pub id: String,
-    pub capability: String,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
-pub struct WorkflowPlannedModel {
-    pub requirement_id: String,
-    pub capability: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preferred_format: Option<String>,
-}
+mod types;
+pub(super) use types::{
+    CONTROL_IF_CAPABILITY, CONTROL_MERGE_CAPABILITY, CONTROL_SPLIT_CAPABILITY,
+    CONTROL_SWITCH_CAPABILITY, DataPolicy, ExecutionAtom, ExecutionPlan, ExecutionPlanNode,
+    ExecutionRecipe, IMAGE_CROP_CAPABILITY, IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY,
+    IMAGE_INPAINT_CAPABILITY, IMAGE_INVERT_CAPABILITY, IMAGE_LOAD_CAPABILITY,
+    IMAGE_RESIZE_CAPABILITY, IMAGE_SAVE_CAPABILITY, IMAGE_UPSCALE_CAPABILITY, INVERT_ENGINE,
+    JSON_EXTRACT_CAPABILITY, LLM_CLASSIFY_CAPABILITY, LLM_GENERATE_CAPABILITY, LLM_MOCK_ENGINE,
+    LLM_STRUCTURED_OUTPUT_CAPABILITY, MASK_COMPOSE_CAPABILITY, MODEL_LOCK_CHECK_CAPABILITY,
+    MODEL_SELECT_CAPABILITY, PREVIEW_EDIT_ENGINE, PREVIEW_ENGINE, PREVIEW_INPAINT_ENGINE,
+    PlannedModel, TEXT_CONCAT_CAPABILITY, TEXT_REGEX_CAPABILITY, TEXT_TEMPLATE_CAPABILITY,
+};
+pub use types::{
+    WorkflowPlan, WorkflowPlanAtom, WorkflowPlanNode, WorkflowPlannedModel, WorkflowRuntimePlan,
+};
 
 pub(super) fn build_workflow_plan(
     workflow: &WorkflowSpec,
