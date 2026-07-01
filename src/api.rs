@@ -9,6 +9,8 @@ mod executors;
 mod flux;
 #[cfg(feature = "flux-native")]
 mod flux_native;
+#[cfg(feature = "flux-native")]
+mod flux_native_session;
 mod history;
 mod llm_rig;
 mod loop_check;
