@@ -9,7 +9,7 @@ mod recording;
 #[path = "history/storage.rs"]
 mod storage;
 #[cfg(test)]
-#[path = "history/tests/mod.rs"]
+#[path = "history/tests/suite.rs"]
 mod tests;
 #[path = "history/types.rs"]
 mod types;

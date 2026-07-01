@@ -10,9 +10,11 @@ usage:
 Checks first-party Rust files in the repository for:
   - files over 500 lines
   - meaningless numeric filenames with a 3+ digit prefix (e.g. 001_foo.rs)
+  - Rust module entrypoint filenames named mod.rs
 
 Generated files with a top-of-file marker comment such as `@generated` can opt
-out of the line-count check. Numeric-prefix filenames are always rejected.
+out of the line-count check. Numeric-prefix filenames and mod.rs are always
+rejected.
 USAGE
 }
 
@@ -56,6 +58,10 @@ is_numeric_prefix_file() {
   return 1
 }
 
+is_mod_rs_file() {
+  [ "$(basename -- "$1")" = "mod.rs" ]
+}
+
 check_file() {
   file=$1
 
@@ -71,6 +77,11 @@ check_file() {
     echo "source-shape: numeric-prefix filename: $file"
     failed=1
   fi
+
+  if is_mod_rs_file "$file"; then
+    echo "source-shape: mod.rs filename: $file"
+    failed=1
+  fi
 }
 
 run_self_test() {
@@ -82,6 +93,7 @@ run_self_test() {
   numeric_file="$tmp_dir/001_generated_name.rs"
   generated_file="$tmp_dir/generated_over_limit.rs"
   generated_numeric_file="$tmp_dir/999_generated.rs"
+  mod_rs_file="$tmp_dir/mod.rs"
 
   printf 'fn main() {}\n' > "$ok_file"
   awk 'BEGIN { for (i = 0; i < 501; i++) print "// line" }' > "$long_file"
@@ -89,6 +101,7 @@ run_self_test() {
   printf '//@generated\n' > "$generated_file"
   awk 'BEGIN { for (i = 0; i < 501; i++) print "// generated line" }' >> "$generated_file"
   printf '//@generated\n' > "$generated_numeric_file"
+  printf 'fn main() {}\n' > "$mod_rs_file"
 
   check_file "$ok_file"
   [ "$failed" -eq 0 ] || return 1
@@ -106,6 +119,10 @@ run_self_test() {
 
   failed=0
   check_file "$generated_numeric_file" >/dev/null
+  [ "$failed" -eq 1 ] || return 1
+
+  failed=0
+  check_file "$mod_rs_file" >/dev/null
   [ "$failed" -eq 1 ] || return 1
 
   echo "scripts/check-source-shape.sh --self-test: ok"
