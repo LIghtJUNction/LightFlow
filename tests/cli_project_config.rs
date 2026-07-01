@@ -123,7 +123,8 @@ fn project_set_config_matches_git_submodules() -> Result<(), Box<dyn std::error:
         "scripts/check.sh should document scoped workflow checks"
     );
     for expected_gate in [
-        "cargo test --test standard_nodes repository_workflow_crates_have_agent_skills",
+        "scripts/check-source-shape.sh",
+        "cargo test --test standard_workflow_skills repository_workflow_crates_have_agent_skills",
         "cargo clippy --all-targets -- -D warnings",
         "cargo run --bin lfw -- publish --workflows --require-publishable",
         "cargo run --bin lfw -- loop projects --dirty",

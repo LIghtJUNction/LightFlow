@@ -12,7 +12,7 @@ To keep workflow refactors predictable and reviewable:
 
 - Avoid splitting source by numbering files such as `001_*`, `002_*`, `123_*`, or any three-digit-prefix filename.
 - Prefer semantic module splits (for example `workflow.rs`, `execution.rs`, `execution/text.rs`) when a file approaches or exceeds `500` lines.
-- Keep modules in `src/` under meaningful names for discoverability.
+- Keep first-party Rust modules, workflow crates, macro crates, and integration tests under meaningful names for discoverability.
 - If a file is generated and intentionally exceeds these conventions, document the exception in the file header and this repository's source-shape checks.
 
 ## Refactors

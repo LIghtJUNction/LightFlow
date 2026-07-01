@@ -35,6 +35,10 @@ pub(super) fn release_commands(
             command_args(["cargo", "fmt", "--check"]),
         ),
         (
+            "release.command.source_shape",
+            command_args(["scripts/check-source-shape.sh"]),
+        ),
+        (
             "release.command.local_workflow_loop",
             command_args(["cargo", "run", "--bin", "lfw", "--", "loop", "check"]),
         ),
@@ -69,7 +73,7 @@ pub(super) fn release_commands(
                 "cargo",
                 "test",
                 "--test",
-                "standard_nodes",
+                "standard_workflow_skills",
                 "repository_workflow_crates_have_agent_skills",
             ]),
         ),
@@ -173,5 +177,29 @@ pub(super) fn command_skipped_check(id: &'static str, command: Vec<String>) -> R
         exit_code: None,
         stdout_tail: None,
         stderr_tail: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_shape_release_command_runs_from_repo_root() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let check = command_check(
+            root,
+            "release.command.source_shape",
+            command_args(["scripts/check-source-shape.sh"]),
+            true,
+        )
+        .expect("source-shape command check");
+
+        assert_eq!(check.status, ReleaseCheckStatus::Passed);
+        assert_eq!(
+            check.command,
+            Some(command_args(["scripts/check-source-shape.sh"]))
+        );
+        assert_eq!(check.exit_code, Some(0));
     }
 }

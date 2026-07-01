@@ -139,6 +139,7 @@ fn lfw_release_check_reports_release_gates_without_running_them()
         planned_commands,
         vec![
             serde_json::json!(["cargo", "fmt", "--check"]),
+            serde_json::json!(["scripts/check-source-shape.sh"]),
             serde_json::json!(["cargo", "run", "--bin", "lfw", "--", "loop", "check"]),
             serde_json::json!([
                 "cargo",
@@ -172,7 +173,7 @@ fn lfw_release_check_reports_release_gates_without_running_them()
                 "cargo",
                 "test",
                 "--test",
-                "standard_nodes",
+                "standard_workflow_skills",
                 "repository_workflow_crates_have_agent_skills"
             ]),
             serde_json::json!(["cargo", "test", "--features", "rig", "--test", "llm_rig"]),
