@@ -5,6 +5,7 @@ use crate::workflow::{
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod model_lock_read;
 mod model_locks;
 pub use model_locks::{
     ModelCatalog, ModelListOptions, ModelLockFingerprint, ModelLockState, ModelLockStatus,
