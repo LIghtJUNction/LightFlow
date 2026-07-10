@@ -123,7 +123,7 @@ impl ApiService {
             let execution = executions.pop().ok_or_else(|| {
                 ApiError::InvalidRequest("run has no replayable stages".to_owned())
             })?;
-            return Ok(ApiRunOutput::Single(execution));
+            return Ok(ApiRunOutput::Single(Box::new(execution)));
         }
 
         Ok(ApiRunOutput::Pipeline(ApiPipelineExecution {
@@ -155,7 +155,7 @@ impl ApiService {
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 enum ApiRunOutput {
-    Single(WorkflowExecution),
+    Single(Box<WorkflowExecution>),
     Pipeline(ApiPipelineExecution),
 }
 

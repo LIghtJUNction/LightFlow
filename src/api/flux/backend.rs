@@ -1,13 +1,24 @@
 use super::types::{FluxBackend, FluxBatchRunRequest, FluxRunRequest};
+use crate::api::executors::validated_flux_runner_path;
+use crate::api::plan::{FLUX_EXTERNAL_ENGINE, FLUX_NATIVE_ENGINE};
 use crate::api::{ApiError, ApiResult};
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
-const FLUX_RUNNER_ENV: &str = "LIGHTFLOW_FLUX_RUNNER";
 const FLUX_BACKEND_ENV: &str = "LIGHTFLOW_FLUX_BACKEND";
 
-pub(super) fn selected_flux_backend() -> ApiResult<FluxBackend> {
+pub(super) fn selected_flux_backend(explicit_engine: Option<&str>) -> ApiResult<FluxBackend> {
+    match explicit_engine {
+        Some(FLUX_NATIVE_ENGINE) => return Ok(FluxBackend::Native),
+        Some(FLUX_EXTERNAL_ENGINE) => return Ok(FluxBackend::ExternalRunner),
+        Some(engine) => {
+            return Err(ApiError::InvalidRequest(format!(
+                "FLUX runtime engine must be {FLUX_NATIVE_ENGINE} or {FLUX_EXTERNAL_ENGINE}; got {engine}"
+            )));
+        }
+        None => {}
+    }
+
     match std::env::var(FLUX_BACKEND_ENV).as_deref() {
         Ok("external") | Ok("runner") => Ok(FluxBackend::ExternalRunner),
         Ok("native") => Ok(FluxBackend::Native),
@@ -97,18 +108,7 @@ pub(super) fn run_flux_native_batch(_request: &FluxBatchRunRequest<'_>) -> ApiRe
 }
 
 fn run_flux_runner(request: &FluxRunRequest<'_>) -> ApiResult<()> {
-    let runner = std::env::var_os(FLUX_RUNNER_ENV).ok_or_else(|| {
-        ApiError::InvalidRequest(format!(
-            "workflow requires a FLUX runner; set {FLUX_RUNNER_ENV} to an executable that accepts LightFlow FLUX runner arguments"
-        ))
-    })?;
-    let runner = PathBuf::from(runner);
-    if !runner.is_file() {
-        return Err(ApiError::InvalidRequest(format!(
-            "{FLUX_RUNNER_ENV} does not point to a file: {}",
-            runner.display()
-        )));
-    }
+    let runner = validated_flux_runner_path().map_err(ApiError::InvalidRequest)?;
 
     let mut command = Command::new(&runner);
     command

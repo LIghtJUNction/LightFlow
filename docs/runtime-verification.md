@@ -27,6 +27,42 @@ Relevant coverage:
 - `tests/text_to_image_pipeline.rs`
 - `tests/llm_rig.rs`
 
+## ComfyUI API Executor
+
+The generic `comfyui.api.v1` path is verified against deterministic local TCP
+mock servers, not a real ComfyUI installation:
+
+```bash
+cargo test --test comfyui_runtime
+cargo test --test comfyui_runtime_errors
+cargo test --test comfyui_runtime_storage
+cargo test --test comfyui_nested_replay
+```
+
+The tests exercise a generated `lightflow.comfyui.workflow` scaffold through a
+real `lfw` subprocess and HTTP sockets. Coverage includes text-to-image node
+overrides, image/mask multipart upload bindings, prompt submission, empty then
+completed history polling, recursive PNG/GIF/video/audio downloads, output-node
+filtering, completed non-file outputs, prompt and execution errors, total
+timeout, remote path traversal safety, and replay fingerprints. Same input
+content remains stable when ComfyUI returns a different prompt id; changing an
+uploaded file produces runtime drift.
+Storage coverage also rejects project-root and symlink escapes, streams
+multipart bodies, refuses download clobbering, and verifies bounded/redacted
+HTTP error bodies. Authorization is sent only to the configured ComfyUI
+origin, and the total deadline includes hashing, upload, submit, polling, and
+download. Nested replay coverage checks recursive execution nodes, event
+depth/node paths/parents, deepest-leaf artifact attribution, and runtime drift.
+
+Server tests verify that long blocking ComfyUI calls do not delay `/health`,
+that the shared semaphore caps concurrent blocking runs, and that
+`LIGHTFLOW_MAX_BLOCKING_RUNS` defaults to `4` with a valid range of `1..=64`.
+
+This proves the LightFlow protocol implementation and replay evidence. It does
+not prove that `127.0.0.1:8188` or another configured endpoint is online, that
+an API graph is accepted by installed custom nodes, or that any real model
+meets image-quality, VRAM, or performance expectations.
+
 ## RIG LLM Runtime
 
 Provider-backed LLM execution is gated by `--features rig`.

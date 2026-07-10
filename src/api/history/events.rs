@@ -3,6 +3,12 @@ use crate::api::ApiResult;
 use serde_json::{Value, json};
 use std::path::Path;
 
+struct NodeEventContext<'a> {
+    run_dir: &'a Path,
+    run_id: &'a str,
+    stage_index: usize,
+}
+
 pub(super) fn append_execution_events(
     run_dir: &Path,
     run_id: &str,
@@ -58,7 +64,32 @@ fn append_stage_node_events(
     let Some(nodes) = execution.get("nodes").and_then(Value::as_array) else {
         return Ok(());
     };
+    let context = NodeEventContext {
+        run_dir,
+        run_id,
+        stage_index,
+    };
+    append_node_events(&context, workflow_id, nodes, "", None, 0)
+}
+
+fn append_node_events(
+    context: &NodeEventContext<'_>,
+    workflow_id: &str,
+    nodes: &[Value],
+    parent_path: &str,
+    parent_node_id: Option<&str>,
+    depth: usize,
+) -> ApiResult<()> {
     for (node_index, node) in nodes.iter().enumerate() {
+        let node_id = node
+            .get("node_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let node_path = if parent_path.is_empty() {
+            node_id.to_owned()
+        } else {
+            format!("{parent_path}/{node_id}")
+        };
         let status = node
             .get("status")
             .and_then(Value::as_str)
@@ -69,12 +100,15 @@ fn append_stage_node_events(
             "node_completed"
         };
         storage::append_event(
-            run_dir,
+            context.run_dir,
             json!({
                 "event": event,
-                "run_id": run_id,
-                "stage_index": stage_index,
+                "run_id": context.run_id,
+                "stage_index": context.stage_index,
                 "node_index": node_index,
+                "depth": depth,
+                "node_path": node_path,
+                "parent_node_id": parent_node_id,
                 "workflow_id": workflow_id,
                 "node_id": node.get("node_id").cloned().unwrap_or_default(),
                 "node_workflow_id": node.get("workflow_id").cloned().unwrap_or_default(),
@@ -88,6 +122,21 @@ fn append_stage_node_events(
                 "artifacts": node.get("artifacts").cloned().unwrap_or_else(|| json!([])),
             }),
         )?;
+        if let Some(children) = node.get("nodes").and_then(Value::as_array) {
+            let child_workflow_id = node
+                .get("selected_workflow_id")
+                .and_then(Value::as_str)
+                .or_else(|| node.get("workflow_id").and_then(Value::as_str))
+                .unwrap_or_default();
+            append_node_events(
+                context,
+                child_workflow_id,
+                children,
+                &node_path,
+                Some(node_id),
+                depth + 1,
+            )?;
+        }
     }
     Ok(())
 }

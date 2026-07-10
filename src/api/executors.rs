@@ -8,6 +8,10 @@ mod definitions;
 use definitions::executor_definitions;
 use serde::Serialize;
 use std::env;
+use std::ffi::OsString;
+use std::path::PathBuf;
+
+pub(super) const FLUX_RUNNER_ENV: &str = "LIGHTFLOW_FLUX_RUNNER";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExecutorInfo {
@@ -77,17 +81,18 @@ impl ExecutorDefinition {
 #[derive(Debug, Clone, Copy)]
 enum ExecutorAvailability {
     Always,
+    EndpointCheckedAtRun,
     Unavailable,
-    EnvPresent(&'static str),
+    FluxRunner,
     Feature(bool),
 }
 
 impl ExecutorAvailability {
     fn available(self) -> bool {
         match self {
-            Self::Always => true,
+            Self::Always | Self::EndpointCheckedAtRun => true,
             Self::Unavailable => false,
-            Self::EnvPresent(name) => env::var(name).is_ok(),
+            Self::FluxRunner => validated_flux_runner_path().is_ok(),
             Self::Feature(enabled) => enabled,
         }
     }
@@ -95,16 +100,18 @@ impl ExecutorAvailability {
     fn reason(self, features: &[&'static str]) -> String {
         match self {
             Self::Always => "available in this build".to_owned(),
+            Self::EndpointCheckedAtRun => "executor available; endpoint checked at run".to_owned(),
             Self::Unavailable => {
                 "reserved executor contract; not runnable in this build".to_owned()
             }
-            Self::EnvPresent(name) => {
-                if env::var(name).is_ok() {
-                    format!("{name} is set")
-                } else {
-                    format!("set {name} to enable this executor")
-                }
-            }
+            Self::FluxRunner => validated_flux_runner_path()
+                .map(|path| {
+                    format!(
+                        "{FLUX_RUNNER_ENV} points to executable file {}",
+                        path.display()
+                    )
+                })
+                .unwrap_or_else(|reason| reason),
             Self::Feature(true) => {
                 let feature = features.first().copied().unwrap_or("required");
                 format!("feature {feature} is enabled")
@@ -115,6 +122,44 @@ impl ExecutorAvailability {
             }
         }
     }
+}
+
+pub(super) fn validated_flux_runner_path() -> Result<PathBuf, String> {
+    validate_flux_runner_path(env::var_os(FLUX_RUNNER_ENV))
+}
+
+fn validate_flux_runner_path(value: Option<OsString>) -> Result<PathBuf, String> {
+    let Some(value) = value else {
+        return Err(format!("set {FLUX_RUNNER_ENV} to enable this executor"));
+    };
+    if value.is_empty() {
+        return Err(format!("{FLUX_RUNNER_ENV} is empty"));
+    }
+
+    let path = PathBuf::from(value);
+    let metadata = path.metadata().map_err(|_| {
+        format!(
+            "{FLUX_RUNNER_ENV} does not point to a file: {}",
+            path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "{FLUX_RUNNER_ENV} does not point to a file: {}",
+            path.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err(format!(
+                "{FLUX_RUNNER_ENV} is not executable: {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(path)
 }
 
 pub(super) const fn data_policy_name(data_policy: DataPolicy) -> &'static str {
@@ -137,4 +182,10 @@ pub(super) fn select_leaf_executor(workflow: &WorkflowSpec) -> Option<&'static E
     executor_definitions()
         .into_iter()
         .find(|executor| (executor.matcher)(workflow))
+}
+
+pub(super) fn executor_by_id(id: &str) -> Option<&'static ExecutorDefinition> {
+    executor_definitions()
+        .into_iter()
+        .find(|executor| executor.id == id)
 }

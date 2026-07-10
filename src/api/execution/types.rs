@@ -4,6 +4,13 @@ use crate::workflow::{ExecutionRuntime, WorkflowArtifact};
 pub(super) struct ChildWorkflowRun {
     pub(super) leaf: LeafExecution,
     pub(super) attempts: usize,
+    pub(super) nodes: Vec<crate::workflow::NodeExecution>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ChildExecution {
+    pub(super) leaf: LeafExecution,
+    pub(super) nodes: Vec<crate::workflow::NodeExecution>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

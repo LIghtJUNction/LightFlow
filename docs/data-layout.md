@@ -143,6 +143,34 @@ Trace snapshots follow the same zero-copy boundary as workflow execution:
 large files are represented as artifact handles and paths, not embedded file
 bytes, model weights, or tensor payloads.
 
+ComfyUI stage inputs retain inline `workflow`, `node_inputs`, and `uploads`
+values; they are not replaced with a pointer to a mutable graph file. The
+selected runtime fingerprint stores the normalized ComfyUI server URL, resolved
+submitted graph SHA-256, and ordered upload target/content hashes. It omits
+prompt ids, timestamps, artifact destinations, and Authorization values.
+Downloaded files default to
+`.lightflow/artifacts/comfyui/<safe-workflow-id>/<prompt-id>/`. Relative
+`output_dir` values resolve from the repository root. Upload paths and output
+directories must remain under that root after canonicalization; traversal and
+symlink escapes are rejected. Remote filenames are
+untrusted: LightFlow uses only a sanitized basename with node, field, and index
+prefixes. Multipart uploads and downloads stream rather than buffering whole
+files, and downloads use unique create-new temporary files plus no-clobber
+persistence. `LIGHTFLOW_COMFYUI_AUTHORIZATION` is sent only to the same origin
+as configured `LIGHTFLOW_COMFYUI_URL`. The run deadline covers hashing, upload,
+submit, polling, and download. Completed histories without files still retain
+`history` and `remote_outputs` and succeed.
+
+Nested `NodeExecution.nodes` remain in `execution.json`. Their trace events
+store `depth`, `node_path`, and parent identity, while artifact catalog rows use
+the deepest producer's `node_path` and avoid duplicates propagated through
+parent nodes. Replay walks the same tree when comparing runtime fingerprints.
+
+The HTTP server holds one shared blocking-run permit across workflow execution
+and recording, replay, or HTTP MCP handling inside `spawn_blocking`.
+`LIGHTFLOW_MAX_BLOCKING_RUNS` defaults to `4`, accepts `1..=64`, and falls back
+to `4` for missing or invalid values; `/health` remains outside this pool.
+
 Runtime patches are part of the stored stage definition, so replay uses the
 same patch that the original run used. Recorded executions include
 `model_locks`, a snapshot of model lock status for executed workflows. Replay
@@ -472,12 +500,20 @@ skill. When workflow inputs, outputs, model requirements, runtime behavior, or
 common commands change, update the corresponding skill in the same change.
 `lfw new --runtime <capability>` selects a runtime-aware node template. For
 example, `--runtime lightflow.image.generate` generates prompt/image ports,
-Node Schema v1 metadata, an `image_model` requirement placeholder, a runnable
-skill example, and a `tests/contract.rs` scaffold for the workflow crate.
+Node Schema v1 metadata, a runnable deterministic `builtin.preview.v1`
+scaffold, a skill example, and a `tests/contract.rs` scaffold for the workflow
+crate. The preview verifies pipeline and PNG artifact handling; it does not
+represent FLUX, ComfyUI, or production model quality. A real backend contract
+must declare its concrete model requirements.
 Run `lfw node test <workflow_id>` before publishing or installing a node. The
 conformance check validates the workflow graph, `lfw help` contract, Node
-Schema v1 metadata, model requirement bindings, runtime executor availability,
-and the workflow crate's agent skill.
+Schema v1 metadata, model requirement bindings, and the workflow crate's agent
+skill. Runtime conformance builds the real plan, resolves logical FLUX recipes
+to the selected physical native or external backend, checks its current
+availability, and recursively verifies every reachable leaf in composite and
+conditional branches without executing the workflow.
+External FLUX runner availability requires `LIGHTFLOW_FLUX_RUNNER` to name a
+regular executable file, not merely contain a value.
 
 The backend exposes workflow-backed nodes over HTTP for editor palettes:
 

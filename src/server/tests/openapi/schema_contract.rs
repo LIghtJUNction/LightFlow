@@ -16,8 +16,10 @@ async fn openapi_documents_patchable_workflow_run_options() {
     assert_schema_property(&openapi, "WorkflowNodePatch", "timeout_ms");
     assert_schema_property(&openapi, "WorkflowExecution", "runtime");
     assert_schema_property(&openapi, "NodeExecution", "runtime");
+    assert_schema_property(&openapi, "NodeExecution", "nodes");
     assert_schema_property(&openapi, "ExecutionRuntime", "executor_id");
     assert_schema_property(&openapi, "ExecutionRuntime", "data_policy");
+    assert_schema_property(&openapi, "ExecutionRuntime", "replay_fingerprint");
     assert_schema_property(&openapi, "ExecutorInfo", "status_reason");
     assert_schema_property(&openapi, "ExecutorInfo", "data_policy");
     assert_schema_property(&openapi, "ExecutorInfo", "plans_models");
@@ -56,6 +58,8 @@ async fn openapi_documents_patchable_workflow_run_options() {
     assert_schema_property(&openapi, "ReplayRuntimeFingerprint", "runtime");
     assert_schema_property(&openapi, "RunArtifact", "stage_index");
     assert_schema_property(&openapi, "RunArtifact", "node_index");
+    assert_schema_property(&openapi, "RunArtifact", "node_path");
+    assert_schema_property(&openapi, "RunArtifact", "depth");
     assert_schema_property(&openapi, "WorkflowPlan", "runtime");
     assert_schema_property(&openapi, "WorkflowRuntimePlan", "executor_status");
     assert_schema_property(&openapi, "WorkflowRuntimePlan", "models");

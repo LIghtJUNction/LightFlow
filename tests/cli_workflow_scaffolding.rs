@@ -293,16 +293,21 @@ fn lfw_new_runtime_template_creates_node_contract_files() -> Result<(), Box<dyn 
 
     let crate_dir = root.join(".lightflow/workflows/image/my_flux_sampler");
     let source = fs::read_to_string(crate_dir.join("src/lib.rs"))?;
-    assert!(source.contains(".runtime(\"image_runtime\", \"lightflow.image.generate\")"));
-    assert!(source.contains(".model(\"image_model\", \"text-to-image\")"));
+    assert!(source.contains(
+        ".builtin_runtime(\"image_runtime\", \"lightflow.image.generate\", \"builtin.preview.v1\")"
+    ));
+    assert!(!source.contains(".model(\"image_model\", \"text-to-image\")"));
     assert!(source.contains(".input_widget(\"prompt\", \"prompt\")"));
-    assert!(source.contains(".input_model_requirement(\"model\", \"image_model\")"));
+    assert!(!source.contains(".input_model_requirement("));
+    assert!(!source.contains(".output_model_requirement("));
     assert!(source.contains(".output_artifact_kind(\"image\", \"image\")"));
 
     let skill =
         fs::read_to_string(crate_dir.join(".agent/skills/lightflow-my-flux-sampler/SKILL.md"))?;
     assert!(skill.contains("Runtime: `lightflow.image.generate`."));
-    assert!(skill.contains("Model requirement `image_model`"));
+    assert!(skill.contains("deterministic preview"));
+    assert!(skill.contains("does not represent production model quality"));
+    assert!(skill.contains("declare its concrete model requirements"));
     assert!(skill.contains("lfw run lightflow.my_flux_sampler"));
     assert!(skill.contains("POST http://127.0.0.1:5174/workflows/lightflow.my_flux_sampler/run"));
     assert!(
@@ -320,10 +325,28 @@ fn lfw_new_runtime_template_creates_node_contract_files() -> Result<(), Box<dyn 
         workflow["runtimes"][0]["capability"],
         "lightflow.image.generate"
     );
-    assert_eq!(workflow["models"][0]["id"], "image_model");
+    assert_eq!(workflow["runtimes"][0]["engine"], "builtin.preview.v1");
+    assert_eq!(workflow["models"], serde_json::json!([]));
     assert_eq!(workflow["inputs"][0]["name"], "prompt");
     assert_eq!(workflow["inputs"][0]["widget"], "prompt");
     assert_eq!(workflow["outputs"][0]["artifact_kind"], "image");
+
+    let output_path = root.join("generated-preview.png");
+    let output_path_text = output_path.display().to_string();
+    let execution = lfw(
+        &root,
+        [
+            "run",
+            "lightflow.my_flux_sampler",
+            "--prompt",
+            "a quiet lake",
+            "--output",
+            output_path_text.as_str(),
+        ],
+    )?;
+    assert_eq!(execution["runtime"]["executor_id"], "builtin.preview.v1");
+    let image = fs::read(&output_path)?;
+    assert!(image.starts_with(b"\x89PNG\r\n\x1a\n"));
 
     let _ = fs::remove_dir_all(root);
     Ok(())

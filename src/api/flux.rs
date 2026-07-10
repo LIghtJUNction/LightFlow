@@ -26,6 +26,25 @@ pub(super) fn workflow_declares_flux_assets(workflow: &WorkflowSpec) -> bool {
         && has_model_requirement(workflow, "vae_model")
 }
 
+pub(super) fn selected_flux_executor_engine(
+    workflow: &WorkflowSpec,
+    capability: &str,
+) -> ApiResult<&'static str> {
+    Ok(selected_flux_backend_for_workflow(workflow, capability)?.engine())
+}
+
+fn selected_flux_backend_for_workflow(
+    workflow: &WorkflowSpec,
+    capability: &str,
+) -> ApiResult<FluxBackend> {
+    let engine = workflow
+        .runtimes
+        .iter()
+        .find(|runtime| runtime.capability == capability)
+        .and_then(|runtime| runtime.engine.as_deref());
+    selected_flux_backend(engine)
+}
+
 fn has_model_requirement(workflow: &WorkflowSpec, id: &str) -> bool {
     workflow.models.iter().any(|model| model.id == id)
 }
@@ -91,7 +110,7 @@ fn execute_flux_with_models(
     };
     let output_paths = output_paths(root, workflow, inputs, seed as u64, count);
     let mut artifacts = Vec::with_capacity(output_paths.len());
-    let backend = selected_flux_backend()?;
+    let backend = selected_flux_backend_for_workflow(workflow, task.capability())?;
 
     for output_path in &output_paths {
         if let Some(parent) = output_path.parent() {

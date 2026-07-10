@@ -141,13 +141,47 @@ HTTP at `POST /workflows/{workflow_id}/run`, through the `lfw mcp` JSON-RPC
 subcommand, and through the MCP `lightflow.workflow.run` tool served at
 `POST /mcp`.
 
-The current runner deliberately does not implement provider routing, remote
-execution substrates, or agent behavior. FLUX image generation, edit, and
-inpaint are the first runtime adapter boundary: the core resolves workflow
+The current runner deliberately does not implement agent behavior. Runtime
+adapters own provider-specific or remote execution. FLUX image generation,
+edit, and inpaint use one such boundary: the core resolves workflow
 inputs and synced model paths, then runs the native Rust `flux-native` backend
 when compiled in. Builds without that feature can call `LIGHTFLOW_FLUX_RUNNER`
 with the same stable task contract. The selected backend owns sampling and
 writes the PNG artifact.
+
+`comfyui.api.v1` is the generic remote graph boundary. Its contract layer
+validates an inline ComfyUI API Format graph, applies arbitrary node input
+overrides, hashes local upload bytes, and validates upload bindings. Its
+blocking client uses explicit timeouts for multipart `/upload/image`, JSON
+`/prompt`, `/history/<prompt_id>` polling, and URL-encoded `/view` downloads.
+The artifact layer recursively extracts any completed output object containing
+`filename`, `subfolder`, and `type`, filters optional output node ids, assigns
+media kinds/MIME types, and writes only safe local basenames.
+Upload sources and output directories are canonicalized beneath the project
+root, including rejection of symlink escapes. Authorization is attached only
+when the endpoint origin matches configured `LIGHTFLOW_COMFYUI_URL`. One
+deadline covers hashing, streaming multipart upload, submit, polling, and
+streaming download; artifact persistence uses create-new temporary files and
+refuses to clobber an existing target.
+
+The Axum adapter runs workflow execution plus recording, replay, and HTTP MCP
+inside `spawn_blocking` while holding a shared semaphore permit. The default
+limit is four; `LIGHTFLOW_MAX_BLOCKING_RUNS` accepts `1..=64` and otherwise
+falls back to four. Read-only health and catalog routes do not wait for these
+blocking permits.
+
+The ComfyUI executor is compiled-available because it has no feature or local
+model dependency. Its status reason is `executor available; endpoint checked at
+run`; this is not an online health assertion. ComfyUI owns its models and custom
+nodes, so this executor does not add LightFlow model-lock requirements. Its
+optional `ExecutionRuntime.replay_fingerprint` records the normalized endpoint,
+resolved graph SHA-256, and ordered upload target/content hashes. Existing
+replay comparison therefore covers ComfyUI root leaves and graph-node leaves
+without recording prompt ids, local artifact paths, or Authorization values.
+Nested graph executions retain recursive child nodes. Trace events include
+depth, slash-delimited node path, and parent context; replay fingerprints and
+artifact projection traverse the same tree and attribute duplicate propagated
+artifacts to the deepest producing leaf.
 
 The native FLUX text-to-image backend is process-resident. It caches one loaded
 FLUX/Qwen/VAE session keyed by the locked model paths and reuses that session

@@ -24,6 +24,8 @@ pub struct ExecutionRuntime {
     pub data_policy: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared: Vec<RuntimeRequirement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_fingerprint: Option<serde_json::Value>,
 }
 
 /// Materialized file produced by a workflow run.
@@ -57,6 +59,8 @@ pub struct NodeExecution {
     pub outputs: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub artifacts: Vec<WorkflowArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nodes: Vec<NodeExecution>,
 }
 
 /// Runtime state of one node.

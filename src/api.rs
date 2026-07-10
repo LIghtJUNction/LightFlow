@@ -1,6 +1,7 @@
 //! Framework-independent LightFlow backend service.
 
 mod agent_skill;
+mod comfyui;
 mod deps;
 mod dsl;
 mod error;

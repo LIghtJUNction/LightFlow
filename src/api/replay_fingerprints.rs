@@ -66,19 +66,37 @@ fn collect_runtime_fingerprints(
             stage_index,
             workflow_id,
             None,
+            None,
             runtime.clone(),
         ));
     }
-    for node in execution
-        .get("nodes")
+    collect_node_runtime_fingerprints(execution.get("nodes"), stage_index, "", runtimes);
+}
+
+fn collect_node_runtime_fingerprints(
+    nodes: Option<&serde_json::Value>,
+    stage_index: Option<usize>,
+    parent_path: &str,
+    runtimes: &mut Vec<serde_json::Value>,
+) {
+    for node in nodes
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
     {
+        let node_id = node
+            .get("node_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let node_path = if parent_path.is_empty() {
+            node_id.to_owned()
+        } else {
+            format!("{parent_path}/{node_id}")
+        };
         let Some(runtime) = node.get("runtime").filter(|runtime| !runtime.is_null()) else {
+            collect_node_runtime_fingerprints(node.get("nodes"), stage_index, &node_path, runtimes);
             continue;
         };
-        let node_id = node.get("node_id").and_then(serde_json::Value::as_str);
         let selected_workflow_id = node
             .get("selected_workflow_id")
             .and_then(serde_json::Value::as_str)
@@ -90,9 +108,11 @@ fn collect_runtime_fingerprints(
         runtimes.push(runtime_fingerprint(
             stage_index,
             selected_workflow_id,
-            node_id,
+            Some(node_id),
+            Some(&node_path),
             runtime.clone(),
         ));
+        collect_node_runtime_fingerprints(node.get("nodes"), stage_index, &node_path, runtimes);
     }
 }
 
@@ -100,6 +120,7 @@ fn runtime_fingerprint(
     stage_index: Option<usize>,
     workflow_id: &str,
     node_id: Option<&str>,
+    node_path: Option<&str>,
     runtime: serde_json::Value,
 ) -> serde_json::Value {
     let mut value = serde_json::Map::new();
@@ -109,6 +130,9 @@ fn runtime_fingerprint(
     value.insert("workflow_id".to_owned(), workflow_id.to_owned().into());
     if let Some(node_id) = node_id {
         value.insert("node_id".to_owned(), node_id.to_owned().into());
+    }
+    if let Some(node_path) = node_path {
+        value.insert("node_path".to_owned(), node_path.to_owned().into());
     }
     value.insert("runtime".to_owned(), runtime);
     value.into()

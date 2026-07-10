@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 
 mod types;
 pub(super) use types::{
-    CONTROL_IF_CAPABILITY, CONTROL_MERGE_CAPABILITY, CONTROL_SPLIT_CAPABILITY,
-    CONTROL_SWITCH_CAPABILITY, DataPolicy, ExecutionAtom, ExecutionPlan, ExecutionPlanNode,
-    ExecutionRecipe, IMAGE_CROP_CAPABILITY, IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY,
+    COMFYUI_API_ENGINE, COMFYUI_WORKFLOW_CAPABILITY, CONTROL_IF_CAPABILITY,
+    CONTROL_MERGE_CAPABILITY, CONTROL_SPLIT_CAPABILITY, CONTROL_SWITCH_CAPABILITY, DataPolicy,
+    ExecutionAtom, ExecutionPlan, ExecutionPlanNode, ExecutionRecipe, FLUX_EXTERNAL_ENGINE,
+    FLUX_NATIVE_ENGINE, IMAGE_CROP_CAPABILITY, IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY,
     IMAGE_INPAINT_CAPABILITY, IMAGE_INVERT_CAPABILITY, IMAGE_LOAD_CAPABILITY,
     IMAGE_RESIZE_CAPABILITY, IMAGE_SAVE_CAPABILITY, IMAGE_UPSCALE_CAPABILITY, INVERT_ENGINE,
     JSON_EXTRACT_CAPABILITY, LLM_CLASSIFY_CAPABILITY, LLM_GENERATE_CAPABILITY, LLM_MOCK_ENGINE,
@@ -74,7 +75,7 @@ fn plan_graph_node(
         .as_ref()
         .and_then(|workflow_id| workflows.get(workflow_id));
     let runtime = match child {
-        Some(child) if child.nodes.is_empty() => {
+        Some(child) if !node.disabled && child.nodes.is_empty() => {
             let plan = build_leaf_execution_plan(child)?;
             Some(runtime_plan(child, &plan.node))
         }
@@ -145,6 +146,7 @@ fn runtime_plan(workflow: &WorkflowSpec, node: &ExecutionPlanNode) -> WorkflowRu
 }
 
 pub(super) fn build_leaf_execution_plan(workflow: &WorkflowSpec) -> ApiResult<ExecutionPlan> {
+    validate_explicit_runtime_engines(workflow)?;
     let Some(executor) = select_leaf_executor(workflow) else {
         let Some(runtime) = workflow.runtimes.first() else {
             unreachable!("passthrough executor matches workflows with no runtimes");
@@ -154,35 +156,101 @@ pub(super) fn build_leaf_execution_plan(workflow: &WorkflowSpec) -> ApiResult<Ex
             workflow.id, runtime.capability
         )));
     };
-    let info = executor.info();
+    let (recipe_executor, public_executor) = match flux_capability(executor.recipe) {
+        Some(capability) => {
+            let physical = resolve_flux_executor(workflow, capability)?;
+            (executor, physical)
+        }
+        None => {
+            let selected = explicit_executor_for(workflow, executor).unwrap_or(executor);
+            (selected, selected)
+        }
+    };
+    let info = public_executor.info();
 
     let node = ExecutionPlanNode {
         id: format!("{}::plan", workflow.id),
-        executor_id: executor.id.to_owned(),
-        executor_kind: executor.kind.to_owned(),
+        executor_id: public_executor.id.to_owned(),
+        executor_kind: public_executor.kind.to_owned(),
         executor_status: info.status.to_owned(),
         executor_status_reason: info.status_reason,
         executor_available: info.available,
-        capabilities: executor
+        capabilities: public_executor
             .capabilities
             .iter()
             .map(|capability| (*capability).to_owned())
             .collect(),
-        plans_models: executor.plans_models,
-        recipe: executor.recipe,
-        atoms: atoms(executor.atoms),
-        models: if executor.plans_models {
+        plans_models: recipe_executor.plans_models,
+        recipe: recipe_executor.recipe,
+        atoms: atoms(recipe_executor.atoms),
+        models: if recipe_executor.plans_models {
             planned_models(workflow)
         } else {
             Vec::new()
         },
-        data_policy: executor.data_policy,
+        data_policy: recipe_executor.data_policy,
     };
 
     Ok(ExecutionPlan {
         workflow_id: workflow.id.clone(),
         node,
     })
+}
+
+fn validate_explicit_runtime_engines(workflow: &WorkflowSpec) -> ApiResult<()> {
+    for runtime in &workflow.runtimes {
+        let Some(engine) = runtime.engine.as_deref() else {
+            continue;
+        };
+        let executor = super::executors::executor_by_id(engine).ok_or_else(|| {
+            ApiError::InvalidRequest(format!(
+                "workflow {} runtime {} declares unknown engine {engine}",
+                workflow.id, runtime.id
+            ))
+        })?;
+        if !executor.capabilities.contains(&runtime.capability.as_str()) {
+            return Err(ApiError::InvalidRequest(format!(
+                "workflow {} runtime {} engine {engine} does not support capability {}",
+                workflow.id, runtime.id, runtime.capability
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn explicit_executor_for(
+    workflow: &WorkflowSpec,
+    matched: &'static super::executors::ExecutorDefinition,
+) -> Option<&'static super::executors::ExecutorDefinition> {
+    workflow.runtimes.iter().find_map(|runtime| {
+        let engine = runtime.engine.as_deref()?;
+        matched
+            .capabilities
+            .contains(&runtime.capability.as_str())
+            .then(|| super::executors::executor_by_id(engine))?
+    })
+}
+
+fn resolve_flux_executor(
+    workflow: &WorkflowSpec,
+    capability: &str,
+) -> ApiResult<&'static super::executors::ExecutorDefinition> {
+    let engine = super::flux::selected_flux_executor_engine(workflow, capability)?;
+    super::executors::executor_by_id(engine).ok_or_else(|| {
+        ApiError::InvalidRequest(format!(
+            "workflow {} selected unknown FLUX executor {engine}",
+            workflow.id
+        ))
+    })
+}
+
+fn flux_capability(recipe: ExecutionRecipe) -> Option<&'static str> {
+    match recipe {
+        ExecutionRecipe::FluxTextToImage => Some(IMAGE_GENERATE_CAPABILITY),
+        ExecutionRecipe::FluxImageEdit => Some(IMAGE_EDIT_CAPABILITY),
+        ExecutionRecipe::FluxInpaint => Some(IMAGE_INPAINT_CAPABILITY),
+        _ => None,
+    }
 }
 
 fn atoms(items: &[(&str, &str)]) -> Vec<ExecutionAtom> {
@@ -225,6 +293,7 @@ fn node_kind(kind: WorkflowNodeKind) -> &'static str {
 fn recipe_name(recipe: ExecutionRecipe) -> &'static str {
     match recipe {
         ExecutionRecipe::Passthrough => "passthrough",
+        ExecutionRecipe::ComfyUiWorkflow => "comfyui_workflow",
         ExecutionRecipe::PreviewTextToImage => "preview_text_to_image",
         ExecutionRecipe::FluxTextToImage => "flux_text_to_image",
         ExecutionRecipe::FluxImageEdit => "flux_image_edit",
@@ -297,5 +366,25 @@ mod tests {
         assert_eq!(plan.node.data_policy, DataPolicy::DeviceResidentPreferred);
         assert_eq!(plan.node.models.len(), 3);
         assert_eq!(plan.node.atoms[0].id, "lightflow.atom.load_flux_model");
+    }
+
+    #[test]
+    fn explicit_comfyui_engine_selects_generic_image_capabilities() {
+        for capability in [
+            IMAGE_GENERATE_CAPABILITY,
+            IMAGE_EDIT_CAPABILITY,
+            IMAGE_INPAINT_CAPABILITY,
+        ] {
+            let workflow = workflow(format!("lightflow.comfy.{capability}"))
+                .builtin_runtime("comfyui", capability, COMFYUI_API_ENGINE)
+                .build();
+
+            let plan = build_leaf_execution_plan(&workflow).expect("ComfyUI plan builds");
+
+            assert_eq!(plan.node.executor_id, COMFYUI_API_ENGINE);
+            assert_eq!(plan.node.recipe, ExecutionRecipe::ComfyUiWorkflow);
+            assert_eq!(plan.node.data_policy, DataPolicy::ArtifactHandles);
+            assert!(plan.node.models.is_empty());
+        }
     }
 }

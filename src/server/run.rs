@@ -1,6 +1,6 @@
 use crate::api::{ArtifactListOptions, RunListOptions};
 use crate::server::{
-    response,
+    blocking, response,
     types::{AppState, ArtifactListQuery, RunListQuery},
 };
 use axum::extract::{Path, Query, State};
@@ -37,7 +37,8 @@ pub(crate) async fn replay_run(
     State(state): State<AppState>,
     Path(run_id): Path<String>,
 ) -> Response {
-    response::api_json(state.service.replay_run(&run_id))
+    let service = std::sync::Arc::clone(&state.service);
+    response::api_json(blocking::run(&state, move || service.replay_run(&run_id)).await)
 }
 
 pub(crate) async fn list_artifacts(

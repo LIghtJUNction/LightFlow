@@ -1238,6 +1238,12 @@ components:
           type: string
         node_id:
           type: string
+        node_path:
+          type: string
+          description: Slash-delimited path to the deepest producing node in a nested execution.
+        depth:
+          type: integer
+          description: Zero-based nesting depth of the producing node.
         artifact:
           $ref: "#/components/schemas/WorkflowArtifact"
     WorkflowSummary:
@@ -2496,6 +2502,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkflowArtifact"
+        nodes:
+          type: array
+          description: Recursive child executions when this node selected a composite workflow.
+          items:
+            $ref: "#/components/schemas/NodeExecution"
     ExecutionRuntime:
       type: object
       required: [executor_id, executor_kind, capabilities, data_policy]
@@ -2517,3 +2528,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RuntimeRequirement"
+        replay_fingerprint:
+          type: object
+          additionalProperties: true
+          description: Stable executor-specific evidence used to detect runtime drift during replay.

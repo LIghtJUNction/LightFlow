@@ -10,3 +10,4 @@ docs-site/out/
 
 # Local CodeGraph index and daemon state.
 .codegraph/
+.tokensave

@@ -1,5 +1,5 @@
 use crate::cli::mcp;
-use crate::server::{response, types::AppState};
+use crate::server::{blocking, response, types::AppState};
 use axum::Json;
 use axum::extract::State;
 use axum::response::Response;
@@ -17,5 +17,9 @@ pub(crate) async fn mcp_post(
     State(state): State<AppState>,
     Json(request): Json<serde_json::Value>,
 ) -> Response {
-    response::json_response(mcp::handle_request(&state.service, request))
+    let service = std::sync::Arc::clone(&state.service);
+    match blocking::run(&state, move || Ok(mcp::handle_request(&service, request))).await {
+        Ok(value) => response::json_response(value),
+        Err(error) => response::error_response(error),
+    }
 }

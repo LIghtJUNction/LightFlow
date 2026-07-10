@@ -17,6 +17,9 @@ mod model_catalog;
 mod run_history;
 
 #[cfg(test)]
+mod blocking;
+
+#[cfg(test)]
 mod loop_projects;
 
 #[cfg(test)]

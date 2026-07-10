@@ -225,6 +225,61 @@ may run the workflow. Use `.builtin_runtime(id, capability, engine)` when the
 workflow requires a specific builtin engine, such as `builtin.preview.v1` or
 `builtin.llm.mock.v1`.
 
+### Generic ComfyUI workflows
+
+Generate the API executor scaffold with:
+
+```bash
+lfw new comfy_run --category image --runtime lightflow.comfyui.workflow
+```
+
+Export a graph from ComfyUI with **Save (API Format)** and keep the prompt graph
+inline in the run JSON. UI workflow JSON and a mutable `workflow_path` are not
+accepted because replay must retain the exact submitted graph.
+
+The following JSON is shape documentation only. Replace `workflow` with the
+complete Save (API Format) export before running, and use only node ids that
+exist in that complete graph:
+
+```json
+{
+  "workflow": {
+    "<complete-api-format-graph>": "REPLACE_ME"
+  },
+  "node_inputs": {
+    "<node-id-from-your-complete-graph>": {"seed": 42}
+  }
+}
+```
+
+For image-to-image or inpainting, upload and bind source files after node input
+overrides:
+
+```json
+{
+  "uploads": [
+    {"path": "input.png", "bind": [{"node_id": "<load-image-node-id>", "input": "image"}]},
+    {"path": "mask.png", "type": "temp", "bind": [{"node_id": "<mask-node-id>", "input": "image"}]}
+  ]
+}
+```
+
+Merge that upload fragment into the complete run object; the binding ids must
+refer to actual image or mask inputs in the exported graph.
+
+Run it with `lfw run lightflow.comfy_run --inputs @comfy-run.json`. Set
+`server_url`, `LIGHTFLOW_COMFYUI_URL`, or rely on
+`http://127.0.0.1:8188`. Optional Authorization comes only from
+`LIGHTFLOW_COMFYUI_AUTHORIZATION`; it is not recorded. ComfyUI manages its own
+models and custom nodes, so do not add fake LightFlow model requirements merely
+to make the node card look model-backed.
+Uploads and `output_dir` must stay beneath the project root after
+canonicalization, so traversal and symlink escapes fail before network access.
+Authorization is sent only when the resolved endpoint has the same origin as
+configured `LIGHTFLOW_COMFYUI_URL`. A single deadline covers hashing, streaming
+multipart upload, submit, polling, and streaming download; downloads refuse to
+overwrite an existing artifact.
+
 Run conformance before publishing or installing:
 
 ```bash

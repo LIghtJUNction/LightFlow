@@ -1,5 +1,6 @@
 use crate::api::plan::{
-    IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY, IMAGE_INPAINT_CAPABILITY,
+    FLUX_EXTERNAL_ENGINE, FLUX_NATIVE_ENGINE, IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY,
+    IMAGE_INPAINT_CAPABILITY,
 };
 use std::path::{Path, PathBuf};
 
@@ -85,8 +86,8 @@ pub(super) enum FluxBackend {
 impl FluxBackend {
     pub(super) fn engine(self) -> &'static str {
         match self {
-            Self::Native => "diffusion-rs.native.v1",
-            Self::ExternalRunner => "flux2-klein.gguf.runner.v1",
+            Self::Native => FLUX_NATIVE_ENGINE,
+            Self::ExternalRunner => FLUX_EXTERNAL_ENGINE,
         }
     }
 }

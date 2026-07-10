@@ -20,7 +20,7 @@ candle-core = { version = "0.10.2", optional = true, default-features = false }
 candle-transformers = { version = "0.10.2", optional = true, default-features = false }
 diffusion-rs = { version = "0.1.20", optional = true, default-features = false }
 diffusion-rs-sys = { version = "0.1.20", optional = true }
-libc = { version = "0.2.186", optional = true }
+libc = "0.2.186"
 lightflow-macros = { path = "lightflow-macros", version = "0.1.2" }
 petgraph = "0.8.3"
 png = "0.18.1"
@@ -31,13 +31,16 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.10.9"
 syn = { version = "2.0.111", features = ["full"] }
+tempfile = "3.23.0"
 tokio = { version = "1.52.3", features = ["full"] }
 toml_edit = "0.22.27"
+ureq = { version = "2.12.1", features = ["json"] }
+url = "2.5.8"
 
 [features]
 default = ["flux", "gguf"]
 flux = []
-flux-native = ["flux", "dep:diffusion-rs", "dep:diffusion-rs-sys", "dep:libc"]
+flux-native = ["flux", "dep:diffusion-rs", "dep:diffusion-rs-sys"]
 flux-native-cuda = ["flux-native", "diffusion-rs/cuda"]
 flux-native-vulkan = ["flux-native", "diffusion-rs/vulkan"]
 gguf = ["dep:candle-core", "dep:candle-transformers"]

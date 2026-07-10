@@ -163,6 +163,12 @@ fn node_card(
     executors: &[ExecutorInfo],
     validation: NodeValidationSummary,
 ) -> NodeCard {
+    let selected_executor_id = workflow
+        .nodes
+        .is_empty()
+        .then(|| super::plan::build_leaf_execution_plan(workflow).ok())
+        .flatten()
+        .map(|plan| plan.node.executor_id);
     NodeCard {
         id: workflow.id.clone(),
         version: workflow.version.clone(),
@@ -181,7 +187,7 @@ fn node_card(
         runtimes: workflow
             .runtimes
             .iter()
-            .map(|runtime| runtime_status(runtime, executors))
+            .map(|runtime| runtime_status(runtime, executors, selected_executor_id.as_deref()))
             .collect(),
         graph: NodeGraphSummary {
             nodes: workflow.nodes.len(),
@@ -191,14 +197,24 @@ fn node_card(
     }
 }
 
-fn runtime_status(runtime: &RuntimeRequirement, executors: &[ExecutorInfo]) -> NodeRuntimeStatus {
+fn runtime_status(
+    runtime: &RuntimeRequirement,
+    executors: &[ExecutorInfo],
+    selected_executor_id: Option<&str>,
+) -> NodeRuntimeStatus {
     let matches = executors
         .iter()
         .filter(|executor| {
-            executor
+            let capability_matches = executor
                 .capabilities
                 .iter()
-                .any(|capability| capability == &runtime.capability)
+                .any(|capability| capability == &runtime.capability);
+            let engine_matches = runtime
+                .engine
+                .as_deref()
+                .is_none_or(|engine| executor.id == engine);
+            let selected = selected_executor_id.is_some_and(|id| executor.id == id);
+            capability_matches && engine_matches && selected
         })
         .map(|executor| NodeExecutorStatus {
             id: executor.id.to_owned(),
@@ -230,4 +246,116 @@ fn runtime_status(runtime: &RuntimeRequirement, executors: &[ExecutorInfo]) -> N
 struct RuntimeAccumulator {
     nodes: usize,
     available_executors: BTreeSet<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::executor_registry;
+    use crate::preload::*;
+
+    #[test]
+    fn builtin_preview_runtime_only_lists_its_declared_engine() {
+        let workflow = workflow("lightflow.preview")
+            .builtin_runtime(
+                "image_runtime",
+                "lightflow.image.generate",
+                "builtin.preview.v1",
+            )
+            .build();
+
+        let plan = crate::api::plan::build_leaf_execution_plan(&workflow).expect("preview plan");
+        let status = runtime_status(
+            &workflow.runtimes[0],
+            &executor_registry(),
+            Some(&plan.node.executor_id),
+        );
+        let executor_ids = status
+            .executors
+            .iter()
+            .map(|executor| executor.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(executor_ids, vec!["builtin.preview.v1"]);
+    }
+
+    #[test]
+    fn abstract_image_runtime_does_not_list_preview_as_a_candidate() {
+        let workflow = workflow("lightflow.abstract")
+            .runtime("image_runtime", "lightflow.image.generate")
+            .build();
+
+        let status = runtime_status(&workflow.runtimes[0], &executor_registry(), None);
+
+        assert!(!status.available);
+        assert!(status.executors.is_empty());
+    }
+
+    #[test]
+    fn flux_runtime_only_lists_the_selected_physical_backend() {
+        let workflow = workflow("lightflow.flux")
+            .builtin_runtime(
+                "image_runtime",
+                "lightflow.image.generate",
+                "flux2-klein.gguf.runner.v1",
+            )
+            .hf_model(
+                "flux_model",
+                "flux",
+                "image-generation",
+                "gguf",
+                "owner/flux",
+                "flux.gguf",
+            )
+            .hf_model(
+                "llm_model",
+                "llm",
+                "text-encoder",
+                "gguf",
+                "owner/llm",
+                "llm.gguf",
+            )
+            .hf_model(
+                "vae_model",
+                "vae",
+                "vae",
+                "safetensors",
+                "owner/vae",
+                "vae.safetensors",
+            )
+            .build();
+        let plan = crate::api::plan::build_leaf_execution_plan(&workflow).expect("FLUX plan");
+
+        let status = runtime_status(
+            &workflow.runtimes[0],
+            &executor_registry(),
+            Some(&plan.node.executor_id),
+        );
+
+        assert_eq!(status.executors.len(), 1);
+        assert_eq!(status.executors[0].id, "flux2-klein.gguf.runner.v1");
+    }
+
+    #[test]
+    fn bogus_explicit_engine_makes_node_card_runtime_unavailable() {
+        let workflow = workflow("lightflow.bogus_engine")
+            .builtin_runtime(
+                "image_runtime",
+                "lightflow.image.load",
+                "bogus.image.engine",
+            )
+            .build();
+
+        let card = node_card(
+            &workflow,
+            &executor_registry(),
+            NodeValidationSummary {
+                valid: true,
+                issues: Vec::new(),
+            },
+        );
+
+        assert!(!card.runtimes[0].available);
+        assert!(card.runtimes[0].executors.is_empty());
+    }
 }

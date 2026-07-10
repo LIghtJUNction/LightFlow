@@ -5,7 +5,7 @@ use super::{image, text};
 use crate::api::model_manager::ModelManager;
 use crate::api::plan::{ExecutionPlan, ExecutionPlanNode, ExecutionRecipe};
 use crate::api::{ApiError, ApiResult};
-use crate::api::{executors, flux, llm_rig};
+use crate::api::{comfyui, executors, flux, llm_rig};
 use crate::workflow::{ExecutionRuntime, WorkflowSpec};
 use std::path::Path;
 
@@ -28,7 +28,17 @@ pub(super) fn execute_leaf_plan(
 ) -> ApiResult<LeafExecution> {
     let runtime = execution_runtime(workflow, &plan.node);
 
+    let mut replay_fingerprint = None;
     let mut leaf = match plan.node.recipe {
+        ExecutionRecipe::ComfyUiWorkflow => {
+            let result = comfyui::execute(root, workflow, inputs)?;
+            replay_fingerprint = Some(result.replay_fingerprint);
+            Ok(LeafExecution {
+                outputs: result.outputs,
+                runtime: None,
+                artifacts: result.artifacts,
+            })
+        }
         ExecutionRecipe::PreviewTextToImage => {
             execute_preview_text_to_image(root, workflow, inputs)
         }
@@ -97,6 +107,8 @@ pub(super) fn execute_leaf_plan(
         }),
     }?;
 
+    let mut runtime = runtime;
+    runtime.replay_fingerprint = replay_fingerprint;
     leaf.runtime = Some(runtime);
     Ok(leaf)
 }
@@ -108,6 +120,7 @@ fn execution_runtime(workflow: &WorkflowSpec, node: &ExecutionPlanNode) -> Execu
         capabilities: node.capabilities.clone(),
         data_policy: executors::data_policy_name(node.data_policy).to_owned(),
         declared: workflow.runtimes.clone(),
+        replay_fingerprint: None,
     }
 }
 

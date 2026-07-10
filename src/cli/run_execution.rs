@@ -8,7 +8,7 @@ use serde_json::json;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 enum RunOutput {
-    Single(WorkflowExecution),
+    Single(Box<WorkflowExecution>),
     Pipeline(PipelineExecution),
 }
 
@@ -141,7 +141,7 @@ fn execute_run_options(
             }));
         };
         return Ok(ExecutedRunOptions {
-            output: RunOutput::Single(execution),
+            output: RunOutput::Single(Box::new(execution)),
             stages: effective_stages,
         });
     }
@@ -167,7 +167,11 @@ fn partial_run_output(
         return None;
     }
     if stage_count == 1 {
-        return executions.into_iter().next().map(RunOutput::Single);
+        return executions
+            .into_iter()
+            .next()
+            .map(Box::new)
+            .map(RunOutput::Single);
     }
     Some(RunOutput::Pipeline(PipelineExecution {
         pipeline: true,

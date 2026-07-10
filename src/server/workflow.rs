@@ -1,5 +1,5 @@
 use crate::api::ApiError;
-use crate::server::{response, types::AppState};
+use crate::server::{blocking, response, types::AppState};
 use crate::workflow::{WorkflowExecutionOptions, WorkflowSpec};
 use axum::Json;
 use axum::extract::{Path, State};
@@ -39,70 +39,87 @@ pub(crate) async fn run_workflow(
     Path(workflow_id): Path<String>,
     Json(options): Json<WorkflowExecutionOptions>,
 ) -> Response {
+    let service = std::sync::Arc::clone(&state.service);
+    let result = blocking::run(&state, move || {
+        execute_and_record_workflow(service, workflow_id, options)
+    })
+    .await;
+    match result {
+        Ok(RunWorkflowOutcome::Completed(value)) => response::api_json(Ok::<_, ApiError>(value)),
+        Ok(RunWorkflowOutcome::Failed {
+            error,
+            run_id,
+            run_dir,
+        }) => response::error_response_with_run(error, &run_id, run_dir),
+        Err(error) => response::error_response(error),
+    }
+}
+
+enum RunWorkflowOutcome {
+    Completed(serde_json::Value),
+    Failed {
+        error: ApiError,
+        run_id: String,
+        run_dir: String,
+    },
+}
+
+fn execute_and_record_workflow(
+    service: std::sync::Arc<crate::api::ApiService>,
+    workflow_id: String,
+    options: WorkflowExecutionOptions,
+) -> Result<RunWorkflowOutcome, ApiError> {
     let started_at_ms = crate::api::ApiService::now_ms();
-    let result = state
-        .service
-        .execute_workflow(&workflow_id, options.clone());
+    let result = service.execute_workflow(&workflow_id, options.clone());
     let completed_at_ms = crate::api::ApiService::now_ms();
     match result {
         Ok(execution) => {
-            let mut value = match state.service.execution_with_model_locks(&execution) {
-                Ok(value) => value,
-                Err(error) => return response::error_response(error),
-            };
-            let record = state.service.record_completed_workflow_run(
+            let mut value = service.execution_with_model_locks(&execution)?;
+            let record = service.record_completed_workflow_run(
                 &workflow_id,
                 &options,
                 &value,
                 started_at_ms,
                 completed_at_ms,
+            )?;
+            let Some(object) = value.as_object_mut() else {
+                return Err(ApiError::InvalidRequest(
+                    "workflow execution output must be a JSON object".to_owned(),
+                ));
+            };
+            object.insert("run_id".to_owned(), record.run_id.into());
+            object.insert(
+                "run_dir".to_owned(),
+                record.run_dir.display().to_string().into(),
             );
-            match record {
-                Ok(record) => {
-                    let Some(object) = value.as_object_mut() else {
-                        return response::error_response(ApiError::InvalidRequest(
-                            "workflow execution output must be a JSON object".to_owned(),
-                        ));
-                    };
-                    object.insert("run_id".to_owned(), record.run_id.into());
-                    object.insert(
-                        "run_dir".to_owned(),
-                        record.run_dir.display().to_string().into(),
-                    );
-                    object.insert(
-                        "trace_path".to_owned(),
-                        record
-                            .run_dir
-                            .join("execution.json")
-                            .display()
-                            .to_string()
-                            .into(),
-                    );
-                    response::api_json(Ok::<_, ApiError>(value))
-                }
-                Err(error) => response::error_response(error),
-            }
+            object.insert(
+                "trace_path".to_owned(),
+                record
+                    .run_dir
+                    .join("execution.json")
+                    .display()
+                    .to_string()
+                    .into(),
+            );
+            Ok(RunWorkflowOutcome::Completed(value))
         }
         Err(error) => {
             let error_json = serde_json::json!({
                 "code": error.code(),
                 "message": error.message(),
             });
-            let record = match state.service.record_failed_workflow_run(
+            let record = service.record_failed_workflow_run(
                 &workflow_id,
                 &options,
                 &error_json,
                 started_at_ms,
                 completed_at_ms,
-            ) {
-                Ok(record) => record,
-                Err(record_error) => return response::error_response(record_error),
-            };
-            response::error_response_with_run(
+            )?;
+            Ok(RunWorkflowOutcome::Failed {
                 error,
-                &record.run_id,
-                record.run_dir.display().to_string(),
-            )
+                run_id: record.run_id,
+                run_dir: record.run_dir.display().to_string(),
+            })
         }
     }
 }

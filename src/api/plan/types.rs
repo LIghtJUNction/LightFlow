@@ -24,11 +24,15 @@ pub(in crate::api) const IMAGE_UPSCALE_CAPABILITY: &str = "lightflow.image.upsca
 pub(in crate::api) const MASK_COMPOSE_CAPABILITY: &str = "lightflow.mask.compose";
 pub(in crate::api) const LLM_CLASSIFY_CAPABILITY: &str = "lightflow.llm.classify";
 pub(in crate::api) const LLM_STRUCTURED_OUTPUT_CAPABILITY: &str = "lightflow.llm.structured_output";
+pub(in crate::api) const COMFYUI_WORKFLOW_CAPABILITY: &str = "lightflow.comfyui.workflow";
 pub(in crate::api) const PREVIEW_ENGINE: &str = "builtin.preview.v1";
 pub(in crate::api) const PREVIEW_EDIT_ENGINE: &str = "builtin.preview.edit.v1";
 pub(in crate::api) const PREVIEW_INPAINT_ENGINE: &str = "builtin.preview.inpaint.v1";
 pub(in crate::api) const INVERT_ENGINE: &str = "builtin.image.invert.v1";
 pub(in crate::api) const LLM_MOCK_ENGINE: &str = "builtin.llm.mock.v1";
+pub(in crate::api) const FLUX_NATIVE_ENGINE: &str = "diffusion-rs.native.v1";
+pub(in crate::api) const FLUX_EXTERNAL_ENGINE: &str = "flux2-klein.gguf.runner.v1";
+pub(in crate::api) const COMFYUI_API_ENGINE: &str = "comfyui.api.v1";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(in crate::api) struct ExecutionPlan {
@@ -55,6 +59,7 @@ pub(in crate::api) struct ExecutionPlanNode {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(in crate::api) enum ExecutionRecipe {
     Passthrough,
+    ComfyUiWorkflow,
     PreviewTextToImage,
     FluxTextToImage,
     FluxImageEdit,

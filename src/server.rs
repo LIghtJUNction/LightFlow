@@ -1,5 +1,6 @@
 //! Axum HTTP gateway for LightFlow's backend API.
 
+mod blocking;
 mod catalog;
 mod checks;
 mod mcp;
@@ -16,7 +17,6 @@ use crate::api::ApiService;
 use axum::Router;
 use axum::routing::{get, post};
 use std::io;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 
 /// Run the LightFlow HTTP gateway.
@@ -109,7 +109,5 @@ fn router(service: ApiService) -> Router {
                 .options(response::cors_options),
         )
         .fallback(response::not_found)
-        .with_state(types::AppState {
-            service: Arc::new(service),
-        })
+        .with_state(types::AppState::new(service))
 }

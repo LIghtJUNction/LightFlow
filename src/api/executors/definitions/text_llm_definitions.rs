@@ -1,9 +1,9 @@
 use super::super::{ExecutorAvailability, ExecutorDefinition};
 use super::matchers::*;
 use crate::api::plan::{
-    DataPolicy, ExecutionRecipe, IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY,
-    IMAGE_INPAINT_CAPABILITY, LLM_GENERATE_CAPABILITY, LLM_MOCK_ENGINE, TEXT_CONCAT_CAPABILITY,
-    TEXT_REGEX_CAPABILITY, TEXT_TEMPLATE_CAPABILITY,
+    DataPolicy, ExecutionRecipe, FLUX_EXTERNAL_ENGINE, FLUX_NATIVE_ENGINE, IMAGE_EDIT_CAPABILITY,
+    IMAGE_GENERATE_CAPABILITY, IMAGE_INPAINT_CAPABILITY, LLM_GENERATE_CAPABILITY, LLM_MOCK_ENGINE,
+    TEXT_CONCAT_CAPABILITY, TEXT_REGEX_CAPABILITY, TEXT_TEMPLATE_CAPABILITY,
 };
 
 pub(super) static TEXT_LLM_EXECUTORS: [ExecutorDefinition; 7] = [
@@ -90,7 +90,7 @@ pub(super) static TEXT_LLM_EXECUTORS: [ExecutorDefinition; 7] = [
         matcher: matches_text_regex,
     },
     ExecutorDefinition {
-        id: "flux2-klein.gguf.runner.v1",
+        id: FLUX_EXTERNAL_ENGINE,
         kind: "external",
         capabilities: &[
             IMAGE_GENERATE_CAPABILITY,
@@ -101,7 +101,7 @@ pub(super) static TEXT_LLM_EXECUTORS: [ExecutorDefinition; 7] = [
         env: Some("LIGHTFLOW_FLUX_RUNNER"),
         command_env: Some("LIGHTFLOW_FLUX_RUNNER"),
         visible: true,
-        availability: ExecutorAvailability::EnvPresent("LIGHTFLOW_FLUX_RUNNER"),
+        availability: ExecutorAvailability::FluxRunner,
         recipe: ExecutionRecipe::FluxTextToImage,
         data_policy: DataPolicy::DeviceResidentPreferred,
         atoms: &[],
@@ -109,7 +109,7 @@ pub(super) static TEXT_LLM_EXECUTORS: [ExecutorDefinition; 7] = [
         matcher: matches_never,
     },
     ExecutorDefinition {
-        id: "diffusion-rs.native.v1",
+        id: FLUX_NATIVE_ENGINE,
         kind: "native",
         capabilities: &[
             IMAGE_GENERATE_CAPABILITY,

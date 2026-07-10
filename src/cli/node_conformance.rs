@@ -1,7 +1,8 @@
 use super::CliResult;
-use crate::api::{ApiService, executor_registry, workflow_placeholder_issues};
+use crate::api::{ApiService, workflow_placeholder_issues};
 use crate::workflow::{PortSpec, WorkflowSpec};
 use serde::Serialize;
+use std::collections::BTreeSet;
 
 mod skills;
 
@@ -65,7 +66,7 @@ pub(super) fn node_conformance(
     push_schema_check(&workflow, &mut checks);
     push_placeholder_check(&workflow, &mut checks);
     push_model_check(&workflow, &mut checks);
-    push_runtime_check(&workflow, &mut checks);
+    push_runtime_check(service, &workflow, &mut checks);
     skills::push_skill_check(service.repo_root(), &workflow, &mut checks);
 
     let valid = !checks
@@ -229,51 +230,79 @@ fn push_model_check(workflow: &WorkflowSpec, checks: &mut Vec<NodeConformanceChe
     }
 }
 
-fn push_runtime_check(workflow: &WorkflowSpec, checks: &mut Vec<NodeConformanceCheck>) {
-    if workflow.runtimes.is_empty() {
-        checks.push(NodeConformanceCheck::passed(
-            "node.runtime",
-            "workflow uses passthrough execution and declares no runtime capability",
-        ));
-        return;
-    }
-
-    let executors = executor_registry();
+fn push_runtime_check(
+    service: &ApiService,
+    workflow: &WorkflowSpec,
+    checks: &mut Vec<NodeConformanceCheck>,
+) {
+    let mut visited = BTreeSet::new();
+    let mut executors = Vec::new();
     let mut issues = Vec::new();
-    for runtime in &workflow.runtimes {
-        let matching = executors
-            .iter()
-            .filter(|executor| {
-                executor
-                    .capabilities
-                    .iter()
-                    .any(|capability| capability == &runtime.capability)
-            })
-            .collect::<Vec<_>>();
-        if matching.is_empty() {
-            issues.push(format!(
-                "runtime capability {} has no registered executor",
-                runtime.capability
-            ));
-            continue;
-        }
-        if !matching.iter().any(|executor| executor.available) {
-            issues.push(format!(
-                "runtime capability {} has registered executors but none are currently available",
-                runtime.capability
-            ));
-        }
-    }
+    audit_runtime_plan(
+        service,
+        &workflow.id,
+        &mut visited,
+        &mut executors,
+        &mut issues,
+    );
 
     if issues.is_empty() {
         checks.push(NodeConformanceCheck::passed(
             "node.runtime",
-            "runtime capabilities have available executors",
+            format!(
+                "runtime plans verified {} reachable leaf executor(s): {}",
+                executors.len(),
+                executors.join(", ")
+            ),
         ));
     } else {
         checks.push(NodeConformanceCheck::failed(
             "node.runtime",
             issues.join("; "),
         ));
+    }
+}
+
+fn audit_runtime_plan(
+    service: &ApiService,
+    workflow_id: &str,
+    visited: &mut BTreeSet<String>,
+    executors: &mut Vec<String>,
+    issues: &mut Vec<String>,
+) {
+    if !visited.insert(workflow_id.to_owned()) {
+        return;
+    }
+
+    let plan = match service.plan_workflow(workflow_id) {
+        Ok(plan) => plan,
+        Err(error) => {
+            issues.push(format!(
+                "workflow {workflow_id} runtime plan failed: {error}"
+            ));
+            return;
+        }
+    };
+    if let Some(runtime) = plan.runtime {
+        executors.push(format!(
+            "{workflow_id}={} ({})",
+            runtime.executor_id, runtime.executor_status_reason
+        ));
+        if !runtime.executor_available {
+            issues.push(format!(
+                "workflow {workflow_id} executor {} is unavailable: {}",
+                runtime.executor_id, runtime.executor_status_reason
+            ));
+        }
+        return;
+    }
+
+    for node in plan.nodes {
+        if node.disabled {
+            continue;
+        }
+        for candidate in node.candidate_workflow_ids {
+            audit_runtime_plan(service, &candidate, visited, executors, issues);
+        }
     }
 }

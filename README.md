@@ -176,6 +176,39 @@ curl -X POST http://127.0.0.1:5174/runs/last/replay
 curl http://127.0.0.1:5174/artifacts
 ```
 
+`lfw new --runtime lightflow.image.generate` generates a runnable deterministic
+preview scaffold backed by `builtin.preview.v1`. It is intended to verify the
+workflow pipeline and PNG artifact path, not FLUX, ComfyUI, or production model
+quality. A real model backend must replace the preview runtime with its own
+backend contract and declare the concrete model requirements it needs.
+
+`lfw new --runtime lightflow.comfyui.workflow` generates a separate
+`comfyui.api.v1` scaffold for a real ComfyUI HTTP API handoff. Its required
+`workflow` input is an inline graph exported with ComfyUI **Save (API Format)**,
+not the editor/UI workflow JSON. `node_inputs` can override arbitrary prompt,
+seed, sampler, model, control, or custom-node inputs. `uploads` can send images
+and masks to `/upload/image` and bind returned references to node inputs.
+LightFlow then submits `/prompt`, polls `/history/<prompt_id>`, recursively
+discovers file descriptors, and downloads them through `/view`. This supports
+text-to-image, image-to-image, inpainting, and other installed ComfyUI graph
+shapes without hard-coding their node types. ComfyUI remains responsible for
+models, custom nodes, hardware scheduling, and model quality. Registry
+availability means only that this LightFlow build has the executor; the
+endpoint is checked when the workflow runs. Local mock-HTTP tests cover the
+protocol, but no real ComfyUI endpoint or model quality is claimed as verified.
+Upload paths and `output_dir` are confined to the LightFlow project root;
+canonical path checks reject `..` traversal and symlinks that escape it.
+`LIGHTFLOW_COMFYUI_AUTHORIZATION` is sent only when the resolved endpoint has
+the same origin as configured `LIGHTFLOW_COMFYUI_URL`. The total timeout covers
+upload hashing, streaming multipart upload, submit, polling, and streamed
+download. Downloads use create-new temporary files and no-clobber persistence,
+so an existing artifact is never overwritten.
+
+HTTP workflow runs, replays, and HTTP MCP calls execute in a bounded blocking
+pool so `/health` remains responsive. `LIGHTFLOW_MAX_BLOCKING_RUNS` configures
+the permit count, defaults to `4`, and accepts only `1..=64`; invalid values
+fall back to the default.
+
 `lfx` is an alias for `lfw run`. It accepts generic JSON inputs, common text /
 image / output-path flags, and temporary node toggles:
 
@@ -330,6 +363,15 @@ lfw replay run-1781797000000
 Replay responses include `replay.runtime_changed` and
 `replay.model_lock_changed` flags with original/replayed runtime and model-lock
 fingerprints, so runtime or model drift is visible when a run is reproduced.
+For ComfyUI runs, the runtime fingerprint records the normalized server URL,
+resolved submitted graph SHA-256, and stable upload target/content hashes. It
+excludes prompt ids, timestamps, output paths, and Authorization values, so a
+different remote prompt id does not create false drift while graph, endpoint,
+or uploaded-byte changes do.
+Nested execution evidence is recursive: `execution.json` retains child
+`NodeExecution.nodes`, events carry `depth`, `node_path`, and parent context,
+and replay/runtime fingerprints and artifact catalog entries identify the
+deepest producing leaf without duplicating the same artifact at every parent.
 The static editor renders both runtime and model-lock replay fingerprints,
 including stage, workflow, requirement, path, and hash evidence.
 

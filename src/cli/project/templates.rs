@@ -4,12 +4,13 @@ pub(super) struct NodeTemplate {
     source_body: String,
     skill_contract: String,
     example_args: Vec<String>,
-    api_inputs: String,
+    api_inputs: Option<String>,
 }
 
 impl NodeTemplate {
     pub(super) fn for_runtime(runtime: Option<&str>) -> Self {
         match runtime {
+            Some("lightflow.comfyui.workflow") => Self::comfyui_workflow(),
             Some("lightflow.image.generate") => Self::image_generate(),
             Some(runtime) => Self::runtime_placeholder(runtime),
             None => Self::passthrough(),
@@ -35,7 +36,7 @@ impl NodeTemplate {
             ]
             .join("\n"),
             example_args: vec!["-i".to_owned(), "value='{\"hello\":\"world\"}'".to_owned()],
-            api_inputs: "{\"value\":{\"hello\":\"world\"}}".to_owned(),
+            api_inputs: Some("{\"value\":{\"hello\":\"world\"}}".to_owned()),
         }
     }
 
@@ -73,34 +74,27 @@ impl NodeTemplate {
                 "        .input_required(\"output_path\", false)",
                 "        .input_widget(\"output_path\", \"file_save\")",
                 "        .input_artifact_kind(\"output_path\", \"image\")",
-                "        .input(\"model\", \"text\")",
-                "        .input_description(\"model\", \"Optional model variant id for the image_model requirement.\")",
-                "        .input_required(\"model\", false)",
-                "        .input_widget(\"model\", \"model_select\")",
-                "        .input_model_requirement(\"model\", \"image_model\")",
                 "        .output(\"image\", \"artifact\")",
                 "        .output_description(\"image\", \"Generated image artifact metadata.\")",
                 "        .output_artifact_kind(\"image\", \"image\")",
-                "        .output_model_requirement(\"image\", \"image_model\")",
                 "        .output(\"image_path\", \"path\")",
                 "        .output_description(\"image_path\", \"Path to the generated PNG image.\")",
                 "        .output_artifact_kind(\"image_path\", \"image\")",
-                "        .output_model_requirement(\"image_path\", \"image_model\")",
-                "        .runtime(\"image_runtime\", \"lightflow.image.generate\")",
-                "        .model(\"image_model\", \"text-to-image\")",
+                "        .builtin_runtime(\"image_runtime\", \"lightflow.image.generate\", \"builtin.preview.v1\")",
             ]
             .join("\n"),
             skill_contract: [
                 "- Runtime: `lightflow.image.generate`.",
+                "- Engine: `builtin.preview.v1`.",
+                "- This is a deterministic preview that only validates the pipeline; it does not represent production model quality.",
+                "- To use a real model backend, replace the preview runtime with that backend's contract and declare its concrete model requirements.",
                 "- Input `prompt`: required positive prompt; widget `prompt`.",
                 "- Input `negative`: optional negative prompt; default `\"\"`; widget `textarea`.",
                 "- Input `width`: optional integer; default `512`; range `64..2048`; step `8`; widget `number`.",
                 "- Input `height`: optional integer; default `512`; range `64..2048`; step `8`; widget `number`.",
                 "- Input `seed`: optional integer seed; widget `seed`.",
                 "- Input `output_path`: optional destination PNG path; artifact kind `image`; widget `file_save`.",
-                "- Input `model`: optional model variant id bound to `image_model`; widget `model_select`.",
-                "- Outputs: `image` artifact metadata and `image_path`; artifact kind `image`; bound to `image_model`.",
-                "- Model requirement `image_model`: add concrete variants with `.hf_model(...)` before publishing.",
+                "- Outputs: `image` artifact metadata and `image_path`; artifact kind `image`.",
             ]
             .join("\n"),
             example_args: vec![
@@ -111,7 +105,114 @@ impl NodeTemplate {
                 "-i".to_owned(),
                 "height=512".to_owned(),
             ],
-            api_inputs: "{\"prompt\":\"a quiet lake\",\"width\":512,\"height\":512}".to_owned(),
+            api_inputs: Some(
+                "{\"prompt\":\"a quiet lake\",\"width\":512,\"height\":512}".to_owned(),
+            ),
+        }
+    }
+
+    fn comfyui_workflow() -> Self {
+        Self {
+            runtime: Some("lightflow.comfyui.workflow".to_owned()),
+            source_body: [
+                "        .input(\"workflow\", \"json\")",
+                "        .input_description(\"workflow\", \"Required inline ComfyUI Save (API Format) prompt graph.\")",
+                "        .input_required(\"workflow\", true)",
+                "        .input_widget(\"workflow\", \"json\")",
+                "        .input(\"node_inputs\", \"json\")",
+                "        .input_description(\"node_inputs\", \"Optional node-id to input-name overrides applied before upload bindings.\")",
+                "        .input_required(\"node_inputs\", false)",
+                "        .input_default_json(\"node_inputs\", \"{}\")",
+                "        .input_widget(\"node_inputs\", \"json\")",
+                "        .input(\"uploads\", \"json\")",
+                "        .input_description(\"uploads\", \"Optional images or masks uploaded and bound to ComfyUI node inputs.\")",
+                "        .input_required(\"uploads\", false)",
+                "        .input_default_json(\"uploads\", \"[]\")",
+                "        .input_widget(\"uploads\", \"json\")",
+                "        .input(\"server_url\", \"text\")",
+                "        .input_description(\"server_url\", \"Optional ComfyUI HTTP base URL; LIGHTFLOW_COMFYUI_URL or localhost:8188 is used otherwise.\")",
+                "        .input_required(\"server_url\", false)",
+                "        .input_widget(\"server_url\", \"text\")",
+                "        .input(\"extra_data\", \"json\")",
+                "        .input_description(\"extra_data\", \"Optional ComfyUI prompt extra_data object.\")",
+                "        .input_required(\"extra_data\", false)",
+                "        .input_widget(\"extra_data\", \"json\")",
+                "        .input(\"client_id\", \"text\")",
+                "        .input_description(\"client_id\", \"Optional ComfyUI client id sent with the prompt.\")",
+                "        .input_required(\"client_id\", false)",
+                "        .input_widget(\"client_id\", \"text\")",
+                "        .input(\"output_node_ids\", \"json\")",
+                "        .input_description(\"output_node_ids\", \"Optional list of top-level ComfyUI output node ids to download.\")",
+                "        .input_required(\"output_node_ids\", false)",
+                "        .input_widget(\"output_node_ids\", \"json\")",
+                "        .input(\"output_dir\", \"path\")",
+                "        .input_description(\"output_dir\", \"Optional local artifact directory relative to the LightFlow repository.\")",
+                "        .input_required(\"output_dir\", false)",
+                "        .input_widget(\"output_dir\", \"directory\")",
+                "        .input(\"timeout_ms\", \"integer\")",
+                "        .input_description(\"timeout_ms\", \"Total ComfyUI execution timeout in milliseconds.\")",
+                "        .input_required(\"timeout_ms\", false)",
+                "        .input_default_json(\"timeout_ms\", \"300000\")",
+                "        .input_widget(\"timeout_ms\", \"number\")",
+                "        .input(\"poll_interval_ms\", \"integer\")",
+                "        .input_description(\"poll_interval_ms\", \"History polling interval in milliseconds.\")",
+                "        .input_required(\"poll_interval_ms\", false)",
+                "        .input_default_json(\"poll_interval_ms\", \"250\")",
+                "        .input_widget(\"poll_interval_ms\", \"number\")",
+                "        .output(\"prompt_id\", \"text\")",
+                "        .output_description(\"prompt_id\", \"ComfyUI prompt id.\")",
+                "        .output(\"artifacts\", \"json\")",
+                "        .output_description(\"artifacts\", \"Downloaded file artifact records.\")",
+                "        .output(\"files\", \"json\")",
+                "        .output_description(\"files\", \"Alias of downloaded file artifact records.\")",
+                "        .output(\"image\", \"artifact\")",
+                "        .output_description(\"image\", \"First downloaded still-image artifact, or null.\")",
+                "        .output_artifact_kind(\"image\", \"image\")",
+                "        .output(\"image_path\", \"path\")",
+                "        .output_description(\"image_path\", \"Path to the first downloaded still image, or null.\")",
+                "        .output_artifact_kind(\"image_path\", \"image\")",
+                "        .output(\"history\", \"json\")",
+                "        .output_description(\"history\", \"Completed ComfyUI history entry.\")",
+                "        .output(\"remote_outputs\", \"json\")",
+                "        .output_description(\"remote_outputs\", \"All remote ComfyUI node outputs, including non-file values.\")",
+                "        .output(\"submitted_workflow\", \"json\")",
+                "        .output_description(\"submitted_workflow\", \"Resolved API graph submitted after overrides and upload bindings.\")",
+                "        .output(\"workflow_sha256\", \"text\")",
+                "        .output_description(\"workflow_sha256\", \"SHA-256 of the resolved submitted workflow.\")",
+                "        .output(\"upload_fingerprints\", \"json\")",
+                "        .output_description(\"upload_fingerprints\", \"Stable uploaded content hashes and remote targets.\")",
+                "        .builtin_runtime(\"comfyui_runtime\", \"lightflow.comfyui.workflow\", \"comfyui.api.v1\")",
+            ]
+            .join("\n"),
+            skill_contract: r#"- Runtime: `lightflow.comfyui.workflow`; engine: `comfyui.api.v1`.
+- `workflow` must be an inline ComfyUI Save (API Format) prompt graph, not the UI workflow JSON.
+- `node_inputs` can override prompt, seed, steps, cfg, model, control, or any other node input; every node id must come from your complete exported graph.
+- `uploads` sends images or masks to `/upload/image`; each `bind` writes the returned ComfyUI reference into a node input.
+- LightFlow submits `/prompt`, polls `/history/<prompt_id>`, and downloads every file descriptor through `/view`.
+- ComfyUI owns model installation, custom nodes, VRAM policy, and model quality. Executor availability only means this build can make the API calls; the endpoint is checked at run.
+- Optional Authorization comes only from `LIGHTFLOW_COMFYUI_AUTHORIZATION` and is never recorded.
+
+## comfy-run.json shape only
+
+Shape only: replace `workflow` with a complete Save (API Format) export before running. The node ids below must be replaced with ids from that complete graph.
+
+```json
+{"workflow":{"<complete-api-format-graph>":"REPLACE_ME"},"node_inputs":{"<node-id-from-your-complete-graph>":{"seed":42}}}
+```
+
+## Upload binding fragment
+
+Merge this fragment into the same complete run object. Upload binding node ids must identify actual image or mask inputs in your graph.
+
+```json
+{"uploads":[{"path":"input.png","bind":[{"node_id":"<load-image-node-id-from-your-complete-graph>","input":"image"}]},{"path":"mask.png","type":"temp","bind":[{"node_id":"<mask-node-id-from-your-complete-graph>","input":"image"}]}]}
+```"#
+                .to_owned(),
+            example_args: vec![
+                "--inputs".to_owned(),
+                "@comfy-run.json".to_owned(),
+            ],
+            api_inputs: None,
         }
     }
 
@@ -135,7 +236,7 @@ impl NodeTemplate {
                 "- Runtime: `{runtime}`.\n- Input `value`: JSON value; required; widget `json`.\n- Output `value`: JSON value.\n- Add runtime-specific inputs, outputs, model requirements, and executor notes before publishing."
             ),
             example_args: vec!["-i".to_owned(), "value='{}'".to_owned()],
-            api_inputs: "{\"value\":{}}".to_owned(),
+            api_inputs: Some("{\"value\":{}}".to_owned()),
         }
     }
 
@@ -181,8 +282,11 @@ pub(super) fn example_skill_source(
         }
     };
     let example = template.example_command(workflow_id).join(" ");
-    let api_body = format!("{{\"inputs\":{}}}", template.api_inputs);
-    format!(
+    let api_body = format!(
+        "{{\"inputs\":{}}}",
+        template.api_inputs.as_deref().unwrap_or("{}")
+    );
+    let mut skill = format!(
         "---\nname: {}\ndescription: This skill should be used when working with the {} LightFlow workflow, configuring its inputs, running it through lfw, HTTP, or composing it with other LightFlow workflows.\nversion: 0.1.0\n---\n\n# {}\n\nUse this skill to understand the workflow contract for `{}`.\n\n## Workflow\n\n- Workflow id: `{}`\n{}\n\n## CLI Usage\n\n```bash\n{}\n```\n\n## API Usage\n\nStart `lfw serve`, then call the workflow through the shared HTTP run contract:\n\n```bash\ncurl -sS -X POST http://127.0.0.1:5174/workflows/{}/run \\\n  -H 'content-type: application/json' \\\n  -d '{}'\n```\n\nRun `lfw help {}` to inspect the generated Node Schema v1 contract.\n",
         rust_string(name),
         workflow_id,
@@ -194,7 +298,22 @@ pub(super) fn example_skill_source(
         workflow_id,
         api_body,
         workflow_id
-    )
+    );
+    if template.api_inputs.is_none() {
+        let Some(start) = skill.find("Start `lfw serve`") else {
+            return skill;
+        };
+        let Some(offset) = skill[start..].find("\n\nRun `lfw help") else {
+            return skill;
+        };
+        let end = start + offset;
+        let api_usage = format!(
+            "Create `comfy-http-request.json` with `{{\"inputs\": <complete run object from comfy-run.json>}}`. The nested `workflow` must be a complete ComfyUI Save (API Format) export. Then send the file without embedding a partial graph:\n\n```bash\ncurl -sS -X POST http://127.0.0.1:5174/workflows/{workflow_id}/run \\\n+  -H 'content-type: application/json' \\\n+  --data-binary @comfy-http-request.json\n```"
+        )
+        .replace("\n+  ", "\n  ");
+        skill.replace_range(start..end, &api_usage);
+    }
+    skill
 }
 
 pub(super) fn example_contract_test(workflow_id: &str, template: &NodeTemplate) -> String {

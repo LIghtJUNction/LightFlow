@@ -77,6 +77,10 @@ pub struct RunArtifact {
     pub workflow_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<usize>,
     pub artifact: WorkflowArtifact,
 }
 

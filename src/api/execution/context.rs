@@ -1,6 +1,6 @@
 use super::leaf::execute_leaf_workflow;
 use super::media::{collect_node_inputs, collect_workflow_outputs};
-use super::types::{ChildWorkflowRun, LeafExecution};
+use super::types::{ChildExecution, ChildWorkflowRun, LeafExecution};
 use crate::api::model_manager::ModelManager;
 use crate::api::validation;
 use crate::api::{ApiError, ApiResult};
@@ -92,6 +92,7 @@ fn execute_workflow_spec_with_models(
                 inputs: node_inputs,
                 outputs: serde_json::Map::new(),
                 artifacts: Vec::new(),
+                nodes: Vec::new(),
             });
             continue;
         }
@@ -135,6 +136,7 @@ fn execute_workflow_spec_with_models(
             inputs: node_inputs,
             outputs: child_run.leaf.outputs,
             artifacts: child_run.leaf.artifacts,
+            nodes: child_run.nodes,
         });
     }
 
@@ -156,9 +158,12 @@ fn execute_child_workflow(
     workflows: &BTreeMap<String, WorkflowSpec>,
     inputs: &serde_json::Map<String, serde_json::Value>,
     model_manager: &mut ModelManager,
-) -> ApiResult<LeafExecution> {
+) -> ApiResult<ChildExecution> {
     if workflow.nodes.is_empty() {
-        return execute_leaf_workflow(root, workflow, inputs, model_manager);
+        return Ok(ChildExecution {
+            leaf: execute_leaf_workflow(root, workflow, inputs, model_manager)?,
+            nodes: Vec::new(),
+        });
     }
 
     let execution = execute_workflow_spec_with_models(
@@ -173,10 +178,13 @@ fn execute_child_workflow(
         },
         model_manager,
     )?;
-    Ok(LeafExecution {
-        outputs: execution.outputs,
-        runtime: execution.runtime,
-        artifacts: execution.artifacts,
+    Ok(ChildExecution {
+        leaf: LeafExecution {
+            outputs: execution.outputs,
+            runtime: execution.runtime,
+            artifacts: execution.artifacts,
+        },
+        nodes: execution.nodes,
     })
 }
 
@@ -205,8 +213,9 @@ fn execute_child_workflow_with_patch(
                     continue;
                 }
                 return Ok(ChildWorkflowRun {
-                    leaf: output,
+                    leaf: output.leaf,
                     attempts: attempt,
+                    nodes: output.nodes,
                 });
             }
             Err(error) => last_error = Some(error),

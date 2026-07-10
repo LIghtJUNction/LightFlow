@@ -1,12 +1,23 @@
 use crate::api::ApiService;
 use serde::Deserialize;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 pub(crate) const OPENAPI_YAML: &str = include_str!("../../openapi/lightflow.yaml");
 
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) service: Arc<ApiService>,
+    pub(crate) blocking_runs: Arc<Semaphore>,
+}
+
+impl AppState {
+    pub(crate) fn new(service: ApiService) -> Self {
+        Self {
+            service: Arc::new(service),
+            blocking_runs: super::blocking::configured_semaphore(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
