@@ -107,13 +107,12 @@ fn write_skill(root: &Path, workflow_id: &str) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-fn preview_source(workflow_id: &str) -> String {
-    format!(
+fn preview_source(_workflow_id: &str) -> String {
+    String::from(
         r#"use lightflow::preload::*;
 
-pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+pub fn define() -> WorkflowSpec {
+    workflow!()
         .name("Preview Branch")
         .description("Runnable preview branch.")
         .input("flag", "boolean")
@@ -123,8 +122,8 @@ pub fn define() -> WorkflowSpec {{
         .output_artifact_kind("image", "image")
         .builtin_runtime("image_runtime", "lightflow.image.generate", "builtin.preview.v1")
         .build()
-}}
-"#
+}
+"#,
     )
 }
 
@@ -135,13 +134,12 @@ fn abstract_source(workflow_id: &str) -> String {
     )
 }
 
-fn nested_source(workflow_id: &str, child_id: &str) -> String {
+fn nested_source(_workflow_id: &str, child_id: &str) -> String {
     format!(
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+    workflow!()
         .name("Nested Runtime")
         .description("Contains another composite runtime candidate.")
         .input("flag", "boolean")
@@ -156,7 +154,7 @@ pub fn define() -> WorkflowSpec {{
     )
 }
 
-fn nested_root_source(workflow_id: &str, disabled: bool) -> String {
+fn nested_root_source(_workflow_id: &str, disabled: bool) -> String {
     let nested_node = if disabled {
         ".disabled_node(\"nested\", \"lightflow.nested_bad\")"
     } else {
@@ -166,8 +164,7 @@ fn nested_root_source(workflow_id: &str, disabled: bool) -> String {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+    workflow!()
         .name("Nested Root")
         .description("Checks disabled nested runtime reachability.")
         .input("flag", "boolean")

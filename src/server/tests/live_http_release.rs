@@ -5,10 +5,13 @@ pub(crate) async fn verify_live_release_contracts(
     openapi: &str,
     test_root: &std::path::Path,
 ) {
-    let release_for_std = request_json(app, "/release?workflow_id=lightflow.std").await;
+    let release_for_std = request_json(app, "/release?workflow_id=lightflow.text_prompt").await;
     assert_eq!(release_for_std["status"], 200);
     assert_required_fields(openapi, "ReleaseCheckReport", &release_for_std["body"]);
-    assert_eq!(release_for_std["body"]["workflow_id"], "lightflow.std");
+    assert_eq!(
+        release_for_std["body"]["workflow_id"],
+        "lightflow.text_prompt"
+    );
     assert_eq!(
         release_for_std["body"]["project_root"],
         test_root.display().to_string()
@@ -29,7 +32,7 @@ pub(crate) async fn verify_live_release_contracts(
                             "--",
                             "loop",
                             "check",
-                            "lightflow.std",
+                            "lightflow.text_prompt",
                             "--require-replay"
                         ])
             }),
@@ -38,12 +41,15 @@ pub(crate) async fn verify_live_release_contracts(
 
     let release_for_project = request_json(
         app,
-        "/release?workflow_id=lightflow.std&project=lightflow-std",
+        "/release?workflow_id=lightflow.text_prompt&project=lightflow-std",
     )
     .await;
     assert_eq!(release_for_project["status"], 200);
     assert_required_fields(openapi, "ReleaseCheckReport", &release_for_project["body"]);
-    assert_eq!(release_for_project["body"]["workflow_id"], "lightflow.std");
+    assert_eq!(
+        release_for_project["body"]["workflow_id"],
+        "lightflow.text_prompt"
+    );
     assert_eq!(release_for_project["body"]["project"], "lightflow-std");
     assert_eq!(release_for_project["body"]["project_config_valid"], true);
     assert_eq!(
@@ -94,7 +100,7 @@ pub(crate) async fn verify_live_release_contracts(
     let release_for_project_path = request_json(
         app,
         &format!(
-            "/release?workflow_id=lightflow.std&project={}",
+            "/release?workflow_id=lightflow.text_prompt&project={}",
             project_path.display()
         ),
     )
@@ -142,7 +148,7 @@ pub(crate) async fn verify_live_release_contracts(
 
     let release_for_relative_project_path = request_json(
         app,
-        "/release?workflow_id=lightflow.std&project=./projects/lightflow-std",
+        "/release?workflow_id=lightflow.text_prompt&project=./projects/lightflow-std",
     )
     .await;
     assert_eq!(release_for_relative_project_path["status"], 200);
@@ -188,7 +194,7 @@ pub(crate) async fn verify_live_release_contracts(
 
     let release_for_unknown_project = request_json(
         app,
-        "/release?workflow_id=lightflow.std&project=lightflow-typo",
+        "/release?workflow_id=lightflow.text_prompt&project=lightflow-typo",
     )
     .await;
     assert_eq!(release_for_unknown_project["status"], 200);

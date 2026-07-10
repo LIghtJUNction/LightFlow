@@ -62,6 +62,6 @@ fn workflow_category_short_name(workflow_id: &str, category: &str) -> Option<Str
     let prefixed = workflow_id
         .strip_prefix("lightflow.")
         .unwrap_or(workflow_id);
-    let short = prefixed.strip_prefix(category)?.strip_prefix('.')?;
+    let short = prefixed.strip_prefix(category)?.strip_prefix('_')?;
     Some(short.replace('.', "_"))
 }

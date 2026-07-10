@@ -96,7 +96,20 @@ fn workflow_crate_dir_name_for_category(workflow_id: &str, category: Option<&str
         .strip_prefix("lightflow.")
         .unwrap_or(workflow_id);
     let short = category
-        .and_then(|category| without_namespace.strip_prefix(&format!("{category}.")))
+        .and_then(|category| without_namespace.strip_prefix(&format!("{category}_")))
         .unwrap_or(without_namespace);
     short.replace('.', "_")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workflow_crate_dir_name_for_category;
+
+    #[test]
+    fn category_prefix_is_removed_from_cargo_derived_workflow_id() {
+        assert_eq!(
+            workflow_crate_dir_name_for_category("lightflow.flux_text_to_image", Some("flux")),
+            "text_to_image"
+        );
+    }
 }

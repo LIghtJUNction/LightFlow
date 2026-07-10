@@ -13,10 +13,10 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let service = ApiService::new(root);
     for (workflow_id, capability) in [
-        ("lightflow.image.load", "lightflow.image.load"),
-        ("lightflow.image.save", "lightflow.image.save"),
-        ("lightflow.image.resize", "lightflow.image.resize"),
-        ("lightflow.image.crop", "lightflow.image.crop"),
+        ("lightflow.image_load", "lightflow.image.load"),
+        ("lightflow.image_save", "lightflow.image.save"),
+        ("lightflow.image_resize", "lightflow.image.resize"),
+        ("lightflow.image_crop", "lightflow.image.crop"),
     ] {
         let workflow = service.get_workflow(workflow_id)?;
         assert_eq!(workflow.category.as_deref(), Some("std"));
@@ -54,7 +54,7 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.image.load",
+            "lightflow.image_load",
             "-i",
             &format!("image_path={}", source.display()),
         ],
@@ -66,7 +66,7 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.image.save",
+            "lightflow.image_save",
             "-i",
             &format!("image_path={}", source.display()),
             "-i",
@@ -80,7 +80,7 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.image.resize",
+            "lightflow.image_resize",
             "-i",
             &format!("image_path={}", source.display()),
             "-i",
@@ -98,7 +98,7 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.image.crop",
+            "lightflow.image_crop",
             "-i",
             &format!("image_path={}", source.display()),
             "-i",
@@ -125,10 +125,10 @@ fn repository_standard_image_nodes_pass_node_conformance() -> Result<(), Box<dyn
 {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for workflow_id in [
-        "lightflow.image.load",
-        "lightflow.image.save",
-        "lightflow.image.resize",
-        "lightflow.image.crop",
+        "lightflow.image_load",
+        "lightflow.image_save",
+        "lightflow.image_resize",
+        "lightflow.image_crop",
     ] {
         let report = lfw(root, ["node", "test", workflow_id])?;
         assert_eq!(report["valid"], true, "{workflow_id}");

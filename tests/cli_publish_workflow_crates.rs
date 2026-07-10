@@ -135,14 +135,28 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
     assert!(cargo_lines[0].contains("--dry-run"));
     assert!(!cargo_lines[1].contains("--dry-run"));
 
-    let workspace_root_publish = Command::new(env!("CARGO_BIN_EXE_lfw"))
-        .arg("publish")
-        .current_dir(&root)
-        .output()?;
-    assert!(!workspace_root_publish.status.success());
+    let root_manifest =
+        fs::read_to_string(root.join("Cargo.toml"))?.parse::<toml_edit::DocumentMut>()?;
+    let host_package = root_manifest["package"]["name"]
+        .as_str()
+        .expect("host package name");
+    let workspace_root_plan = lfw(&root, ["publish"])?;
+    assert_eq!(workspace_root_plan["dry_run"], true);
+    assert_eq!(workspace_root_plan["package"], host_package);
+    assert_eq!(workspace_root_plan["publishable"], false);
     assert!(
-        String::from_utf8_lossy(&workspace_root_publish.stderr)
-            .contains("Cargo manifest is missing package.name")
+        workspace_root_plan["issues"]
+            .as_array()
+            .is_some_and(|issues| issues
+                .iter()
+                .any(|issue| issue == "package.publish is false"))
+    );
+    assert_eq!(workspace_root_plan["executed"], serde_json::json!([]));
+    assert_eq!(
+        workspace_root_plan["command"]
+            .as_array()
+            .and_then(|command| command.last()),
+        Some(&serde_json::json!("--dry-run"))
     );
 
     let root_plan = lfw(Path::new(env!("CARGO_MANIFEST_DIR")), ["publish"])?;

@@ -59,8 +59,7 @@ fn lfwx_runs_workflow_and_temporarily_toggles_nodes() -> Result<(), Box<dyn std:
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.parent")
-        .version("0.1.0")
+    workflow!()
         .name("Parent")
         .input("in", "json")
         .output("out", "json")
@@ -95,8 +94,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.io")
-        .version("0.1.0")
+    workflow!()
         .name("IO")
         .input("text", "text")
         .input("prompt", "text")

@@ -10,10 +10,10 @@ fn repository_standard_control_nodes_are_discoverable_and_runnable()
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let service = ApiService::new(root);
     for (workflow_id, capability) in [
-        ("lightflow.control.if", "lightflow.control.if"),
-        ("lightflow.control.switch", "lightflow.control.switch"),
-        ("lightflow.control.merge", "lightflow.control.merge"),
-        ("lightflow.control.split", "lightflow.control.split"),
+        ("lightflow.control_if", "lightflow.control.if"),
+        ("lightflow.control_switch", "lightflow.control.switch"),
+        ("lightflow.control_merge", "lightflow.control.merge"),
+        ("lightflow.control_split", "lightflow.control.split"),
     ] {
         let workflow = service.get_workflow(workflow_id)?;
         assert_eq!(workflow.category.as_deref(), Some("std"));
@@ -24,7 +24,7 @@ fn repository_standard_control_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.control.if",
+            "lightflow.control_if",
             "-i",
             "condition=true",
             "-i",
@@ -40,7 +40,7 @@ fn repository_standard_control_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.control.switch",
+            "lightflow.control_switch",
             "-i",
             "selector=final",
             "-i",
@@ -56,7 +56,7 @@ fn repository_standard_control_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.control.merge",
+            "lightflow.control_merge",
             "-i",
             "a={\"prompt\":\"cat\"}",
             "-i",
@@ -72,7 +72,7 @@ fn repository_standard_control_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.control.split",
+            "lightflow.control_split",
             "-i",
             "value=[\"first\",\"second\",\"third\"]",
         ],
@@ -95,10 +95,10 @@ fn repository_standard_control_nodes_pass_node_conformance()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for workflow_id in [
-        "lightflow.control.if",
-        "lightflow.control.switch",
-        "lightflow.control.merge",
-        "lightflow.control.split",
+        "lightflow.control_if",
+        "lightflow.control_switch",
+        "lightflow.control_merge",
+        "lightflow.control_split",
     ] {
         let report = lfw(root, ["node", "test", workflow_id])?;
         assert_eq!(report["valid"], true, "{workflow_id}");

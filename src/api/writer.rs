@@ -1,4 +1,4 @@
-use super::{ApiError, ApiResult};
+use super::{ApiError, ApiResult, workflow_package_identity};
 use crate::workflow::{
     CargoDependencySource, ModelProvider, PortSpec, WorkflowCondition, WorkflowNodeKind,
     WorkflowSpec,
@@ -20,14 +20,50 @@ pub(super) fn write_text_atomic(path: &Path, body: &str) -> ApiResult<()> {
     fs::rename(temp_path, path).map_err(ApiError::from)
 }
 
+pub(super) fn ensure_workflow_manifest(crate_dir: &Path, workflow: &WorkflowSpec) -> ApiResult<()> {
+    let manifest = crate_dir.join("Cargo.toml");
+    if manifest.exists() {
+        let (id, version) = workflow_package_identity(&manifest)?;
+        if id != workflow.id || version != workflow.version {
+            return Err(ApiError::InvalidRequest(format!(
+                "workflow manifest {} defines {id} {version}, but request defines {} {}",
+                manifest.display(),
+                workflow.id,
+                workflow.version
+            )));
+        }
+        return Ok(());
+    }
+
+    let package = workflow_package_name(&workflow.id)?;
+    let source = format!(
+        "[package]\nname = {package:?}\nversion = {:?}\nedition = \"2024\"\n\n[dependencies]\nlightflow = {{ workspace = true }}\n",
+        workflow.version
+    );
+    write_text_atomic(&manifest, &source)
+}
+
+fn workflow_package_name(workflow_id: &str) -> ApiResult<String> {
+    let suffix = workflow_id
+        .strip_prefix("lightflow.")
+        .filter(|suffix| {
+            !suffix.is_empty()
+                && suffix
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        })
+        .ok_or_else(|| {
+            ApiError::InvalidRequest(format!(
+                "workflow id {workflow_id} cannot be represented by a LightFlow Cargo package"
+            ))
+        })?;
+    Ok(format!("lightflow-{}", suffix.replace('_', "-")))
+}
+
 pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
     let mut source = String::from("use lightflow::preload::*;\n\n");
     source.push_str("pub fn define() -> WorkflowSpec {\n");
-    source.push_str(&format!("    workflow({})\n", rust_string(&workflow.id)));
-    source.push_str(&format!(
-        "        .version({})\n",
-        rust_string(&workflow.version)
-    ));
+    source.push_str("    workflow!()\n");
     source.push_str(&format!("        .name({})\n", rust_string(&workflow.name)));
     if let Some(description) = &workflow.description {
         source.push_str(&format!(

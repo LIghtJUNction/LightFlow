@@ -25,7 +25,7 @@ fn lfw_runs_text_to_image_through_invert_pipeline() -> Result<(), Box<dyn std::e
             "--output",
             generated_path.to_str().unwrap(),
             "|",
-            "lightflow.image.invert",
+            "lightflow.image_invert",
             "--output",
             inverted_path.to_str().unwrap(),
         ],

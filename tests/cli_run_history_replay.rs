@@ -144,8 +144,7 @@ fn lfw_replay_reports_model_lock_drift() -> Result<(), Box<dyn std::error::Error
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.model_passthrough")
-        .version("0.1.0")
+    workflow!()
         .name("Model Passthrough")
         .input("value", "json")
         .output("value", "json")
@@ -160,8 +159,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.echo_value")
-        .version("0.1.0")
+    workflow!()
         .name("Echo Value")
         .input("value", "json")
         .output("value", "json")

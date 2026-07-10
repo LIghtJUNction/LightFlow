@@ -51,8 +51,7 @@ Reusable workflows are library crates with `src/lib.rs` and no `src/main.rs`:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.text_plan")
-        .version("0.1.0")
+    workflow!()
         .name("Text Plan")
         .input("value", "json")
         .input_description("value", "Structured request payload.")
@@ -60,14 +59,19 @@ pub fn define() -> WorkflowSpec {
         .input_widget("value", "json")
         .output("result", "text")
         .output_description("result", "Generated text result.")
-        .depends_on("lightflow.std", "0.1.0")
         .depends_on("lightflow.text_prompt", "0.1.0")
-        .node("identity", "lightflow.std")
+        .depends_on("lightflow.text_result", "0.1.0")
         .node("prompt", "lightflow.text_prompt")
-        .edge("identity", "value", "prompt", "value")
+        .node("result", "lightflow.text_result")
+        .edge("prompt", "prompt", "result", "text")
         .build()
 }
 ```
+
+`workflow!()` reads `CARGO_PKG_NAME` and `CARGO_PKG_VERSION` in the workflow
+crate. A package named `lightflow-text-plan` therefore owns workflow id
+`lightflow.text_plan` at the package version; workflow source does not repeat or
+override either value.
 
 The backend parses this DSL statically from Rust ASTs; it does not execute or
 compile workflow source files.
@@ -127,9 +131,9 @@ cargo run --bin lfw -- new my_flux_sampler --category image --runtime lightflow.
 cargo run --bin lfw -- new my_global_flow --category std --global
 cargo run --bin lfw -- info
 cargo run --bin lfw -- home
-cargo run --bin lfw -- add lightflow-std --version 0.1.1
-cargo run --bin lfw -- add lightflow-std --path projects/lightflow-std/workflows/std/std --editable
-cargo run --bin lfw -- add lightflow-std --version 0.1.1 --global
+cargo run --bin lfw -- add lightflow-text-prompt --version 0.1.0
+cargo run --bin lfw -- add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
+cargo run --bin lfw -- add lightflow-text-prompt --version 0.1.0 --global
 cargo run --bin lfw -- import projects/lightflow-flux --global
 cargo run --bin lfw -- list
 cargo run --bin lfw -- list --categories
@@ -158,7 +162,7 @@ cargo run --bin lfw -- node test lightflow.text_to_image
 cargo run --bin lfw -- models requirements
 cargo run --bin lfw -- models requirements lightflow.text_to_image
 cargo run --bin lfw -- models requirements --blocked
-cargo run --bin lfw -- publish lightflow.std
+cargo run --bin lfw -- publish lightflow.text_prompt
 cargo run --bin lfw -- loop check lightflow.text_plan
 cargo run --bin lfw -- release check
 cargo run --bin lfw -- mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
@@ -324,16 +328,16 @@ with `surface: "mcp"` events, and includes the failed `run_id`, `run_dir`, and
 `trace_path` in JSON-RPC error `data` when execution fails.
 
 The standard node library now includes executable text and JSON helpers for
-prompt graphs: `lightflow.text.concat`, `lightflow.text.template`,
-`lightflow.text.regex`, and `lightflow.json.extract`; image and mask helpers
-`lightflow.image.load`, `lightflow.image.save`, `lightflow.image.resize`,
-`lightflow.image.crop`, `lightflow.image.upscale`, and
-`lightflow.mask.compose`; preview diffusion nodes `lightflow.image.edit` and
-`lightflow.image.inpaint`; control helpers `lightflow.control.if`,
-`lightflow.control.switch`, `lightflow.control.merge`, and
-`lightflow.control.split`; model helpers `lightflow.model.select` and
-`lightflow.model.lock_check`; and LLM helpers `lightflow.llm.generate`,
-`lightflow.llm.classify`, and `lightflow.llm.structured_output`, alongside
+prompt graphs: `lightflow.text_concat`, `lightflow.text_template`,
+`lightflow.text_regex`, and `lightflow.json_extract`; image and mask helpers
+`lightflow.image_load`, `lightflow.image_save`, `lightflow.image_resize`,
+`lightflow.image_crop`, `lightflow.image_upscale`, and
+`lightflow.mask_compose`; preview diffusion nodes `lightflow.image_edit` and
+`lightflow.image_inpaint`; control helpers `lightflow.control_if`,
+`lightflow.control_switch`, `lightflow.control_merge`, and
+`lightflow.control_split`; model helpers `lightflow.model_select` and
+`lightflow.model_lock_check`; and LLM helpers `lightflow.llm_generate`,
+`lightflow.llm_classify`, and `lightflow.llm_structured_output`, alongside
 identity, prompt/result, image generation, and image invert workflows.
 
 Every `lfw run` and `lfx` execution is recorded under
@@ -525,7 +529,10 @@ workflow crates as workspace members or dependencies. `lfw add --global` and
 `lfw upgrade --global` delegate to Cargo.
 
 `lfw init --workflow` creates a project workflow collection under
-`./.lightflow/workflows`. `lfw init --plugin` creates a single standard Cargo
+`./.lightflow/workflows`. Its root `Cargo.toml` is both the workflow workspace
+and a non-publishable host package whose library is `.lightflow/workspace.rs`;
+normal Cargo dependencies added to that host are therefore visible to
+LightFlow. `lfw init --plugin` creates a single standard Cargo
 crate that can expose a workflow from `src/lib.rs`. `lfw new --global` creates
 a workflow crate under the default global home's `workflows/` tree; `lfw add --global`
 writes dependencies to the default global home's `Cargo.toml`. Those global
@@ -541,19 +548,46 @@ Workflow dependencies are Cargo dependencies. A local standard workflow can be
 installed with:
 
 ```toml
-[workspace.dependencies]
-lightflow-std = { path = "projects/lightflow-std/workflows/std/std" }
+[dependencies]
+lightflow-text-prompt = { path = "projects/lightflow-std/workflows/std/text_prompt" }
 ```
+
+Registry and Git workflow crates use Cargo directly; no LightFlow package
+format or registry resolver is involved:
+
+```bash
+cargo add lightflow-text-prompt
+cargo add --path ../lightflow-text-prompt
+cargo add --git https://github.com/example/my-workflow my-workflow
+```
+
+LightFlow asks `cargo metadata` for the resolved package graph and discovers
+direct dependency crates whose library target exposes `pub fn define() ->
+WorkflowSpec`. If that workflow depends on other workflow crates, those are
+discovered recursively. Cargo owns registry downloads, Git checkouts, feature
+resolution, and `Cargo.lock`.
+
+A directly executable workflow remains the same package: keep the reusable
+`define()` function in `src/lib.rs`, then add a `src/bin/<name>.rs` target that
+passes it to `lightflow::runner::run_workflow_from_env`. Install that binary
+with Cargo:
+
+```bash
+cargo install my-workflow --bin my-workflow
+```
+
+Publish a crate with standard `cargo publish`; `lfw publish <workflow_id>` is
+the optional LightFlow readiness/dry-run gate before Cargo publishing.
 
 Use `--editable` with `--path` for a development install. It records the same
 Cargo path dependency, keeps the source tree live for edits, and marks the CLI
 result as editable:
 
 ```bash
-lfw add lightflow-std --path projects/lightflow-std/workflows/std/std --editable
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
 ```
 
-Use an external checkout path such as `../lightflow-std/workflows/std/std`
+Use an external checkout path such as `../lightflow-std/workflows/std/text_prompt`
 only when the standard workflow repository is not checked out under
 `projects/`.
 
@@ -651,19 +685,19 @@ let intent = classify_with_hooks(input, &patched).await?;
 Workflow files can also embed the Cargo installation hint:
 
 ```rust
-workflow("lightflow.image_prompt")
+workflow!()
     .depends_on_path(
-        "lightflow.std",
+        "lightflow.text_prompt",
         "0.1.0",
-        "lightflow-std",
-        "projects/lightflow-std/workflows/std/std",
+        "lightflow-text-prompt",
+        "projects/lightflow-std/workflows/std/text_prompt",
     )
     .depends_on_git(
-        "lightflow.std",
+        "lightflow.text_prompt",
         "0.1.0",
-        "lightflow-std",
+        "lightflow-text-prompt",
         "https://github.com/lightjunction/lightflow-std",
-        "lightflow-std",
+        "lightflow-text-prompt",
     )
 ```
 
@@ -676,8 +710,7 @@ Workflow versions are SemVer strings. The current resolver supports exact
 requirements and `*`:
 
 ```rust
-workflow("lightflow.std")
-    .version("0.1.0")
+workflow!()
     .depends_on("lightflow.other", "0.1.0")
 ```
 
@@ -697,12 +730,12 @@ sections, including `workspace = true` entries inherited from
 
 ```bash
 lfw publish                  # root lightflow crate plan
-lfw publish lightflow.std    # workflow crate plan
+lfw publish lightflow.text_prompt    # workflow crate plan
 lfw publish --crate path/to/crate
 lfw publish --workflows      # all workflow crate plans in dependency order
 lfw publish --workflows --require-publishable
 lfw publish --workflows --project lightflow-std
-lfw publish lightflow.std --apply
+lfw publish lightflow.text_prompt --apply
 lfw publish --workflows --apply --allow-dirty
 ```
 
@@ -1054,7 +1087,7 @@ the number of active workflow executions:
 
 ```bash
 lfw batch run jobs.jsonl \
-  --workflow lightflow.image.inpaint \
+  --workflow lightflow.image_inpaint \
   --max-gpu-jobs 1 \
   --max-cpu-jobs auto \
   --batch-size auto \

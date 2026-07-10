@@ -252,11 +252,11 @@ struct RuntimeAccumulator {
 mod tests {
     use super::*;
     use crate::api::executor_registry;
-    use crate::preload::*;
+    use crate::workflow::workflow_with_identity;
 
     #[test]
     fn builtin_preview_runtime_only_lists_its_declared_engine() {
-        let workflow = workflow("lightflow.preview")
+        let workflow = workflow_with_identity("lightflow.preview", "0.1.0")
             .builtin_runtime(
                 "image_runtime",
                 "lightflow.image.generate",
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn abstract_image_runtime_does_not_list_preview_as_a_candidate() {
-        let workflow = workflow("lightflow.abstract")
+        let workflow = workflow_with_identity("lightflow.abstract", "0.1.0")
             .runtime("image_runtime", "lightflow.image.generate")
             .build();
 
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn flux_runtime_only_lists_the_selected_physical_backend() {
-        let workflow = workflow("lightflow.flux")
+        let workflow = workflow_with_identity("lightflow.flux", "0.1.0")
             .builtin_runtime(
                 "image_runtime",
                 "lightflow.image.generate",
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn bogus_explicit_engine_makes_node_card_runtime_unavailable() {
-        let workflow = workflow("lightflow.bogus_engine")
+        let workflow = workflow_with_identity("lightflow.bogus_engine", "0.1.0")
             .builtin_runtime(
                 "image_runtime",
                 "lightflow.image.load",

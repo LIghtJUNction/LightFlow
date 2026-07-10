@@ -36,14 +36,17 @@ Metadata and graph structure live in the library entrypoint:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.example")
-        .version("0.1.0")
+    workflow!()
         .name("Example")
         .input("value", "json")
         .output("value", "json")
         .build()
 }
 ```
+
+The `workflow!()` macro injects the calling crate's Cargo package name and
+version. Static discovery applies the same mapping from the adjacent
+`Cargo.toml`, so compiled and source-parsed identities cannot drift.
 
 The backend statically parses the supported builder DSL from the Rust AST. It
 does not compile or execute workflow files.
@@ -60,23 +63,22 @@ the `projects/` sibling workflow workspace catalog.
 
 ## Standard Workflows
 
-`lightflow.std` is a normal workflow crate, not backend code and not a hidden
-built-in. Its scope is limited to abstract, domain-neutral building blocks such
-as identity / passthrough, no-op control points, structural merge / split
-helpers, and basic type adapters when they are broadly useful. It must not
-contain agent behavior, provider integrations, model download logic, or
-business templates.
+Each standard node is its own normal workflow crate, not backend code or a
+hidden aggregate workflow. The standard project contains domain-neutral text,
+JSON, image, control, model, and LLM helpers. These crates must not contain
+agent behavior, provider integrations, model download logic, or business
+templates.
 
 The repository also ships small standard workflow nodes for prompt and image
-graph composition. `lightflow.text.concat`, `lightflow.text.template`,
-`lightflow.text.regex`, `lightflow.json.extract`, `lightflow.image.load`,
-`lightflow.image.save`, `lightflow.image.resize`, `lightflow.image.crop`,
-`lightflow.image.upscale`, `lightflow.mask.compose`, `lightflow.image.edit`,
-`lightflow.image.inpaint`, `lightflow.control.if`,
-`lightflow.control.switch`, `lightflow.control.merge`,
-`lightflow.control.split`, `lightflow.model.select`,
-`lightflow.model.lock_check`, `lightflow.llm.generate`,
-`lightflow.llm.classify`, and `lightflow.llm.structured_output` are ordinary
+graph composition. `lightflow.text_concat`, `lightflow.text_template`,
+`lightflow.text_regex`, `lightflow.json_extract`, `lightflow.image_load`,
+`lightflow.image_save`, `lightflow.image_resize`, `lightflow.image_crop`,
+`lightflow.image_upscale`, `lightflow.mask_compose`, `lightflow.image_edit`,
+`lightflow.image_inpaint`, `lightflow.control_if`,
+`lightflow.control_switch`, `lightflow.control_merge`,
+`lightflow.control_split`, `lightflow.model_select`,
+`lightflow.model_lock_check`, `lightflow.llm_generate`,
+`lightflow.llm_classify`, and `lightflow.llm_structured_output` are ordinary
 workflow crates with agent skills and Node Schema v1 metadata, but execute
 through builtin runtime capabilities. They cover common ComfyUI-style prompt
 preparation, PNG artifact handling, mask composition, preview image
@@ -84,8 +86,9 @@ edit/inpaint, model selection checks, graph value routing, offline LLM
 composition, and simple upscale workflows without forcing users to write a
 custom Rust workflow for every adapter.
 
-The repository dogfoods this model: `lightflow.text_plan` declares an exact
-dependency on `lightflow.std` and includes a `lightflow.std` node in its graph.
+The repository dogfoods this model: `lightflow.text_plan` declares exact
+dependencies on `lightflow.text_prompt` and `lightflow.text_result` and composes
+those two package-owned workflow nodes.
 
 ## Validation
 
@@ -302,7 +305,7 @@ the project workflow sources listed in
 homes from `LFW_PATH`, scans project and global home manifests for Cargo `path`
 dependencies, then statically parses any dependency crate that exposes
 `pub fn define() -> WorkflowSpec` in `src/lib.rs`. This lets a project depend
-on `lightflow-std = { path = "..." }` and immediately use `lightflow.std` in
+on `lightflow-text-prompt = { path = "..." }` and immediately use `lightflow.text_prompt` in
 `.depends_on(...)` or `.node(...)`. Remote git dependencies keep the same Cargo
 manifest shape; `lfw sync` handles Cargo fetching and model/resource
 synchronization.

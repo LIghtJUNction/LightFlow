@@ -28,8 +28,7 @@ lightflow = {{ path = {:?} }}
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.skillful")
-        .version("0.1.0")
+    workflow!()
         .name("Skillful")
         .input("value", "json")
         .output("value", "json")

@@ -1,18 +1,34 @@
 use super::package_name_from_id;
 use std::path::Path;
 
-pub(in crate::cli) fn workspace_manifest() -> String {
+pub(in crate::cli) fn workspace_manifest(root: &Path) -> String {
+    workflow_workspace_manifest(root, ".lightflow/workflows/*/*")
+}
+
+pub(in crate::cli) fn workflow_collection_manifest(root: &Path) -> String {
+    workflow_workspace_manifest(root, "workflows/*/*")
+}
+
+fn workflow_workspace_manifest(root: &Path, member_glob: &str) -> String {
+    let package = workflow_host_package_name(root);
     format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\".lightflow/workflows/*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
+        "[package]\nname = {package:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n[lib]\npath = \".lightflow/workspace.rs\"\n\n[dependencies]\n\n[workspace]\nresolver = \"3\"\nmembers = [{member_glob:?}]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
         env!("CARGO_PKG_VERSION")
     )
 }
 
-pub(in crate::cli) fn workflow_collection_manifest() -> String {
-    format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [\"workflows/*/*\"]\n\n[workspace.dependencies]\nlightflow = {:?}\n",
-        env!("CARGO_PKG_VERSION")
-    )
+pub(in crate::cli) fn workflow_host_package_name(root: &Path) -> String {
+    let resolved_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let root_name = resolved_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(package_name_from_id)
+        .unwrap_or_else(|| "lightflow".to_owned());
+    format!("{root_name}-lightflow-host")
+}
+
+pub(in crate::cli) const fn workflow_host_source() -> &'static str {
+    "//! Cargo host package for project-level LightFlow workflow dependencies.\n"
 }
 
 pub(super) fn project_gitignore() -> String {

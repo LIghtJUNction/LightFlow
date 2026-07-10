@@ -7,10 +7,8 @@ Reusable workflows define `src/lib.rs` and do not define `src/main.rs`. Leaf
 workflows declare ports and no nodes. Composite workflows use
 `.node(..., workflow_id)` to nest other workflows.
 
-`lightflow.std` is a normal workflow crate in the `lightflow-std` project, not a
-backend built-in. It is reserved for minimal, abstract, reusable building blocks
-and must not contain agent behavior, provider integrations, or business
-templates.
+Every standard node is a separate workflow crate in the `lightflow-std`
+project; there is no aggregate `std/std` workflow crate.
 
-`lightflow.text_plan` depends on and nests `lightflow.std` to verify that the
-standard workflow project is exercised by a real local workflow.
+`lightflow.text_plan` composes `lightflow.text_prompt` and
+`lightflow.text_result` to exercise the standard workflow project.

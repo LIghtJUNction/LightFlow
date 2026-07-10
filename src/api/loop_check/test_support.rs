@@ -92,7 +92,7 @@ pub(super) fn git_ok<const N: usize>(
 
 pub(super) fn write_test_extension_crate(
     root: &Path,
-    workflow_id: &str,
+    _workflow_id: &str,
     source: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let crate_dir = root.join("extensions/lightflow-external-child");
@@ -105,12 +105,9 @@ version = "0.1.0"
 edition = "2024"
 description = "External child fixture."
 license = "MIT"
-
-[dependencies]
-lightflow = { workspace = true }
 "#,
     )?;
     fs::write(crate_dir.join("src/lib.rs"), source)?;
-    assert!(source.contains(&format!("workflow(\"{workflow_id}\")")));
+    assert!(source.contains("workflow!()"));
     Ok(())
 }

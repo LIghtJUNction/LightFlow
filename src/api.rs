@@ -32,6 +32,7 @@ mod service;
 mod source;
 mod util;
 mod validation;
+mod workflow_identity;
 mod workflow_metadata;
 mod writer;
 
@@ -49,16 +50,19 @@ pub(crate) use publish_checks::{
     internal_path_dependency_packages, package_field_value, publish_issues, read_cargo_manifest,
     read_workspace_cargo_manifest,
 };
-use source::read_workflow_sources;
+use source::{ensure_workflow_save_workspace, read_workflow_sources};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use util::{validate_id_segment, workflow_crate_dir_name};
 use validation::{validate_workflow_shape, validate_workflow_spec};
+pub(crate) use workflow_identity::{
+    workflow_package_identity, workflow_package_identity_from_source,
+};
 pub(crate) use workflow_metadata::{
     categorized_workflow_manifest_path, workflow_id_from_manifest, workflow_placeholder_issues,
     workflow_publish_metadata_issues,
 };
-use writer::{workflow_source, write_text_atomic};
+use writer::{ensure_workflow_manifest, workflow_source, write_text_atomic};
 
 pub(super) const WORKFLOW_DIR: &str = "workflows";
 pub(super) const PROJECT_LIGHTFLOW_DIR: &str = ".lightflow";
@@ -150,21 +154,30 @@ impl ApiService {
             .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))
     }
 
-    /// Save one workflow spec under
-    /// `workflows/<category>/<short-name>/src/lib.rs`.
+    /// Save one workflow spec under the official project collection at
+    /// `.lightflow/workflows/<category>/<short-name>/src/lib.rs`.
     pub fn save_workflow(&self, workflow: WorkflowSpec) -> ApiResult<WorkflowSpec> {
+        ensure_workflow_save_workspace(&self.repo_root)?;
         let validation = self.validate_workflow(&workflow);
         if !validation.valid {
             return Err(ApiError::InvalidRequest(validation.issues.join("; ")));
         }
         let path = self.workflow_path(&workflow.id, workflow.category.as_deref())?;
+        let crate_dir = path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .ok_or_else(|| ApiError::InvalidRequest("workflow crate path is invalid".to_owned()))?;
+        ensure_workflow_manifest(crate_dir, &workflow)?;
         write_text_atomic(&path, &workflow_source(&workflow))?;
         Ok(workflow)
     }
 
     fn workflow_path(&self, workflow_id: &str, category: Option<&str>) -> ApiResult<PathBuf> {
         validate_id_segment(workflow_id, "workflow id")?;
-        let path = self.repo_root.join(WORKFLOW_DIR);
+        let path = self
+            .repo_root
+            .join(PROJECT_LIGHTFLOW_DIR)
+            .join(WORKFLOW_DIR);
         let Some(category) = category else {
             return Err(ApiError::InvalidRequest(
                 "workflow category is required for local workflow files".to_owned(),
@@ -332,4 +345,130 @@ fn dependency_issues(dependencies: &WorkflowDependencyReport) -> Vec<String> {
         ));
     }
     issues
+}
+
+#[cfg(test)]
+mod save_workflow_tests {
+    use super::*;
+    use crate::workflow::workflow_with_identity;
+    use std::fs;
+    use std::process::Command;
+
+    #[test]
+    fn save_rejects_uninitialized_repository_without_creating_workflow_files() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let service = ApiService::new(root.path());
+        let mut workflow = workflow_with_identity("lightflow.saved_flow", "2.3.4")
+            .name("Saved Flow")
+            .build();
+        workflow.category = Some("tests".to_owned());
+
+        let error = service.save_workflow(workflow).expect_err("save error");
+
+        assert!(error.message().contains("run `lfw init`"));
+        assert!(!root.path().join(".lightflow/workflows").exists());
+    }
+
+    #[test]
+    fn save_rejects_non_official_workspace_without_creating_workflow_files() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("src")).expect("source dir");
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname = \"ordinary\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("manifest");
+        fs::write(root.path().join("src/lib.rs"), "pub fn library() {}\n").expect("source");
+        assert!(!root.path().join("Cargo.lock").exists());
+        let service = ApiService::new(root.path());
+        let mut workflow = workflow_with_identity("lightflow.saved_flow", "2.3.4")
+            .name("Saved Flow")
+            .build();
+        workflow.category = Some("tests".to_owned());
+
+        let error = service.save_workflow(workflow).expect_err("save error");
+
+        assert!(error.message().contains("run `lfw init`"));
+        assert!(!root.path().join("Cargo.lock").exists());
+        assert!(!root.path().join(".lightflow/workflows").exists());
+    }
+
+    #[test]
+    fn save_and_reload_preserve_manifest_identity_and_version() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join(".lightflow")).expect("host dir");
+        fs::write(
+            root.path().join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "save-test-lightflow-host"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = ".lightflow/workspace.rs"
+
+[dependencies]
+
+[workspace]
+resolver = "3"
+members = [".lightflow/workflows/*/*"]
+
+[workspace.dependencies]
+lightflow = {{ path = {:?} }}
+"#,
+                env!("CARGO_MANIFEST_DIR")
+            ),
+        )
+        .expect("host manifest");
+        fs::write(
+            root.path().join(".lightflow/workspace.rs"),
+            "//! Test workflow host.\n",
+        )
+        .expect("host source");
+        let service = ApiService::new(root.path());
+        let mut workflow = workflow_with_identity("lightflow.saved_flow", "2.3.4")
+            .name("Saved Flow")
+            .build();
+        workflow.category = Some("tests".to_owned());
+
+        service.save_workflow(workflow).expect("save workflow");
+        let reloaded = service
+            .get_workflow("lightflow.saved_flow")
+            .expect("reload workflow");
+        let workflow_manifest = root
+            .path()
+            .join(".lightflow/workflows/tests/saved_flow/Cargo.toml");
+        let manifest = fs::read_to_string(&workflow_manifest).expect("manifest");
+        let metadata = Command::new("cargo")
+            .args(["metadata", "--format-version", "1", "--no-deps"])
+            .current_dir(root.path())
+            .output()
+            .expect("cargo metadata");
+        assert!(
+            metadata.status.success(),
+            "cargo metadata failed: {}",
+            String::from_utf8_lossy(&metadata.stderr)
+        );
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&metadata.stdout).expect("metadata JSON");
+        assert!(
+            metadata["workspace_members"]
+                .as_array()
+                .is_some_and(|members| {
+                    members.iter().any(|member| {
+                        member
+                            .as_str()
+                            .is_some_and(|member| member.contains("lightflow-saved-flow"))
+                    })
+                })
+        );
+
+        assert_eq!(reloaded.id, "lightflow.saved_flow");
+        assert_eq!(reloaded.version, "2.3.4");
+        assert!(manifest.contains("name = \"lightflow-saved-flow\""));
+        assert!(manifest.contains("version = \"2.3.4\""));
+        assert!(manifest.contains("lightflow = { workspace = true }"));
+    }
 }

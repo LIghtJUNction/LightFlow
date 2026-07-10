@@ -45,8 +45,6 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-[dependencies]
-lightflow-b-git = { workspace = true }
 "#,
     )?;
     fs::write(root.join("app/src/lib.rs"), "pub fn app() {}\n")?;
@@ -77,8 +75,7 @@ pub(crate) fn write_leaf_project_in_workspace(
             r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+    workflow!()
         .name("{display_name}")
         .input("value", "text")
         .output("value", "text")
@@ -103,8 +100,7 @@ pub(crate) fn write_a_project(
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("lightflow.a")
-        .version("0.1.0")
+    workflow!()
         .name("A")
         .input("use_b", "boolean")
         .input("value", "text")
@@ -149,7 +145,7 @@ lightflow = {{ workspace = true }}
 pub(crate) fn write_standalone_workflow_crate(
     crate_dir: &Path,
     crate_name: &str,
-    workflow_id: &str,
+    _workflow_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(crate_dir.join("src"))?;
     fs::write(
@@ -169,19 +165,16 @@ lightflow = {{ path = {:?} }}
     )?;
     fs::write(
         crate_dir.join("src/lib.rs"),
-        format!(
-            r#"use lightflow::preload::*;
+        r#"use lightflow::preload::*;
 
-pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+pub fn define() -> WorkflowSpec {
+    workflow!()
         .name("Git B")
         .input("value", "text")
         .output("value", "text")
         .build()
-}}
-"#
-        ),
+}
+"#,
     )?;
     Ok(())
 }

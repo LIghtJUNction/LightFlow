@@ -24,8 +24,7 @@ lightflow = { path = "." }
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.test_flux_edit")
-        .version("0.1.0")
+    workflow!()
         .name("Test FLUX Edit")
         .input("image_path", "path")
         .input("prompt", "text")
@@ -51,8 +50,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.test_flux_inpaint")
-        .version("0.1.0")
+    workflow!()
         .name("Test FLUX Inpaint")
         .input("image_path", "path")
         .input("mask_path", "path")

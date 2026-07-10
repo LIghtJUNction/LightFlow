@@ -12,7 +12,7 @@ pub(crate) async fn verify_invalid_project_config_contracts(
     )
     .expect("invalid project config");
     let release_for_invalid_project_config =
-        request_json(app, "/release?workflow_id=lightflow.std").await;
+        request_json(app, "/release?workflow_id=lightflow.text_prompt").await;
     assert_eq!(release_for_invalid_project_config["status"], 200);
     assert_required_fields(
         openapi,
@@ -81,11 +81,11 @@ pub(crate) async fn verify_run_and_patch_contracts(app: &axum::Router, openapi: 
         "/workflows/lightflow.text_plan/run",
         serde_json::json!({
             "inputs": { "value": "patched" },
-            "enabled_nodes": ["identity"],
+            "enabled_nodes": ["prompt"],
             "patch": {
                 "nodes": {
-                    "identity": {
-                        "replace_with": "lightflow.std",
+                    "prompt": {
+                        "replace_with": "lightflow.text_prompt",
                         "timeout_ms": 1000
                     }
                 }
@@ -101,14 +101,14 @@ pub(crate) async fn verify_run_and_patch_contracts(app: &axum::Router, openapi: 
     assert_eq!(patched_trace["status"], 200);
     assert_eq!(
         patched_trace["body"]["manifest"]["stages"][0]["execution"]["enabled_nodes"],
-        serde_json::json!(["identity"])
+        serde_json::json!(["prompt"])
     );
     assert_eq!(
-        patched_trace["body"]["manifest"]["stages"][0]["execution"]["patch"]["nodes"]["identity"]["replace_with"],
-        "lightflow.std"
+        patched_trace["body"]["manifest"]["stages"][0]["execution"]["patch"]["nodes"]["prompt"]["replace_with"],
+        "lightflow.text_prompt"
     );
     assert_eq!(
-        patched_trace["body"]["manifest"]["stages"][0]["execution"]["patch"]["nodes"]["identity"]["timeout_ms"],
+        patched_trace["body"]["manifest"]["stages"][0]["execution"]["patch"]["nodes"]["prompt"]["timeout_ms"],
         1000
     );
     let removed_run = request_json_delete(app, &format!("/runs/{patched_run_id}")).await;
@@ -122,7 +122,7 @@ pub(crate) async fn verify_run_and_patch_contracts(app: &axum::Router, openapi: 
         "/patches/qa-debug",
         serde_json::json!({
             "nodes": {
-                "identity": {
+                "prompt": {
                     "retry": 2,
                     "timeout_ms": 500
                 }
@@ -143,7 +143,7 @@ pub(crate) async fn verify_run_and_patch_contracts(app: &axum::Router, openapi: 
     assert_eq!(registered_patch["status"], 200);
     assert_required_fields(openapi, "RegisteredPatch", &registered_patch["body"]);
     assert_eq!(
-        registered_patch["body"]["patch"]["nodes"]["identity"]["retry"],
+        registered_patch["body"]["patch"]["nodes"]["prompt"]["retry"],
         2
     );
 
@@ -151,7 +151,7 @@ pub(crate) async fn verify_run_and_patch_contracts(app: &axum::Router, openapi: 
         app,
         "/patches/validate",
         serde_json::json!({
-            "nodes": { "identity": { "enable": true } }
+            "nodes": { "prompt": { "enable": true } }
         }),
     )
     .await;

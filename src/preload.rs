@@ -10,8 +10,9 @@ pub use crate::workflow::{
     WorkflowCondition, WorkflowDependencyReport, WorkflowDependencyRequirement, WorkflowEdge,
     WorkflowEndpoint, WorkflowExecution, WorkflowExecutionOptions, WorkflowList, WorkflowNode,
     WorkflowNodeKind, WorkflowNodePatch, WorkflowPatch, WorkflowPosition, WorkflowSpec,
-    WorkflowState, WorkflowSummary, WorkflowValidation, workflow,
+    WorkflowState, WorkflowSummary, WorkflowValidation,
 };
 pub use crate::{
-    WorkflowInput, WorkflowOutput, node, retry, subworkflow, timeout, trace_node, workflow,
+    WorkflowInput, WorkflowOutput, node, retry, subworkflow, timeout, trace_node, typed_workflow,
+    workflow,
 };

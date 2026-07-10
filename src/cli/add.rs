@@ -1,4 +1,4 @@
-use super::project::workspace_manifest;
+use super::project::{workflow_host_package_name, workflow_host_source, workspace_manifest};
 use super::{CliError, CliResult};
 use serde_json::json;
 use std::fs;
@@ -119,7 +119,7 @@ fn add_usage() -> String {
         "usage:",
         "  lfw add <crate_name> [--version <version>] [--path <path>|--git <url>] [--package <package>] [--editable] [--global|-g]",
         "",
-        "Adds one workflow crate dependency to the local or global LightFlow workspace manifest.",
+        "Adds one workflow crate dependency to the local or global LightFlow host package.",
         "Registry dependencies require --version <version>.",
         "Use --path for local workflow crates and --editable when the path should remain editable.",
         "Use --git for remote workflow crates; --package selects a package when the repository name differs.",
@@ -144,19 +144,24 @@ pub(super) fn add_dependency(
     let manifest_path = root.join("Cargo.toml");
     if !manifest_path.exists() {
         let manifest = if global {
-            super::project::workflow_collection_manifest()
+            super::project::workflow_collection_manifest(root)
         } else {
-            workspace_manifest()
+            workspace_manifest(root)
         };
         fs::write(&manifest_path, manifest)?;
+        write_workflow_host_source(root)?;
     }
     let source = fs::read_to_string(&manifest_path)?;
     let mut document = source
         .parse::<DocumentMut>()
         .map_err(|error| CliError::Usage(format!("invalid Cargo manifest: {error}")))?;
-    ensure_workspace_dependencies_table(&mut document);
+    if document.get("package").is_none() && document.get("workspace").is_some() {
+        ensure_workflow_host_package(&mut document, root);
+        write_workflow_host_source(root)?;
+    }
+    ensure_dependencies_table(&mut document);
     let dependency = dependency_item(options);
-    document["workspace"]["dependencies"][&options.crate_name] = dependency;
+    document["dependencies"][&options.crate_name] = dependency;
     fs::write(&manifest_path, document.to_string())?;
     Ok(json!({
         "manifest": manifest_path,
@@ -173,23 +178,56 @@ pub(super) fn add_dependency(
     }))
 }
 
-fn ensure_workspace_dependencies_table(document: &mut DocumentMut) {
+fn ensure_dependencies_table(document: &mut DocumentMut) {
     let root = document.as_table_mut();
-    let needs_workspace = root
-        .get("workspace")
-        .is_none_or(|workspace| !workspace.is_table());
-    if needs_workspace {
-        root["workspace"] = Item::Table(Table::new());
-    }
-    let workspace = root["workspace"]
-        .as_table_mut()
-        .expect("workspace table was just ensured");
-    let needs_dependencies = workspace
+    let needs_dependencies = root
         .get("dependencies")
         .is_none_or(|dependencies| !dependencies.is_table());
     if needs_dependencies {
-        workspace["dependencies"] = Item::Table(Table::new());
+        root["dependencies"] = Item::Table(Table::new());
     }
+}
+
+fn ensure_workflow_host_package(document: &mut DocumentMut, root: &Path) {
+    let inherited_dependencies = document
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(Item::as_table_like)
+        .map(|dependencies| {
+            dependencies
+                .iter()
+                .filter(|(name, dependency)| !is_core_lightflow_dependency(name, dependency))
+                .map(|(name, dependency)| (name.to_owned(), dependency.clone()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    document["package"] = Item::Table(Table::new());
+    document["package"]["name"] = value(workflow_host_package_name(root));
+    document["package"]["version"] = value("0.0.0");
+    document["package"]["edition"] = value("2024");
+    document["package"]["publish"] = value(false);
+    document["lib"] = Item::Table(Table::new());
+    document["lib"]["path"] = value(".lightflow/workspace.rs");
+    ensure_dependencies_table(document);
+    for (name, dependency) in &inherited_dependencies {
+        document["dependencies"][name] = dependency.clone();
+    }
+}
+
+fn is_core_lightflow_dependency(name: &str, dependency: &Item) -> bool {
+    name == "lightflow" || dependency.get("package").and_then(Item::as_str) == Some("lightflow")
+}
+
+fn write_workflow_host_source(root: &Path) -> CliResult<()> {
+    let path = root.join(".lightflow/workspace.rs");
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, workflow_host_source())?;
+    Ok(())
 }
 
 fn dependency_item(options: &AddDependencyOptions) -> Item {

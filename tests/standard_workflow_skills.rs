@@ -15,13 +15,7 @@ fn repository_workflow_crates_have_agent_skills() -> Result<(), Box<dyn std::err
 
     let mut missing = Vec::new();
     for crate_dir in workflow_crates {
-        let source = fs::read_to_string(crate_dir.join("src/lib.rs"))?;
-        let workflow_id = workflow_id_from_source(&source).unwrap_or_else(|| {
-            panic!(
-                "workflow crate {} should declare workflow(\"...\")",
-                crate_dir.display()
-            )
-        });
+        let workflow_id = workflow_id_from_manifest(&crate_dir.join("Cargo.toml"))?;
         let skill_root = crate_dir.join(".agent/skills");
         let mut found = false;
         if let Ok(entries) = fs::read_dir(&skill_root) {
@@ -107,8 +101,11 @@ fn collect_workflow_crates(
     Ok(())
 }
 
-fn workflow_id_from_source(source: &str) -> Option<String> {
-    let start = source.find("workflow(\"")? + "workflow(\"".len();
-    let end = source[start..].find('"')?;
-    Some(source[start..start + end].to_owned())
+fn workflow_id_from_manifest(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let manifest = fs::read_to_string(path)?.parse::<toml_edit::DocumentMut>()?;
+    let package = manifest["package"]["name"]
+        .as_str()
+        .ok_or("workflow package name is missing")?;
+    let suffix = package.strip_prefix("lightflow-").unwrap_or(package);
+    Ok(format!("lightflow.{}", suffix.replace('-', "_")))
 }

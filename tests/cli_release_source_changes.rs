@@ -27,6 +27,7 @@ fn lfw_release_check_dry_run_reports_source_change_blockers()
         "# Local Workflow Loop\n\n## Verification Gates\n",
     )?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(&root, ["new", "reviewed", "--category", "examples"])?;
     complete_generated_workflow_metadata(&root, "examples", "example")?;
     complete_generated_workflow_metadata(&root, "examples", "reviewed")?;
@@ -107,6 +108,7 @@ fn lfw_release_check_dry_run_accepts_skill_only_source_changes()
         "# Local Workflow Loop\n\n## Verification Gates\n",
     )?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(&root, ["new", "reviewed", "--category", "examples"])?;
     complete_generated_workflow_metadata(&root, "examples", "example")?;
     complete_generated_workflow_metadata(&root, "examples", "reviewed")?;
@@ -192,6 +194,7 @@ fn lfw_release_check_apply_skips_commands_after_source_change_blockers()
         "# Local Workflow Loop\n\n## Verification Gates\n",
     )?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(&root, ["new", "reviewed", "--category", "examples"])?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;

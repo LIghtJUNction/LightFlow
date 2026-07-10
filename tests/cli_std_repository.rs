@@ -6,15 +6,14 @@ use std::path::Path;
 use support::*;
 
 #[test]
-fn repository_std_workflow_is_library_only_and_abstract() -> Result<(), Box<dyn std::error::Error>>
-{
+fn repository_standard_workflow_is_library_only() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let service = ApiService::new(root);
-    let workflow = service.get_workflow("lightflow.std")?;
+    let workflow = service.get_workflow("lightflow.text_prompt")?;
 
-    assert_eq!(workflow.id, "lightflow.std");
+    assert_eq!(workflow.id, "lightflow.text_prompt");
     assert_eq!(workflow.version, "0.1.0");
-    assert_eq!(workflow.name, "LightFlow Std Identity");
+    assert_eq!(workflow.name, "Text Prompt");
     assert_eq!(workflow.inputs.len(), 1);
     assert_eq!(workflow.outputs.len(), 1);
     assert!(workflow.dependencies.is_empty());
@@ -22,12 +21,12 @@ fn repository_std_workflow_is_library_only_and_abstract() -> Result<(), Box<dyn 
     assert!(workflow.edges.is_empty());
 
     assert_eq!(workflow.category.as_deref(), Some("std"));
-    let crate_dir = root.join("projects/lightflow-std/workflows/std/std");
+    let crate_dir = root.join("projects/lightflow-std/workflows/std/text_prompt");
     assert!(crate_dir.join("src/lib.rs").exists());
     assert!(!crate_dir.join("src/main.rs").exists());
 
     let manifest = fs::read_to_string(crate_dir.join("Cargo.toml"))?;
-    assert!(manifest.contains("name = \"lightflow-std\""));
+    assert!(manifest.contains("name = \"lightflow-text-prompt\""));
     assert!(manifest.contains("lightflow = { workspace = true }"));
     assert!(manifest.contains("repository = \"https://github.com/lightjunction/lightflow-std\""));
     assert!(!manifest.contains("publish = false"));
@@ -42,10 +41,13 @@ fn repository_std_project_workflows_are_discovered_by_default()
     let service = ApiService::new(root);
 
     assert_eq!(
-        service.get_workflow("lightflow.std")?.category.as_deref(),
+        service
+            .get_workflow("lightflow.text_prompt")?
+            .category
+            .as_deref(),
         Some("std")
     );
-    assert!(service.get_workflow("lightflow.text.template").is_ok());
+    assert!(service.get_workflow("lightflow.text_template").is_ok());
 
     Ok(())
 }
@@ -67,8 +69,8 @@ fn sibling_project_workflows_are_discovered_from_explicit_paths()
         .filter_map(|workflow| workflow["id"].as_str())
         .collect::<Vec<_>>();
 
-    assert!(workflow_ids.contains(&"lightflow.flux.text_to_image"));
-    assert!(workflow_ids.contains(&"lightflow.rig.llm"));
+    assert!(workflow_ids.contains(&"lightflow.flux_text_to_image"));
+    assert!(workflow_ids.contains(&"lightflow.rig_llm"));
 
     Ok(())
 }
@@ -89,7 +91,6 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
             ))
             .collect::<Vec<_>>(),
         vec![
-            ("lightflow.std", Some("0.1.0")),
             ("lightflow.text_prompt", Some("0.1.0")),
             ("lightflow.text_result", Some("0.1.0")),
         ]
@@ -98,7 +99,7 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
         workflow
             .nodes
             .iter()
-            .any(|node| node.id == "identity" && node.workflow_id == "lightflow.std")
+            .any(|node| node.id == "prompt" && node.workflow_id == "lightflow.text_prompt")
     );
 
     let detail = lfw(root, ["ls", "--detail"])?;
@@ -108,14 +109,16 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
         .iter()
         .find(|workflow| workflow["id"] == "lightflow.text_plan")
         .expect("detailed list includes lightflow.text_plan");
-    assert_eq!(text_plan["nodes"][0]["workflow_id"], "lightflow.std");
+    assert_eq!(
+        text_plan["nodes"][0]["workflow_id"],
+        "lightflow.text_prompt"
+    );
 
     let deps = lfw(root, ["deps", "lightflow.text_plan"])?;
     assert_eq!(deps["complete"], true);
     assert_eq!(
         deps["workflows"],
         serde_json::json!([
-            "lightflow.std",
             "lightflow.text_plan",
             "lightflow.text_prompt",
             "lightflow.text_result"
@@ -124,7 +127,6 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
     assert_eq!(
         deps["workflow_order"],
         serde_json::json!([
-            "lightflow.std",
             "lightflow.text_prompt",
             "lightflow.text_result",
             "lightflow.text_plan"

@@ -1,4 +1,5 @@
-use super::{ApiError, ApiResult};
+use super::ApiResult;
+use crate::api::workflow_package_identity;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -46,19 +47,5 @@ pub(super) fn discover_workflow_collection_crates(collection: &Path) -> ApiResul
 }
 
 pub(super) fn workflow_id_from_crate(crate_dir: &Path) -> ApiResult<String> {
-    let lib = crate_dir.join("src").join("lib.rs");
-    let source = fs::read_to_string(&lib)?;
-    extract_workflow_id(&source).ok_or_else(|| {
-        ApiError::InvalidRequest(format!(
-            "workflow crate {} does not define workflow(\"...\")",
-            crate_dir.display()
-        ))
-    })
-}
-
-fn extract_workflow_id(source: &str) -> Option<String> {
-    let start = source.find("workflow(\"")? + "workflow(\"".len();
-    let rest = &source[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_owned())
+    workflow_package_identity(&crate_dir.join("Cargo.toml")).map(|(id, _)| id)
 }

@@ -63,6 +63,11 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert!(manifest.contains("name = \"lightflow-extra\""));
     assert!(!manifest.contains("publish = false"));
     let workspace = fs::read_to_string(root.join("Cargo.toml"))?;
+    assert!(workspace.contains("-lightflow-host\""));
+    assert!(workspace.contains("version = \"0.0.0\""));
+    assert!(workspace.contains("publish = false"));
+    assert!(workspace.contains("path = \".lightflow/workspace.rs\""));
+    assert!(root.join(".lightflow/workspace.rs").is_file());
     assert!(workspace.contains(&format!("lightflow = {:?}", env!("CARGO_PKG_VERSION"))));
     let gitignore = fs::read_to_string(root.join(".gitignore"))?;
     assert!(gitignore.contains("/target/"));
@@ -73,7 +78,10 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     let lfw_path_manifest = root.join(".lightflow/Cargo.toml");
     assert!(lfw_path_manifest.exists());
     let lfw_path_workspace = fs::read_to_string(&lfw_path_manifest)?;
+    assert!(lfw_path_workspace.contains("-lightflow-host\""));
+    assert!(lfw_path_workspace.contains("publish = false"));
     assert!(lfw_path_workspace.contains("members = [\"workflows/*/*\"]"));
+    assert!(root.join(".lightflow/.lightflow/workspace.rs").is_file());
     assert!(lfw_path_workspace.contains(&format!("lightflow = {:?}", env!("CARGO_PKG_VERSION"))));
     assert_eq!(
         init["config"]["workflow_workspace_manifest"],
@@ -93,7 +101,8 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert_eq!(second_init["config"]["workflow_workspace_created"], false);
     let path = root.join(".lightflow/workflows/examples/extra/src/lib.rs");
     let source = fs::read_to_string(path)?;
-    assert!(source.contains("workflow(\"lightflow.extra\")"));
+    assert!(source.contains("workflow!()"));
+    assert!(!source.contains(".version("));
     assert!(source.contains(".name(\"Extra Workflow\")"));
     assert!(source.contains(".input_description(\"value\""));
     assert!(source.contains(".input_required(\"value\", true)"));
@@ -114,6 +123,7 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     );
     complete_generated_workflow_metadata(&root, "examples", "example")?;
     complete_generated_workflow_metadata(&root, "examples", "extra")?;
+    use_local_lightflow_dependency(&root)?;
 
     let workflow = lightflow(&root, ["workflows", "get", "lightflow.extra"])?;
     assert_eq!(workflow["id"], "lightflow.extra");
@@ -203,6 +213,7 @@ fn lfw_new_and_add_support_global_workflow_workspace() -> Result<(), Box<dyn std
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
 
     let global = lfw(
         &root,
@@ -260,6 +271,7 @@ fn lfw_new_runtime_template_creates_node_contract_files() -> Result<(), Box<dyn 
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
 
     let created = lfw(
         &root,
@@ -358,6 +370,7 @@ fn lfw_node_test_checks_schema_runtime_models_and_skill() -> Result<(), Box<dyn 
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(
         &root,
         [

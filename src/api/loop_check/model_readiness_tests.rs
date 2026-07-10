@@ -48,8 +48,7 @@ fn selected_model_check_includes_child_workflow_models() -> Result<(), Box<dyn s
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-workflow("lightflow.child_model")
-    .version("0.1.0")
+workflow!()
     .name("Child Model")
     .input("model", "text")
     .output("value", "json")
@@ -65,8 +64,7 @@ workflow("lightflow.child_model")
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-workflow("lightflow.parent_model_graph")
-    .version("0.1.0")
+workflow!()
     .name("Parent Model Graph")
     .output("value", "json")
     .node("child", "lightflow.child_model")

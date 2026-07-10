@@ -14,8 +14,7 @@ fn lfw_run_rejects_unknown_leaf_runtime() -> Result<(), Box<dyn std::error::Erro
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.unknown_runtime")
-        .version("0.1.0")
+    workflow!()
         .name("Unknown Runtime")
         .input("prompt", "text")
         .output("image", "artifact")

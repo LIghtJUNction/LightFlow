@@ -22,7 +22,7 @@ fn loop_check_reports_run_catalog_issues_without_hiding_valid_runs()
             "completed_at_ms": 12,
             "stages": [
                 {
-                    "workflow_id": "lightflow.std",
+                    "workflow_id": "lightflow.text_prompt",
                     "execution": {
                         "inputs": {},
                         "disabled_nodes": [],

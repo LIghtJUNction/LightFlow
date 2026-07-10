@@ -17,6 +17,7 @@ fn local_loop_agent_skill_failures_are_summarized() -> Result<(), Box<dyn std::e
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     complete_generated_workflow_metadata(&root, "examples", "example")?;
 
     for index in 0..7 {
@@ -64,6 +65,7 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(&root, ["new", "reviewed", "--category", "examples"])?;
     complete_generated_workflow_metadata(&root, "examples", "example")?;
     complete_generated_workflow_metadata(&root, "examples", "reviewed")?;
@@ -224,6 +226,7 @@ fn lfw_loop_changes_tracks_untracked_workflow_files() -> Result<(), Box<dyn std:
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(&root, ["new", "untracked", "--category", "examples"])?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;

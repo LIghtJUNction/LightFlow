@@ -34,8 +34,7 @@ lightflow = {{ path = {:?}, features = ["rig"] }}
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.test_rig_llm")
-        .version("0.1.0")
+    workflow!()
         .name("Test RIG LLM")
         .description("Generate text through the LightFlow RIG LLM runtime.")
         .input("prompt", "text")
@@ -158,8 +157,7 @@ lightflow = {{ path = {:?} }}
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.test_rig_llm")
-        .version("0.1.0")
+    workflow!()
         .name("Test RIG LLM")
         .input("prompt", "text")
         .input("provider", "text")

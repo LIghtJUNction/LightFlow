@@ -139,8 +139,8 @@ done <<EOF
 $(find "$repo_root" \
   \( -path "$repo_root/.git" \
     -o -path "$repo_root/.codegraph" \
-    -o -path "$repo_root/target" \
-    -o -path "$repo_root/vendor" \
+    -o \( -type d -name target \) \
+    -o \( -type d -name vendor \) \
   \) -prune \
   -o -type f -name '*.rs' -print)
 EOF

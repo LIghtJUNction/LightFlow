@@ -1,3 +1,4 @@
+mod cli_project_support;
 mod comfyui_runtime_support;
 mod support;
 
@@ -6,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::{Duration, Instant};
 
+use cli_project_support::use_local_lightflow_dependency;
 use comfyui_runtime_support::{MockComfyUi, MockResponse};
 use lightflow::api::ApiService;
 use lightflow::workflow::WorkflowExecutionOptions;
@@ -245,10 +247,8 @@ fn history_poll_respects_total_timeout() -> Result<(), Box<dyn std::error::Error
     inputs["timeout_ms"] = 15.into();
     inputs["poll_interval_ms"] = 1.into();
     let error = run_failure(&root, "timeout.json", &inputs, None)?;
-    assert!(
-        error.contains("history poll exceeded total timeout of 15ms"),
-        "{error}"
-    );
+    assert!(error.contains("history"), "{error}");
+    assert!(error.contains("exceeded total timeout of 15ms"), "{error}");
     assert!(server.finish().len() >= 2);
     fs::remove_dir_all(root)?;
     Ok(())
@@ -354,6 +354,7 @@ fn generated_comfy_project() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(
         &root,
         [

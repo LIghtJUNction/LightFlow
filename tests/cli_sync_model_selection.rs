@@ -10,9 +10,9 @@ fn cargo_path_dependency_installs_workflow_for_dependency_resolution()
 -> Result<(), Box<dyn std::error::Error>> {
     let base = unique_temp_root();
     let project = base.join("project");
-    let std_dep = base.join("lightflow-std");
+    let text_prompt_dep = base.join("lightflow-text-prompt");
     fs::create_dir_all(&project)?;
-    write_external_std_crate(&std_dep)?;
+    write_external_text_prompt_crate(&text_prompt_dep)?;
 
     fs::write(
         project.join("Cargo.toml"),
@@ -29,12 +29,17 @@ lightflow = {{ path = {:?} }}
     )?;
     let added_dep = lfw(
         &project,
-        ["add", "lightflow-std", "--path", "../lightflow-std"],
+        [
+            "add",
+            "lightflow-text-prompt",
+            "--path",
+            "../lightflow-text-prompt",
+        ],
     )?;
-    assert_eq!(added_dep["dependency"], "lightflow-std");
-    assert_eq!(added_dep["source"]["path"], "../lightflow-std");
+    assert_eq!(added_dep["dependency"], "lightflow-text-prompt");
+    assert_eq!(added_dep["source"]["path"], "../lightflow-text-prompt");
     let manifest = fs::read_to_string(project.join("Cargo.toml"))?;
-    assert!(manifest.contains("lightflow-std = { path = \"../lightflow-std\" }"));
+    assert!(manifest.contains("lightflow-text-prompt = { path = \"../lightflow-text-prompt\" }"));
 
     write_workflow_crate(
         &project,
@@ -42,13 +47,12 @@ lightflow = {{ path = {:?} }}
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.image_prompt")
-        .version("0.1.0")
+    workflow!()
         .name("Image Prompt")
         .input("positive", "text")
         .input("negative", "text")
         .output("prompt", "json")
-        .depends_on("lightflow.std", "0.1.0")
+        .depends_on("lightflow.text_prompt", "0.1.0")
         .hf_model(
             "image_model",
             "flux2-safetensors",
@@ -73,7 +77,7 @@ pub fn define() -> WorkflowSpec {
             "city96/FLUX.2-dev-gguf",
             "flux2-dev-q4.gguf"
         )
-        .node("passthrough", "lightflow.std")
+        .node("passthrough", "lightflow.text_prompt")
         .build()
 }
 "#,
@@ -86,17 +90,17 @@ pub fn define() -> WorkflowSpec {
         .iter()
         .map(|workflow| workflow["id"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec!["lightflow.image_prompt", "lightflow.std"]);
+    assert_eq!(ids, vec!["lightflow.image_prompt", "lightflow.text_prompt"]);
 
     let deps = lfw(&project, ["deps", "lightflow.image_prompt"])?;
     assert_eq!(deps["complete"], true);
     assert_eq!(
         deps["workflows"],
-        serde_json::json!(["lightflow.image_prompt", "lightflow.std"])
+        serde_json::json!(["lightflow.image_prompt", "lightflow.text_prompt"])
     );
     assert_eq!(
         deps["workflow_order"],
-        serde_json::json!(["lightflow.std", "lightflow.image_prompt"])
+        serde_json::json!(["lightflow.text_prompt", "lightflow.image_prompt"])
     );
 
     let sync = lfw(&project, ["sync", "lightflow.image_prompt", "--dry-run"])?;

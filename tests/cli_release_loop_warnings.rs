@@ -27,6 +27,7 @@ fn lfw_release_check_dry_run_reports_local_loop_warnings() -> Result<(), Box<dyn
         "# Local Workflow Loop\n\n## Verification Gates\n",
     )?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     complete_generated_workflow_metadata(&root, "examples", "example")?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
@@ -156,8 +157,7 @@ fn release_check_reviews_configured_workflow_paths() -> Result<(), Box<dyn std::
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.external_model")
-        .version("0.1.0")
+    workflow!()
         .name("External Model")
         .input("model", "text")
         .output("value", "json")

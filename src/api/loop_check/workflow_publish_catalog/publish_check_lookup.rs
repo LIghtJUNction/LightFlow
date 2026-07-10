@@ -5,7 +5,6 @@ use super::super::workflow_crates::{
     discover_local_workflow_crates, discover_workflow_collection_crates, workflow_id_from_crate,
 };
 use super::super::{ApiError, ApiResult, WorkflowPublishCheck};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn workflow_publish_check_at_root(
@@ -61,9 +60,7 @@ fn workflow_publish_check_from_crate(
             crate_dir.display()
         )));
     }
-    let source = fs::read_to_string(&lib)?;
-    let needle = format!("workflow(\"{workflow_id}\")");
-    if !source.contains(&needle) {
+    if workflow_id_from_crate(crate_dir)? != workflow_id {
         return Err(ApiError::NotFound(format!("workflow {workflow_id}")));
     }
     let root = crate_dir.parent().unwrap_or(crate_dir);

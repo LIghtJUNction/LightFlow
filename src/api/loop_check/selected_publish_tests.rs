@@ -15,8 +15,7 @@ fn selected_publish_check_includes_child_workflow_crates() -> Result<(), Box<dyn
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-workflow("lightflow.blocked_child_publish")
-    .version("0.1.0")
+workflow!()
     .name("Blocked Child Publish")
     .output("value", "json")
     .build()
@@ -29,8 +28,7 @@ workflow("lightflow.blocked_child_publish")
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-workflow("lightflow.parent_publish_graph")
-    .version("0.1.0")
+workflow!()
     .name("Parent Publish Graph")
     .output("value", "json")
     .node("child", "lightflow.blocked_child_publish")
@@ -105,14 +103,15 @@ edition = "2024"
 lightflow-external-child = { path = "extensions/lightflow-external-child", version = "0.1.0" }
 "#,
     )?;
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("src/lib.rs"), "pub fn fixture() {}\n")?;
     write_test_extension_crate(
         &root,
         "lightflow.external_child",
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-workflow("lightflow.external_child")
-    .version("0.1.0")
+workflow!()
     .name("External Child")
     .output("value", "json")
     .build()
@@ -125,8 +124,7 @@ workflow("lightflow.external_child")
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-workflow("lightflow.local_parent_external_child")
-    .version("0.1.0")
+workflow!()
     .name("Local Parent External Child")
     .output("value", "json")
     .node("child", "lightflow.external_child")

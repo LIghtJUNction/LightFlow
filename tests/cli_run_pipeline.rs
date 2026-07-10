@@ -23,8 +23,7 @@ lightflow = { path = "." }
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.first")
-        .version("0.1.0")
+    workflow!()
         .name("First")
         .input("text", "text")
         .output("text", "text")
@@ -38,8 +37,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.second")
-        .version("0.1.0")
+    workflow!()
         .name("Second")
         .input("text", "text")
         .output("text", "text")
@@ -53,8 +51,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.broken")
-        .version("0.1.0")
+    workflow!()
         .name("Broken")
         .input("text", "text")
         .output("text", "text")

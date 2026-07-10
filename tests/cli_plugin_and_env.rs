@@ -109,8 +109,7 @@ fn lfw_uses_xdg_default_and_lfw_path_environment() -> Result<(), Box<dyn std::er
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.xdg_default")
-        .version("0.1.0")
+    workflow!()
         .name("XDG Default")
         .input("value", "json")
         .output("value", "json")
@@ -170,8 +169,7 @@ HTTP `/workflows/lightflow.xdg_default/run` example.
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.rc")
-        .version("0.1.0")
+    workflow!()
         .name("RC Workflow")
         .input("value", "json")
         .output("value", "json")
@@ -221,8 +219,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.rc")
-        .version("0.1.0")
+    workflow!()
         .name("Project Override")
         .input("value", "json")
         .output("value", "json")

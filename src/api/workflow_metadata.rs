@@ -1,4 +1,5 @@
 use super::dsl::read_workflow_source;
+use super::workflow_package_identity;
 pub(crate) use paths::categorized_workflow_manifest_path;
 use paths::workflow_lib_path;
 pub(crate) use placeholders::workflow_placeholder_issues;
@@ -21,8 +22,7 @@ pub(crate) fn workflow_publish_metadata_issues(manifest: &Path) -> Vec<String> {
 }
 
 pub(crate) fn workflow_id_from_manifest(manifest: &Path) -> Option<String> {
-    let lib = workflow_lib_path(manifest)?;
-    read_workflow_source(&lib).ok().map(|workflow| workflow.id)
+    workflow_package_identity(manifest).ok().map(|(id, _)| id)
 }
 
 #[cfg(test)]
@@ -66,14 +66,17 @@ mod tests {
         let root = test_dir("metadata-valid");
         let crate_dir = root.path().join("workflow");
         fs::create_dir_all(crate_dir.join("src")).expect("workflow source dir");
-        fs::write(crate_dir.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("manifest");
+        fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname = \"lightflow-metadata\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("manifest");
         fs::write(
             crate_dir.join("src/lib.rs"),
             r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.metadata")
-        .version("0.1.0")
+    workflow!()
         .name("Metadata")
         .description("TODO: describe this workflow.")
         .input("value", "text")
@@ -97,14 +100,17 @@ pub fn define() -> WorkflowSpec {
         let root = test_dir("metadata-id");
         let crate_dir = root.path().join("workflow");
         fs::create_dir_all(crate_dir.join("src")).expect("workflow source dir");
-        fs::write(crate_dir.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("manifest");
+        fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname = \"lightflow-metadata-id\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("manifest");
         fs::write(
             crate_dir.join("src/lib.rs"),
             r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.metadata_id")
-        .version("0.1.0")
+    workflow!()
         .name("Metadata ID")
         .build()
 }
@@ -154,7 +160,7 @@ pub fn define() -> WorkflowSpec {
         fs::write(crate_dir.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("manifest");
 
         assert_eq!(
-            categorized_workflow_manifest_path(root.path(), "lightflow.text.plan").unwrap(),
+            categorized_workflow_manifest_path(root.path(), "lightflow.text_plan").unwrap(),
             crate_dir.join("Cargo.toml")
         );
     }
@@ -186,7 +192,7 @@ pub fn define() -> WorkflowSpec {
         fs::write(crate_dir.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("manifest");
 
         assert_eq!(
-            categorized_workflow_manifest_path(root.path(), "lightflow.text.plan").unwrap(),
+            categorized_workflow_manifest_path(root.path(), "lightflow.text_plan").unwrap(),
             crate_dir.join("Cargo.toml")
         );
     }

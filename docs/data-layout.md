@@ -285,7 +285,7 @@ as a Cargo path dependency.
 
 The directory name is a short slug, not the full workflow id. For example,
 `lightflow.text_plan` can live at `std/text_plan/src/lib.rs`; the Rust DSL
-still declares `workflow("lightflow.text_plan")`.
+still declares `workflow!()`.
 
 Project workflows are read from `./.lightflow/workflows` before global
 `LFW_PATH` workflows. Legacy `./workflows` collections are still read for
@@ -306,8 +306,7 @@ Each workflow is a Rust library crate with embedded metadata and definition in
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.example")
-        .version("0.1.0")
+    workflow!()
         .name("Example")
         .description("Reusable workflow definition.")
         .input("value", "json")
@@ -319,6 +318,11 @@ pub fn define() -> WorkflowSpec {
         .build()
 }
 ```
+
+Workflow id and version are not duplicated in Rust source. `workflow!()` uses
+the crate's Cargo package metadata, and static discovery reads the same values
+from `Cargo.toml`. Package `lightflow-example-flow` maps to
+`lightflow.example_flow`.
 
 Input and output ports can carry Node Schema v1 metadata for editor and agent
 tooling: descriptions, required/default values, numeric ranges, enum choices,
@@ -333,8 +337,7 @@ with `.edge()`:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.parent")
-        .version("0.1.0")
+    workflow!()
         .name("Parent")
         .depends_on("lightflow.child", "0.1.0")
         .node("child", "lightflow.child")
@@ -586,18 +589,18 @@ after a normal submodule checkout. Other sibling workflow projects under
 workflow sources that should be added through `LFW_PATH`, `lfw import`, an
 explicit workflow search path, or the default source list when a run needs
 those domain-specific nodes.
-Current prompt-graph helpers include `lightflow.text.concat`,
-`lightflow.text.template`, `lightflow.text.regex`, and
-`lightflow.json.extract`; image and mask artifact helpers include
-`lightflow.image.load`, `lightflow.image.save`, `lightflow.image.resize`,
-`lightflow.image.crop`, `lightflow.image.upscale`, and
-`lightflow.mask.compose`; preview diffusion helpers include
-`lightflow.image.edit` and `lightflow.image.inpaint`; control helpers include
-`lightflow.control.if`, `lightflow.control.switch`, `lightflow.control.merge`,
-and `lightflow.control.split`; model helpers include `lightflow.model.select`
-and `lightflow.model.lock_check`; LLM helpers include
-`lightflow.llm.generate`, `lightflow.llm.classify`, and
-`lightflow.llm.structured_output`. Each has a matching
+Current prompt-graph helpers include `lightflow.text_concat`,
+`lightflow.text_template`, `lightflow.text_regex`, and
+`lightflow.json_extract`; image and mask artifact helpers include
+`lightflow.image_load`, `lightflow.image_save`, `lightflow.image_resize`,
+`lightflow.image_crop`, `lightflow.image_upscale`, and
+`lightflow.mask_compose`; preview diffusion helpers include
+`lightflow.image_edit` and `lightflow.image_inpaint`; control helpers include
+`lightflow.control_if`, `lightflow.control_switch`, `lightflow.control_merge`,
+and `lightflow.control_split`; model helpers include `lightflow.model_select`
+and `lightflow.model_lock_check`; LLM helpers include
+`lightflow.llm_generate`, `lightflow.llm_classify`, and
+`lightflow.llm_structured_output`. Each has a matching
 `.agent/skills/<skill-name>/SKILL.md` file and a builtin runtime capability.
 
 `lfw sync --apply` discovers skills from workflow/plugin projects,
@@ -636,8 +639,8 @@ workflow crates under `workflows/<category>/<short-name>/` and also
 scans `path` dependencies declared in the project `Cargo.toml`:
 
 ```toml
-[workspace.dependencies]
-lightflow-std = { path = "projects/lightflow-std/workflows/std/std" }
+[dependencies]
+lightflow-text-prompt = { path = "projects/lightflow-std/workflows/std/text_prompt" }
 ```
 
 If the dependency target contains `src/lib.rs` with `pub fn define() ->
@@ -648,17 +651,18 @@ Git dependencies use the same manifest shape:
 
 ```toml
 [dependencies]
-lightflow-std = { git = "https://github.com/lightjunction/lightflow-std", package = "lightflow-std" }
+lightflow-text-prompt = { git = "https://github.com/lightjunction/lightflow-std", package = "lightflow-text-prompt" }
 ```
 
-`lfw add` writes these dependencies into the workspace manifest:
+`lfw add` writes these dependencies into the root host package's
+`[dependencies]` table:
 
 ```bash
-lfw add lightflow-std --version 0.1.1
-lfw add lightflow-std --path projects/lightflow-std/workflows/std/std
-lfw add lightflow-std --path projects/lightflow-std/workflows/std/std --editable
-lfw add lightflow-std --git https://github.com/lightjunction/lightflow-std --package lightflow-std
-lfw add lightflow-std --version 0.1.1 --global
+lfw add lightflow-text-prompt --version 0.1.0
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
+lfw add lightflow-text-prompt --git https://github.com/lightjunction/lightflow-std --package lightflow-text-prompt
+lfw add lightflow-text-prompt --version 0.1.0 --global
 ```
 
 For a self-contained workflow repository or local collection that contains
@@ -681,6 +685,14 @@ fetching, updating, lockfile resolution, feature resolution, and publishing;
 LightFlow is responsible for workflow discovery, node metadata, model sync, and
 agent skill sync.
 
+New workflow workspaces use the root manifest as a non-publishable host package
+(`version = "0.0.0"`, `publish = false`) with
+`[lib] path = ".lightflow/workspace.rs"`. This lets standard `cargo add`,
+including `cargo add --path` and `cargo add --git`, install one external
+workflow library directly. The same manifest retains the official workflow
+member glob and `[workspace.dependencies].lightflow` for locally generated
+member crates.
+
 `--editable` is only valid with `--path`. It keeps the manifest as a standard
 Cargo path dependency and makes the CLI result report `"editable": true`,
 which distinguishes a deliberate live-source development install from a normal
@@ -689,20 +701,20 @@ path install.
 Workflow dependencies can embed the same install metadata in the Rust file:
 
 ```rust
-workflow("lightflow.image_prompt")
-    .depends_on_crate("lightflow.std", "0.1.0", "lightflow-std")
+workflow!()
+    .depends_on_crate("lightflow.text_prompt", "0.1.0", "lightflow-text-prompt")
     .depends_on_path(
         "lightflow.local_std",
         "0.1.0",
-        "lightflow-std",
-        "projects/lightflow-std/workflows/std/std",
+        "lightflow-text-prompt",
+        "projects/lightflow-std/workflows/std/text_prompt",
     )
     .depends_on_git(
         "lightflow.remote_std",
         "0.1.0",
-        "lightflow-std",
+        "lightflow-text-prompt",
         "https://github.com/lightjunction/lightflow-std",
-        "lightflow-std",
+        "lightflow-text-prompt",
     )
 ```
 
@@ -769,21 +781,20 @@ advertises the parameterized publish resource as
 Workflow definitions use SemVer strings:
 
 ```rust
-workflow("lightflow.std")
-    .version("0.1.0")
+workflow!()
 ```
 
 Explicit workflow dependencies currently use exact SemVer requirements:
 
 ```rust
-.depends_on("lightflow.std", "0.1.0")
+.depends_on("lightflow.text_prompt", "0.1.0")
 ```
 
 The install-aware forms keep the same exact workflow version and add Cargo
 resolution metadata:
 
 ```rust
-.depends_on_crate("lightflow.std", "0.1.0", "lightflow-std")
+.depends_on_crate("lightflow.text_prompt", "0.1.0", "lightflow-text-prompt")
 ```
 
 The backend also accepts `*` for an unconstrained local dependency. Range
@@ -796,8 +807,7 @@ Model requirements are embedded in the workflow file. A workflow can declare an
 abstract model capability and provide multiple Hugging Face variants:
 
 ```rust
-workflow("lightflow.image_prompt")
-    .version("0.1.0")
+workflow!()
     .hf_model(
         "image_model",
         "flux2-safetensors",

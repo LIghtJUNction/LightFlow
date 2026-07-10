@@ -41,16 +41,18 @@ This creates a project layout like:
 
 ```text
 Cargo.toml
-workflows/
-  <category>/
-    <short-name>/
-      Cargo.toml
-      src/
-        lib.rs
-      .agent/
-        skills/
-          <skill-name>/
-            SKILL.md
+.lightflow/
+  workspace.rs
+  workflows/
+    <category>/
+      <short-name>/
+        Cargo.toml
+        src/
+          lib.rs
+        .agent/
+          skills/
+            <skill-name>/
+              SKILL.md
 ```
 
 Then create a workflow crate inside the collection:
@@ -92,14 +94,33 @@ directory's `workflows/` tree.
 To add an external workflow crate as a dependency, use `lfw add`:
 
 ```bash
-lfw add lightflow-std --version 0.1.1
-lfw add lightflow-std --path projects/lightflow-std/workflows/std/std --editable
-lfw add lightflow-std --git https://github.com/lightjunction/lightflow-std --package lightflow-std
+lfw add lightflow-text-prompt --version 0.1.0
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
+lfw add lightflow-text-prompt --git https://github.com/lightjunction/lightflow-std --package lightflow-text-prompt
 ```
+
+You can also use Cargo without a LightFlow wrapper:
+
+```bash
+cargo add lightflow-text-prompt
+cargo add --path ../lightflow-text-prompt
+cargo add --git https://github.com/example/my-workflow my-workflow
+```
+
+`lfw init --workflow` makes the root manifest a non-publishable Cargo host
+package with `.lightflow/workspace.rs` as its library target. Both `cargo add`
+and `lfw add` therefore write ordinary root `[dependencies]`; each installed
+library crate can own one workflow ID derived from its Cargo package metadata.
+
+LightFlow uses `cargo metadata` to locate direct path, registry, and Git
+dependency packages. A dependency with a library target containing
+`pub fn define() -> WorkflowSpec` and `workflow!()` is loaded as a workflow;
+only workflow dependencies are followed recursively. Ordinary dependencies do
+not cause LightFlow to scan their full transitive graphs.
 
 Use `--editable` for local development. It records a Cargo path dependency and
 keeps edits live.
-Use an external checkout path such as `../lightflow-std/workflows/std/std`
+Use an external checkout path such as `../lightflow-std/workflows/std/text_prompt`
 only when `lightflow-std` is not checked out under `projects/`.
 
 To import a repository that contains many workflow crates, use `lfw import`:
@@ -144,6 +165,29 @@ lfw info
 lfw help <workflow_id>
 ```
 
+## Add A Directly Executable Workflow
+
+An executable workflow uses the same Cargo package and the same `src/lib.rs`
+`define()` function as a reusable library workflow. Add `src/bin/<name>.rs`:
+
+```rust
+fn main() -> lightflow::runner::RunnerResult<()> {
+    lightflow::runner::run_workflow_from_env(my_workflow::define())
+}
+```
+
+Install the binary through Cargo:
+
+```bash
+cargo install my-workflow --bin my-workflow
+```
+
+There is no separate executable-workflow archive or manifest format.
+
+Publish reusable and executable workflow packages with `cargo publish`.
+`lfw publish <workflow_id>` provides LightFlow validation and Cargo dry-run
+gates, but Cargo remains the publisher.
+
 ## Write A Leaf Workflow
 
 A minimal leaf workflow declares metadata and ports:
@@ -152,8 +196,7 @@ A minimal leaf workflow declares metadata and ports:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("acme.text.echo")
-        .version("0.1.0")
+    workflow!()
         .name("Text Echo")
         .description("Return the input text unchanged.")
         .input("text", "text")
@@ -165,6 +208,13 @@ pub fn define() -> WorkflowSpec {
         .build()
 }
 ```
+
+The Cargo package is the workflow identity source. `workflow!()` expands in the
+workflow crate and reads `CARGO_PKG_NAME` plus `CARGO_PKG_VERSION`. LightFlow
+strips a leading `lightflow-`, converts remaining `-` characters to `_`, and
+adds the `lightflow.` prefix. For example, package `lightflow-text-echo`
+defines workflow `lightflow.text_echo`; changing the Cargo package version
+changes the workflow version without editing `src/lib.rs`.
 
 Port metadata follows Node Schema v1. Prefer adding it for user-facing
 workflows:
@@ -188,8 +238,7 @@ A runtime-backed workflow declares a capability from the Executor Registry:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("acme.image.preview")
-        .version("0.1.0")
+    workflow!()
         .name("Image Preview")
         .description("Generate a deterministic preview image.")
         .input("prompt", "text")
@@ -283,7 +332,7 @@ overwrite an existing artifact.
 Run conformance before publishing or installing:
 
 ```bash
-lfw node test acme.image.preview
+lfw node test lightflow.image_preview
 ```
 
 This checks workflow validation, `lfw help`, Node Schema metadata, model
@@ -346,8 +395,7 @@ to connect output ports to input ports.
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("acme.prompted_image")
-        .version("0.1.0")
+    workflow!()
         .name("Prompted Image")
         .description("Render a prompt template, then generate an image.")
         .input("topic", "text")
@@ -360,9 +408,9 @@ pub fn define() -> WorkflowSpec {
         .output("image_path", "path")
         .output_description("image_path", "Generated PNG path.")
         .output_artifact_kind("image_path", "image")
-        .depends_on("lightflow.text.template", "0.1.0")
+        .depends_on("lightflow.text_template", "0.1.0")
         .depends_on("lightflow.text_to_image", "0.1.0")
-        .node("template", "lightflow.text.template")
+        .node("template", "lightflow.text_template")
         .node("generate", "lightflow.text_to_image")
         .edge("template", "text", "generate", "prompt")
         .build()
@@ -376,13 +424,13 @@ when a child output should feed another child input.
 Declare dependencies with exact versions so `lfw deps` can verify the graph:
 
 ```bash
-lfw deps acme.prompted_image
+lfw deps lightflow.prompted_image
 ```
 
 Use install hints when a dependency may not already be installed:
 
 ```rust
-workflow("acme.prompted_image")
+workflow!()
     .depends_on_path(
         "lightflow.text_to_image",
         "0.1.0",
@@ -390,7 +438,7 @@ workflow("acme.prompted_image")
         "projects/lightflow-std/workflows/std/text_to_image",
     )
     .depends_on_git(
-        "lightflow.text.template",
+        "lightflow.text_template",
         "0.1.0",
         "lightflow-text-template",
         "https://github.com/lightjunction/lightflow-std",
@@ -401,7 +449,7 @@ workflow("acme.prompted_image")
 Then let LightFlow add missing Cargo dependencies:
 
 ```bash
-lfw sync acme.prompted_image --apply
+lfw sync lightflow.prompted_image --apply
 ```
 
 ## Call Workflows From The CLI
@@ -409,13 +457,13 @@ lfw sync acme.prompted_image --apply
 Run one workflow:
 
 ```bash
-lfw run acme.text.echo -i text='"hello"'
+lfw run lightflow.text_echo -i text='"hello"'
 ```
 
 Use JSON values for non-string inputs:
 
 ```bash
-lfw run lightflow.control.merge \
+lfw run lightflow.control_merge \
   -i a='{"prompt":"cat"}' \
   -i b='{"seed":1}' \
   -i mode='"object"'
@@ -427,7 +475,7 @@ Pipe one workflow into another from the CLI:
 lfw run lightflow.text_to_image \
   -i prompt='"a quiet lake"' \
   -i output_path='"out/lake.png"' \
-  '|' lightflow.image.invert \
+  '|' lightflow.image_invert \
   -i output_path='"out/lake-inverted.png"'
 ```
 

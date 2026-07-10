@@ -10,7 +10,7 @@ fn repository_standard_text_nodes_are_discoverable_and_runnable()
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let service = ApiService::new(root);
 
-    let concat = service.get_workflow("lightflow.text.concat")?;
+    let concat = service.get_workflow("lightflow.text_concat")?;
     assert_eq!(concat.category.as_deref(), Some("std"));
     assert_eq!(concat.runtimes[0].capability, "lightflow.text.concat");
     assert_eq!(
@@ -22,21 +22,21 @@ fn repository_standard_text_nodes_are_discoverable_and_runnable()
         Some(serde_json::json!(""))
     );
 
-    let template = service.get_workflow("lightflow.text.template")?;
+    let template = service.get_workflow("lightflow.text_template")?;
     assert_eq!(template.runtimes[0].capability, "lightflow.text.template");
     assert_eq!(template.inputs[0].widget.as_deref(), Some("textarea"));
 
-    let extract = service.get_workflow("lightflow.json.extract")?;
+    let extract = service.get_workflow("lightflow.json_extract")?;
     assert_eq!(extract.runtimes[0].capability, "lightflow.json.extract");
     assert_eq!(extract.outputs.len(), 3);
 
-    let regex = service.get_workflow("lightflow.text.regex")?;
+    let regex = service.get_workflow("lightflow.text_regex")?;
     assert_eq!(regex.runtimes[0].capability, "lightflow.text.regex");
     assert!(regex.outputs.iter().any(|port| port.name == "matched"));
 
     let nodes = service.list_nodes()?;
     assert!(nodes.nodes.iter().any(|node| {
-        node.id == "lightflow.text.concat"
+        node.id == "lightflow.text_concat"
             && node
                 .runtimes
                 .iter()
@@ -47,7 +47,7 @@ fn repository_standard_text_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.text.concat",
+            "lightflow.text_concat",
             "-i",
             "a=hello",
             "-i",
@@ -62,7 +62,7 @@ fn repository_standard_text_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.text.template",
+            "lightflow.text_template",
             "-i",
             "template=Describe {{scene}} in {{style}} style",
             "-i",
@@ -78,7 +78,7 @@ fn repository_standard_text_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.json.extract",
+            "lightflow.json_extract",
             "-i",
             "value={\"items\":[{\"title\":\"first\"}]}",
             "-i",
@@ -93,7 +93,7 @@ fn repository_standard_text_nodes_are_discoverable_and_runnable()
         root,
         [
             "run",
-            "lightflow.text.regex",
+            "lightflow.text_regex",
             "-i",
             "text=item-42",
             "-i",
@@ -115,10 +115,10 @@ fn repository_standard_text_nodes_pass_node_conformance() -> Result<(), Box<dyn 
 {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for workflow_id in [
-        "lightflow.text.concat",
-        "lightflow.text.template",
-        "lightflow.json.extract",
-        "lightflow.text.regex",
+        "lightflow.text_concat",
+        "lightflow.text_template",
+        "lightflow.json_extract",
+        "lightflow.text_regex",
     ] {
         let report = lfw(root, ["node", "test", workflow_id])?;
         assert_eq!(report["valid"], true, "{workflow_id}");

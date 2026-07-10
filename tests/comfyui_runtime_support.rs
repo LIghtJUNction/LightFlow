@@ -127,7 +127,23 @@ fn serve(
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .expect("read timeout");
-                    let request = read_request(&mut stream).expect("read mock request");
+                    let request = match read_request(&mut stream) {
+                        Ok(request) => request,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::UnexpectedEof
+                                    | std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::ConnectionAborted
+                            ) =>
+                        {
+                            if stop.load(Ordering::SeqCst) {
+                                return requests;
+                            }
+                            continue;
+                        }
+                        Err(error) => panic!("read mock request: {error}"),
+                    };
                     thread::sleep(response.delay);
                     if let Err(error) = write_response(&mut stream, &response)
                         && !matches!(

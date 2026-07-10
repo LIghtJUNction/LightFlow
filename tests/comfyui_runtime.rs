@@ -1,8 +1,10 @@
+mod cli_project_support;
 mod comfyui_runtime_support;
 mod support;
 
 use std::fs;
 
+use cli_project_support::use_local_lightflow_dependency;
 use comfyui_runtime_support::{MockComfyUi, MockResponse};
 use lightflow::api::ApiService;
 use serde_json::{Value, json};
@@ -396,6 +398,7 @@ fn generated_comfy_project() -> Result<std::path::PathBuf, Box<dyn std::error::E
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(
         &root,
         [

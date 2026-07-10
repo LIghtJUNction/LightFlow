@@ -1,14 +1,14 @@
-use super::super::templates::title_from_id;
+use super::super::templates::{package_name_from_id, title_from_id};
 use crate::cli::{CliError, CliResult};
+use crate::workflow::workflow_id_from_package_name;
 use std::path::{Path, PathBuf};
 
 pub(super) fn plugin_workflow_id(root: &Path) -> String {
-    let suffix = root
+    let root_name = root
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("plugin")
-        .replace('-', "_");
-    format!("lightflow.{suffix}")
+        .unwrap_or("plugin");
+    workflow_id_from_package_name(&package_name_from_id(root_name))
 }
 
 pub(super) fn plugin_title(root: &Path) -> String {
@@ -95,9 +95,19 @@ pub(in crate::cli) fn validate_spec_id(value: &str, label: &str) -> CliResult<()
 
 pub(in crate::cli) fn normalize_workflow_id(value: &str) -> String {
     let value = value.strip_suffix(".rs").unwrap_or(value);
-    if value.starts_with("lightflow.") {
-        value.to_owned()
-    } else {
-        format!("lightflow.{value}")
+    let suffix = value.strip_prefix("lightflow.").unwrap_or(value);
+    format!("lightflow.{}", suffix.replace(['.', '-'], "_"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_workflow_id_matches_generated_manifest_package() {
+        assert_eq!(
+            plugin_workflow_id(Path::new("/tmp/lightflow-demo")),
+            "lightflow.demo"
+        );
     }
 }

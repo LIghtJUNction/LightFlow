@@ -24,8 +24,7 @@ lightflow = { path = "." }
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.test_flux")
-        .version("0.1.0")
+    workflow!()
         .name("Test FLUX")
         .input("prompt", "text")
         .input("negative", "text")

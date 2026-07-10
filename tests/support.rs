@@ -182,13 +182,16 @@ pub fn write_project_specs(root: &Path) -> Result<(), Box<dyn std::error::Error>
     fs::create_dir_all(root.join(".lightflow/workflows"))?;
     fs::write(
         root.join("Cargo.toml"),
-        r#"[workspace]
+        format!(
+            r#"[workspace]
 resolver = "3"
 members = [".lightflow/workflows/*/*"]
 
 [workspace.dependencies]
-lightflow = { path = "." }
+lightflow = {{ path = {:?} }}
 "#,
+            env!("CARGO_MANIFEST_DIR")
+        ),
     )?;
     write_workflow_crate(
         root,
@@ -196,8 +199,7 @@ lightflow = { path = "." }
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.child")
-        .version("0.1.0")
+    workflow!()
         .name("Child")
         .input("in", "json")
         .output("out", "json")
@@ -211,8 +213,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.sink")
-        .version("0.1.0")
+    workflow!()
         .name("Sink")
         .input("in", "json")
         .build()
@@ -225,8 +226,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.parent")
-        .version("0.1.0")
+    workflow!()
         .name("Parent")
         .input("in", "json")
         .output("out", "json")
@@ -241,13 +241,13 @@ pub fn define() -> WorkflowSpec {
     Ok(())
 }
 
-pub fn write_external_std_crate(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn write_external_text_prompt_crate(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(root.join("src"))?;
     fs::write(
         root.join("Cargo.toml"),
         format!(
             r#"[package]
-name = "lightflow-std"
+name = "lightflow-text-prompt"
 version = "0.1.0"
 edition = "2024"
 
@@ -262,9 +262,8 @@ lightflow = {{ path = {:?} }}
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.std")
-        .version("0.1.0")
-        .name("LightFlow Std Identity")
+    workflow!()
+        .name("Text Prompt Identity")
         .input("value", "json")
         .output("value", "json")
         .build()
@@ -293,8 +292,7 @@ license = "MIT OR Apache-2.0"
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.extension")
-        .version("0.1.0")
+    workflow!()
         .name("Extension")
         .input("value", "json")
         .output("value", "json")

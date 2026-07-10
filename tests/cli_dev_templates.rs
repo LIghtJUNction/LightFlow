@@ -62,6 +62,7 @@ fn lfw_dev_skill_template_generates_compliant_skill_source()
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
 
     let template = lfw(&root, ["dev", "skill-template", "lightflow.example"])?;
     assert_eq!(template["workflow_id"], "lightflow.example");
@@ -87,6 +88,7 @@ fn lfw_dev_skill_template_writes_without_accidental_overwrite()
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
 
     let skill_path =
         root.join(".lightflow/workflows/examples/example/.agent/skills/lightflow-example/SKILL.md");
@@ -136,16 +138,16 @@ fn lfw_dev_skill_template_writes_to_explicit_sibling_project()
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     let project = root.join("projects/lightflow-flux");
     write_workflow_crate_in(
         &project.join("workflows"),
-        "lightflow.flux.sample",
+        "lightflow.flux_sample",
         r#"
 use lightflow::{WorkflowSpec, workflow};
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.flux.sample")
-        .version("0.1.0")
+    workflow!()
         .name("Flux Sample")
         .description("Sample sibling project workflow.")
         .input("prompt", "text")
@@ -161,7 +163,7 @@ pub fn define() -> WorkflowSpec {
     let lfw_path = project.to_string_lossy().to_string();
     let written = lfw_with_env_values(
         &root,
-        ["dev", "skill-template", "lightflow.flux.sample", "--write"],
+        ["dev", "skill-template", "lightflow.flux_sample", "--write"],
         [("LFW_PATH", lfw_path.as_str())],
     )?;
     let skill_path =
@@ -169,8 +171,8 @@ pub fn define() -> WorkflowSpec {
     assert_eq!(written["written"], true);
     assert_eq!(written["path"], skill_path.to_string_lossy().as_ref());
     let source = fs::read_to_string(&skill_path)?;
-    assert!(source.contains("Workflow id: `lightflow.flux.sample`"));
-    assert!(source.contains("/workflows/lightflow.flux.sample/run"));
+    assert!(source.contains("Workflow id: `lightflow.flux_sample`"));
+    assert!(source.contains("/workflows/lightflow.flux_sample/run"));
 
     let _ = fs::remove_dir_all(root);
     Ok(())

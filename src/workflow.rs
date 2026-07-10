@@ -250,13 +250,34 @@ pub struct WorkflowVersionMismatch {
     pub required_by: String,
 }
 
-/// Start a Rust workflow definition.
+/// Converts a Cargo package name into its canonical LightFlow workflow id.
 #[must_use]
-pub fn workflow(id: impl Into<String>) -> WorkflowBuilder {
+pub fn workflow_id_from_package_name(package_name: &str) -> String {
+    let suffix = package_name
+        .strip_prefix("lightflow-")
+        .unwrap_or(package_name)
+        .replace('-', "_");
+    format!("lightflow.{suffix}")
+}
+
+/// Builds a workflow definition from the calling crate's Cargo identity.
+#[doc(hidden)]
+#[must_use]
+pub fn workflow_from_package(package_name: &str, package_version: &str) -> WorkflowBuilder {
+    workflow_with_identity(workflow_id_from_package_name(package_name), package_version)
+}
+
+/// Builds a workflow with an explicit identity for internal tests and synthetic fixtures.
+#[doc(hidden)]
+#[must_use]
+pub(crate) fn workflow_with_identity(
+    id: impl Into<String>,
+    version: impl Into<String>,
+) -> WorkflowBuilder {
     WorkflowBuilder {
         spec: WorkflowSpec {
             id: id.into(),
-            version: default_version(),
+            version: version.into(),
             name: String::new(),
             category: None,
             description: None,
@@ -270,4 +291,12 @@ pub fn workflow(id: impl Into<String>) -> WorkflowBuilder {
             edges: Vec::new(),
         },
     }
+}
+
+/// Starts a workflow definition using the calling Cargo package name and version.
+#[macro_export]
+macro_rules! workflow {
+    () => {
+        $crate::workflow::workflow_from_package(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+    };
 }

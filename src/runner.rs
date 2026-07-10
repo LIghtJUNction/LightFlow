@@ -21,8 +21,7 @@ pub type RunnerResult<T> = Result<T, Box<dyn Error>>;
 /// use lightflow::preload::*;
 ///
 /// fn define() -> WorkflowSpec {
-///     workflow("lightflow.example")
-///         .version("0.1.0")
+///     workflow!()
 ///         .name("Example")
 ///         .input("value", "text")
 ///         .output("value", "text")

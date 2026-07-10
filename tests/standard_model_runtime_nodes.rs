@@ -13,16 +13,16 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let service = ApiService::new(root);
     for (workflow_id, capability) in [
-        ("lightflow.model.select", "lightflow.model.select"),
-        ("lightflow.model.lock_check", "lightflow.model.lock.check"),
-        ("lightflow.image.upscale", "lightflow.image.upscale"),
-        ("lightflow.mask.compose", "lightflow.mask.compose"),
-        ("lightflow.image.edit", "lightflow.image.edit"),
-        ("lightflow.image.inpaint", "lightflow.image.inpaint"),
-        ("lightflow.llm.generate", "lightflow.llm.generate"),
-        ("lightflow.llm.classify", "lightflow.llm.classify"),
+        ("lightflow.model_select", "lightflow.model.select"),
+        ("lightflow.model_lock_check", "lightflow.model.lock.check"),
+        ("lightflow.image_upscale", "lightflow.image.upscale"),
+        ("lightflow.mask_compose", "lightflow.mask.compose"),
+        ("lightflow.image_edit", "lightflow.image.edit"),
+        ("lightflow.image_inpaint", "lightflow.image.inpaint"),
+        ("lightflow.llm_generate", "lightflow.llm.generate"),
+        ("lightflow.llm_classify", "lightflow.llm.classify"),
         (
-            "lightflow.llm.structured_output",
+            "lightflow.llm_structured_output",
             "lightflow.llm.structured_output",
         ),
     ] {
@@ -35,7 +35,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.model.select",
+            "lightflow.model_select",
             "-i",
             "requirement_id=image_model",
             "-i",
@@ -51,7 +51,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.model.lock_check",
+            "lightflow.model_lock_check",
             "-i",
             "workflow_id=lightflow.text_to_image",
             "-i",
@@ -119,7 +119,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.image.upscale",
+            "lightflow.image_upscale",
             "-i",
             &format!("image_path={}", source.display()),
             "-i",
@@ -135,7 +135,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.mask.compose",
+            "lightflow.mask_compose",
             "-i",
             &format!("mask_a_path={}", mask_a.display()),
             "-i",
@@ -157,7 +157,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.image.edit",
+            "lightflow.image_edit",
             "-i",
             &format!("image_path={}", source.display()),
             "-i",
@@ -177,7 +177,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.image.inpaint",
+            "lightflow.image_inpaint",
             "-i",
             &format!("image_path={}", source.display()),
             "-i",
@@ -202,7 +202,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.llm.generate",
+            "lightflow.llm_generate",
             "-i",
             "prompt=hello",
             "-i",
@@ -215,7 +215,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.llm.classify",
+            "lightflow.llm_classify",
             "-i",
             "text=urgent billing issue",
             "-i",
@@ -228,7 +228,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         root,
         [
             "run",
-            "lightflow.llm.structured_output",
+            "lightflow.llm_structured_output",
             "-i",
             "text={\"intent\":\"search\"}",
         ],
@@ -244,15 +244,15 @@ fn repository_standard_model_diffusion_and_llm_nodes_pass_node_conformance()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for workflow_id in [
-        "lightflow.model.select",
-        "lightflow.model.lock_check",
-        "lightflow.image.upscale",
-        "lightflow.mask.compose",
-        "lightflow.image.edit",
-        "lightflow.image.inpaint",
-        "lightflow.llm.generate",
-        "lightflow.llm.classify",
-        "lightflow.llm.structured_output",
+        "lightflow.model_select",
+        "lightflow.model_lock_check",
+        "lightflow.image_upscale",
+        "lightflow.mask_compose",
+        "lightflow.image_edit",
+        "lightflow.image_inpaint",
+        "lightflow.llm_generate",
+        "lightflow.llm_classify",
+        "lightflow.llm_structured_output",
     ] {
         let report = lfw(root, ["node", "test", workflow_id])?;
         assert_eq!(report["valid"], true, "{workflow_id}");

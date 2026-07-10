@@ -25,8 +25,7 @@ pub(super) fn read_path_dependency_workflows(
             if manifest.exists() {
                 manifests.insert(normalize_existing_path(&manifest)?);
             }
-
-            let lib = dependency_dir.join("src").join("lib.rs");
+            let lib = dependency_dir.join("src/lib.rs");
             if !lib.exists() {
                 continue;
             }
@@ -45,7 +44,7 @@ pub(super) fn read_path_dependency_workflows(
     Ok(())
 }
 
-fn dependency_category(dependency_dir: &Path) -> Option<String> {
+pub(super) fn dependency_category(dependency_dir: &Path) -> Option<String> {
     let category = dependency_dir.parent()?.file_name()?.to_str()?;
     let marker = dependency_dir.parent()?.parent()?.file_name()?.to_str()?;
     if marker == WORKFLOW_DIR && validate_id_segment(category, "workflow category").is_ok() {

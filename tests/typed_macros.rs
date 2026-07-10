@@ -21,7 +21,7 @@ async fn classify(input: UserInput) -> lightflow::anyhow::Result<Intent> {
     })
 }
 
-#[workflow("qa")]
+#[typed_workflow("qa")]
 async fn qa(input: UserInput) -> lightflow::anyhow::Result<FinalAnswer> {
     let intent = classify(input).await?;
     Ok(FinalAnswer {

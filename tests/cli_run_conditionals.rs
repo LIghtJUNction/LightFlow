@@ -23,8 +23,7 @@ lightflow = { path = "." }
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.then_branch")
-        .version("0.1.0")
+    workflow!()
         .name("Then Branch")
         .input("flag", "boolean")
         .input("value", "text")
@@ -39,8 +38,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.else_branch")
-        .version("0.1.0")
+    workflow!()
         .name("Else Branch")
         .input("flag", "boolean")
         .input("value", "text")
@@ -55,8 +53,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.conditional")
-        .version("0.1.0")
+    workflow!()
         .name("Conditional")
         .input("flag", "boolean")
         .input("value", "text")

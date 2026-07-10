@@ -17,7 +17,10 @@ use std::path::Path;
 mod files;
 mod manifests;
 mod paths;
-pub(in crate::cli) use manifests::{workflow_collection_manifest, workspace_manifest};
+pub(in crate::cli) use manifests::{
+    workflow_collection_manifest, workflow_host_package_name, workflow_host_source,
+    workspace_manifest,
+};
 pub(in crate::cli) use paths::{normalize_workflow_id, validate_spec_id};
 
 pub(in crate::cli) fn init_workflow_project(root: &Path) -> CliResult<serde_json::Value> {
@@ -29,9 +32,16 @@ pub(in crate::cli) fn init_workflow_project(root: &Path) -> CliResult<serde_json
     write_init_text(&root.join(".gitignore"), &project_gitignore(), &mut created)?;
     write_init_text(
         &root.join("Cargo.toml"),
-        &workspace_manifest(),
+        &workspace_manifest(root),
         &mut created,
     )?;
+    if create_example {
+        write_init_text(
+            &root.join(".lightflow/workspace.rs"),
+            workflow_host_source(),
+            &mut created,
+        )?;
+    }
     write_init_text(
         &workflows.join("README.md"),
         "# Workflows\n\nEach top-level directory is one category. Workflow crates live at `<category>/<short-name>/src/lib.rs`.\n",
@@ -189,9 +199,14 @@ fn ensure_workspace_manifest(
         return Ok(());
     }
     let manifest = if global {
-        workflow_collection_manifest()
+        workflow_collection_manifest(root)
     } else {
-        workspace_manifest()
+        workspace_manifest(root)
     };
-    write_new_text(&manifest_path, &manifest, created)
+    write_new_text(&manifest_path, &manifest, created)?;
+    write_new_text(
+        &root.join(".lightflow/workspace.rs"),
+        workflow_host_source(),
+        created,
+    )
 }

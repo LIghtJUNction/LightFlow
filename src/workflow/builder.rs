@@ -14,12 +14,6 @@ pub struct WorkflowBuilder {
 
 impl WorkflowBuilder {
     #[must_use]
-    pub fn version(mut self, version: impl Into<String>) -> Self {
-        self.spec.version = version.into();
-        self
-    }
-
-    #[must_use]
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.spec.name = name.into();
         self

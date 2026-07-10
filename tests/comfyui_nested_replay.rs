@@ -1,8 +1,10 @@
+mod cli_project_support;
 mod comfyui_runtime_support;
 mod support;
 
 use std::fs;
 
+use cli_project_support::use_local_lightflow_dependency;
 use comfyui_runtime_support::{MockComfyUi, MockResponse};
 use serde_json::{Value, json};
 use support::{lfw, unique_temp_root, write_workflow_crate};
@@ -103,6 +105,7 @@ fn nested_project() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
+    use_local_lightflow_dependency(&root)?;
     lfw(
         &root,
         [
@@ -127,13 +130,12 @@ fn nested_project() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     Ok(root)
 }
 
-fn composite_source(workflow_id: &str, node_id: &str, child_id: &str) -> String {
+fn composite_source(_workflow_id: &str, node_id: &str, child_id: &str) -> String {
     format!(
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+    workflow!()
         .name("Nested")
         .input("workflow", "json")
         .input("uploads", "json")

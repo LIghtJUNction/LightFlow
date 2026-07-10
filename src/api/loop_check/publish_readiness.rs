@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(
             publish_workspace_label(
                 root,
-                &root.join("projects/lightflow-std/workflows/std/std/Cargo.toml"),
+                &root.join("projects/lightflow-std/workflows/std/text_prompt/Cargo.toml"),
             ),
             "projects/lightflow-std"
         );

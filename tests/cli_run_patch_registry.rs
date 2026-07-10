@@ -14,8 +14,7 @@ fn lfw_run_applies_patch_files_at_node_boundaries() -> Result<(), Box<dyn std::e
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.replacement")
-        .version("0.1.0")
+    workflow!()
         .name("Replacement")
         .input("in", "json")
         .output("out", "json")
@@ -29,8 +28,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.fallback")
-        .version("0.1.0")
+    workflow!()
         .name("Fallback")
         .input("in", "json")
         .output("out", "json")
@@ -44,8 +42,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.no_output")
-        .version("0.1.0")
+    workflow!()
         .name("No Output")
         .input("in", "json")
         .build()
@@ -58,8 +55,7 @@ pub fn define() -> WorkflowSpec {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.extra_required")
-        .version("0.1.0")
+    workflow!()
         .name("Extra Required")
         .input("in", "json")
         .input("extra", "json")

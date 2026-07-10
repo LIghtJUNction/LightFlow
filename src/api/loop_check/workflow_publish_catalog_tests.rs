@@ -12,7 +12,7 @@ fn publish_catalog_resolves_project_workspace_dependencies_and_filters_duplicate
         &root,
         "workflows/std/app",
         "lightflow.shared_app",
-        "root-app",
+        "shared-app",
     )?;
 
     let project_root = root.join("projects/lightflow-std");
@@ -37,7 +37,7 @@ project-base = { path = "workflows/std/base", version = "0.1.0" }
         &project_root,
         "workflows/std/app",
         "lightflow.shared_app",
-        "project-app",
+        "shared-app",
         "[dependencies]\nproject-base = { workspace = true }\n",
     )?;
     let service = ApiService::new(&root);
@@ -51,7 +51,7 @@ project-base = { path = "workflows/std/base", version = "0.1.0" }
             .iter()
             .map(|check| check.package.as_str())
             .collect::<Vec<_>>(),
-        vec!["project-base", "root-app"]
+        vec!["project-base", "shared-app"]
     );
     assert!(
         default_catalog
@@ -59,7 +59,7 @@ project-base = { path = "workflows/std/base", version = "0.1.0" }
             .iter()
             .any(|check| check.workflow_id == "lightflow.shared_app"
                 && check.workspace == "root"
-                && check.package == "root-app"),
+                && check.package == "shared-app"),
         "default catalog:\n{default_catalog:#?}"
     );
 
@@ -80,12 +80,12 @@ project-base = { path = "workflows/std/base", version = "0.1.0" }
             .iter()
             .map(|check| check.package.as_str())
             .collect::<Vec<_>>(),
-        vec!["project-base", "project-app"]
+        vec!["project-base", "shared-app"]
     );
     let app = project_catalog
         .checks
         .iter()
-        .find(|check| check.package == "project-app")
+        .find(|check| check.package == "shared-app")
         .expect("project app check");
     assert_eq!(app.workspace, "projects/lightflow-std");
     assert_eq!(app.internal_dependencies, vec!["project-base"]);
@@ -107,7 +107,7 @@ project-base = { path = "workflows/std/base", version = "0.1.0" }
                 .iter()
                 .map(|check| check.package.as_str())
                 .collect::<Vec<_>>(),
-            vec!["project-base", "project-app"]
+            vec!["project-base", "shared-app"]
         );
     }
 
@@ -163,7 +163,7 @@ fn write_publishable_workflow(
 fn write_publishable_workflow_with_dependencies(
     root: &Path,
     relative_crate_dir: &str,
-    workflow_id: &str,
+    _workflow_id: &str,
     package: &str,
     dependencies: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -185,19 +185,16 @@ license = "MIT"
     )?;
     fs::write(
         crate_dir.join("src/lib.rs"),
-        format!(
-            r#"use lightflow::preload::*;
+        r#"use lightflow::preload::*;
 
-pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+pub fn define() -> WorkflowSpec {
+    workflow!()
         .name("Publishable Fixture")
         .output("value", "json")
         .output_description("value", "Fixture output.")
         .build()
-}}
-"#
-        ),
+}
+"#,
     )?;
     Ok(())
 }

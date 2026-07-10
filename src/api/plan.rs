@@ -327,11 +327,11 @@ fn recipe_name(recipe: ExecutionRecipe) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preload::*;
+    use crate::workflow::workflow_with_identity;
 
     #[test]
     fn flux_workflow_builds_single_device_resident_plan_node() {
-        let workflow = workflow("lightflow.flux.text_to_image")
+        let workflow = workflow_with_identity("lightflow.flux_text_to_image", "0.1.0")
             .runtime("image_runtime", IMAGE_GENERATE_CAPABILITY)
             .hf_model(
                 "flux_model",
@@ -375,7 +375,7 @@ mod tests {
             IMAGE_EDIT_CAPABILITY,
             IMAGE_INPAINT_CAPABILITY,
         ] {
-            let workflow = workflow(format!("lightflow.comfy.{capability}"))
+            let workflow = workflow_with_identity(format!("lightflow.comfy.{capability}"), "0.1.0")
                 .builtin_runtime("comfyui", capability, COMFYUI_API_ENGINE)
                 .build();
 

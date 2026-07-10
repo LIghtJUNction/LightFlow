@@ -10,6 +10,7 @@ pub mod workflow;
 pub use anyhow;
 pub use async_trait;
 pub use lightflow_macros::{
-    WorkflowInput, WorkflowOutput, node, retry, subworkflow, timeout, trace_node, workflow,
+    WorkflowInput, WorkflowOutput, node, retry, subworkflow, timeout, trace_node,
+    workflow as typed_workflow,
 };
 pub use serde_json;

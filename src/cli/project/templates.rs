@@ -248,7 +248,7 @@ Merge this fragment into the same complete run object. Upload binding node ids m
 }
 
 pub(super) fn example_workflow_source(
-    workflow_id: &str,
+    _workflow_id: &str,
     name: &str,
     template: Option<&NodeTemplate>,
 ) -> String {
@@ -261,8 +261,7 @@ pub(super) fn example_workflow_source(
         }
     };
     format!(
-        "use lightflow::preload::*;\n\npub fn define() -> WorkflowSpec {{\n    workflow({})\n        .version(\"0.1.0\")\n        .name({})\n        .description(\"TODO: describe this workflow.\")\n{}\n        .build()\n}}\n",
-        rust_string(workflow_id),
+        "use lightflow::preload::*;\n\npub fn define() -> WorkflowSpec {{\n    workflow!()\n        .name({})\n        .description(\"TODO: describe this workflow.\")\n{}\n        .build()\n}}\n",
         rust_string(name),
         template.source_body
     )

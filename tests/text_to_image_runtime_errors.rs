@@ -14,8 +14,7 @@ fn node_test_rejects_model_free_abstract_image_runtime() -> Result<(), Box<dyn s
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.abstract_image")
-        .version("0.1.0")
+    workflow!()
         .name("Abstract Image")
         .description("A model-free abstract image runtime used for conformance testing.")
         .input("prompt", "text")
@@ -67,8 +66,7 @@ fn image_generate_runtime_without_builtin_preview_is_rejected()
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.external_image")
-        .version("0.1.0")
+    workflow!()
         .name("External Image")
         .input("prompt", "text")
         .output("image", "artifact")
@@ -118,8 +116,7 @@ lightflow = { path = "." }
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.test_flux_missing_lock")
-        .version("0.1.0")
+    workflow!()
         .name("Test FLUX Missing Lock")
         .input("prompt", "text")
         .output("image", "artifact")

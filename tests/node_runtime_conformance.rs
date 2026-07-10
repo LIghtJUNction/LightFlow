@@ -375,7 +375,7 @@ fn write_skill(root: &Path, workflow_id: &str) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-fn flux_source(workflow_id: &str, engine: Option<&str>) -> String {
+fn flux_source(_workflow_id: &str, engine: Option<&str>) -> String {
     let runtime = match engine {
         Some(engine) => format!(
             ".builtin_runtime(\"image_runtime\", \"lightflow.image.generate\", \"{engine}\")"
@@ -386,8 +386,7 @@ fn flux_source(workflow_id: &str, engine: Option<&str>) -> String {
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+    workflow!()
         .name("FLUX Test")
         .description("Tests physical FLUX backend planning.")
         .input("prompt", "text")
@@ -408,13 +407,12 @@ pub fn define() -> WorkflowSpec {{
     )
 }
 
-fn preview_source(workflow_id: &str) -> String {
-    format!(
+fn preview_source(_workflow_id: &str) -> String {
+    String::from(
         r#"use lightflow::preload::*;
 
-pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+pub fn define() -> WorkflowSpec {
+    workflow!()
         .name("Preview Branch")
         .description("Runnable preview branch.")
         .input("flag", "boolean")
@@ -424,8 +422,8 @@ pub fn define() -> WorkflowSpec {{
         .output_artifact_kind("image", "image")
         .builtin_runtime("image_runtime", "lightflow.image.generate", "builtin.preview.v1")
         .build()
-}}
-"#
+}
+"#,
     )
 }
 
@@ -436,13 +434,12 @@ fn abstract_source(workflow_id: &str) -> String {
     )
 }
 
-fn conditional_source(workflow_id: &str, then_id: &str, else_id: &str) -> String {
+fn conditional_source(_workflow_id: &str, then_id: &str, else_id: &str) -> String {
     format!(
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+    workflow!()
         .name("Conditional Root")
         .description("Checks every conditional runtime candidate.")
         .input("flag", "boolean")
@@ -458,13 +455,12 @@ pub fn define() -> WorkflowSpec {{
     )
 }
 
-fn image_load_source(workflow_id: &str, engine: &str) -> String {
+fn image_load_source(_workflow_id: &str, engine: &str) -> String {
     format!(
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {{
-    workflow("{workflow_id}")
-        .version("0.1.0")
+    workflow!()
         .name("Image Load")
         .description("Tests an explicit non-FLUX engine.")
         .input("image_path", "path")

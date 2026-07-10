@@ -206,8 +206,7 @@ license = "MIT OR Apache-2.0"
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.http_publish")
-        .version("0.1.0")
+    workflow!()
         .name("HTTP Publish")
         .description("HTTP publish readiness fixture.")
         .input("value", "json")

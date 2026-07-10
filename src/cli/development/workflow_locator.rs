@@ -45,13 +45,13 @@ pub(super) fn find_workflow_crate_dir(
 
 fn preferred_project_names(workflow_id: &str) -> Vec<String> {
     let mut names = Vec::new();
-    if workflow_id == "lightflow.std" || workflow_id.starts_with("lightflow.") {
+    if workflow_id == "lightflow.text_prompt" || workflow_id.starts_with("lightflow.") {
         names.push("lightflow-std".to_owned());
     }
-    if workflow_id.starts_with("lightflow.flux.") {
+    if workflow_id.starts_with("lightflow.flux_") {
         names.insert(0, "lightflow-flux".to_owned());
     }
-    if workflow_id.starts_with("lightflow.rig.") {
+    if workflow_id.starts_with("lightflow.rig_") {
         names.insert(0, "lightflow-rig".to_owned());
     }
     names.dedup();
@@ -91,4 +91,25 @@ fn read_sorted_dirs(path: &Path) -> CliResult<Vec<PathBuf>> {
         .collect::<Result<Vec<_>, _>>()?;
     paths.sort();
     Ok(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preferred_project_names;
+
+    #[test]
+    fn flux_workflow_prefers_flux_project() {
+        assert_eq!(
+            preferred_project_names("lightflow.flux_text_to_image")[0],
+            "lightflow-flux"
+        );
+    }
+
+    #[test]
+    fn rig_workflow_prefers_rig_project() {
+        assert_eq!(
+            preferred_project_names("lightflow.rig_llm")[0],
+            "lightflow-rig"
+        );
+    }
 }

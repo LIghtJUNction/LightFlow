@@ -1,4 +1,4 @@
-use super::project::workflow_collection_manifest;
+use super::project::{workflow_collection_manifest, workflow_host_source};
 use super::{CliError, CliResult};
 use std::env;
 use std::fs;
@@ -146,7 +146,12 @@ fn ensure_default_workflow_workspace(path: &Path) -> CliResult<(PathBuf, bool)> 
     if manifest.exists() {
         return Ok((manifest, false));
     }
-    fs::write(&manifest, workflow_collection_manifest())?;
+    fs::write(&manifest, workflow_collection_manifest(path))?;
+    let host_source = path.join(".lightflow/workspace.rs");
+    if let Some(parent) = host_source.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(host_source, workflow_host_source())?;
     Ok((manifest, true))
 }
 

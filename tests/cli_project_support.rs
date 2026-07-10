@@ -94,3 +94,19 @@ pub fn complete_generated_workflow_metadata(
     fs::write(path, source)?;
     Ok(())
 }
+
+pub fn use_local_lightflow_dependency(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest_path = root.join("Cargo.toml");
+    let source = fs::read_to_string(&manifest_path)?;
+    let version_dependency = format!("lightflow = {:?}", env!("CARGO_PKG_VERSION"));
+    let path_dependency = format!(
+        "lightflow = {{ version = {:?}, path = {:?} }}",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_MANIFEST_DIR")
+    );
+    fs::write(
+        manifest_path,
+        source.replace(&version_dependency, &path_dependency),
+    )?;
+    Ok(())
+}

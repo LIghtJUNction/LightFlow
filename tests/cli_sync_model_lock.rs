@@ -28,8 +28,7 @@ lightflow = {{ path = {:?} }}
         r#"use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow("lightflow.locked_image")
-        .version("0.1.0")
+    workflow!()
         .name("Locked Image")
         .input("prompt", "text")
         .output("image", "artifact")

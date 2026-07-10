@@ -1,4 +1,5 @@
 use super::arguments::{bool_arg, expect_arg_len, string_arg};
+use crate::api::workflow_package_identity_from_source;
 use crate::api::{ApiError, ApiResult};
 use crate::workflow::{
     CargoDependency, CargoDependencySource, ModelProvider, ModelRequirement, ModelVariant,
@@ -28,19 +29,33 @@ pub(super) fn parse_workflow_builder(
     expression: &syn::Expr,
     path: &Path,
 ) -> ApiResult<WorkflowSpec> {
+    parse_workflow_builder_with_package(expression, path, None)
+}
+
+pub(super) fn parse_workflow_builder_with_identity(
+    expression: &syn::Expr,
+    path: &Path,
+    id: &str,
+    version: &str,
+) -> ApiResult<WorkflowSpec> {
+    parse_workflow_builder_with_package(expression, path, Some((id, version)))
+}
+
+fn parse_workflow_builder_with_package(
+    expression: &syn::Expr,
+    path: &Path,
+    package_identity: Option<(&str, &str)>,
+) -> ApiResult<WorkflowSpec> {
     match expression {
         syn::Expr::MethodCall(call) => {
-            let mut workflow = parse_workflow_builder(&call.receiver, path)?;
+            let mut workflow =
+                parse_workflow_builder_with_package(&call.receiver, path, package_identity)?;
             let method = call.method.to_string();
             if apply_port_builder_method(&mut workflow, &method, &call.args, path)? {
                 return Ok(workflow);
             }
             match method.as_str() {
                 "build" => expect_arg_len(&call.args, 0, &method, path)?,
-                "version" => {
-                    workflow.version = string_arg(&call.args, 0, &method, path)?;
-                    expect_arg_len(&call.args, 1, &method, path)?;
-                }
                 "name" => {
                     workflow.name = string_arg(&call.args, 0, &method, path)?;
                     expect_arg_len(&call.args, 1, &method, path)?;
@@ -214,11 +229,20 @@ pub(super) fn parse_workflow_builder(
             }
             Ok(workflow)
         }
-        syn::Expr::Call(call) if is_workflow_constructor(call) => {
-            expect_arg_len(&call.args, 1, "workflow", path)?;
+        syn::Expr::Macro(call) if is_workflow_macro(&call.mac.path) => {
+            if !call.mac.tokens.is_empty() {
+                return Err(ApiError::InvalidRequest(format!(
+                    "workflow!() takes no arguments in {:?}",
+                    path
+                )));
+            }
+            let (id, version) = match package_identity {
+                Some((id, version)) => (id.to_owned(), version.to_owned()),
+                None => workflow_package_identity_from_source(path)?,
+            };
             Ok(WorkflowSpec {
-                id: string_arg(&call.args, 0, "workflow", path)?,
-                version: "0.1.0".to_owned(),
+                id,
+                version,
                 name: String::new(),
                 category: None,
                 description: None,
@@ -237,6 +261,12 @@ pub(super) fn parse_workflow_builder(
             path
         ))),
     }
+}
+
+fn is_workflow_macro(path: &syn::Path) -> bool {
+    path.segments
+        .last()
+        .is_some_and(|segment| segment.ident == "workflow")
 }
 
 fn push_hf_model_variant(
@@ -267,16 +297,5 @@ fn push_hf_model_variant(
             capability,
             variants: vec![variant],
         });
-    }
-}
-
-fn is_workflow_constructor(call: &syn::ExprCall) -> bool {
-    match call.func.as_ref() {
-        syn::Expr::Path(path) => path
-            .path
-            .segments
-            .last()
-            .is_some_and(|segment| segment.ident == "workflow"),
-        _ => false,
     }
 }

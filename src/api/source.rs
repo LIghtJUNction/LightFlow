@@ -8,7 +8,11 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod cargo_dependencies;
 mod path_dependencies;
+mod template_workspace;
+
+pub(super) use template_workspace::ensure_workflow_save_workspace;
 
 pub(super) fn read_workflow_sources(
     root: &Path,
@@ -53,6 +57,16 @@ pub(super) fn read_workflow_sources(
         &mut manifests,
         &mut visited_libs,
     )?;
+    if root_manifest.exists()
+        && !template_workspace::should_skip_empty_template_workspace_metadata(&root_manifest)?
+    {
+        cargo_dependencies::read_cargo_dependency_workflows(
+            &root_manifest,
+            &mut workflows,
+            &mut manifests,
+            &mut visited_libs,
+        )?;
+    }
 
     Ok(workflows)
 }
