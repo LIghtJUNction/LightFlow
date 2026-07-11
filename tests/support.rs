@@ -185,7 +185,7 @@ pub fn write_project_specs(root: &Path) -> Result<(), Box<dyn std::error::Error>
         format!(
             r#"[workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -201,6 +201,7 @@ lightflow = {{ path = {:?} }}
 pub fn define() -> WorkflowSpec {
     workflow!()
         .name("Child")
+        .category("tests")
         .input("in", "json")
         .output("out", "json")
         .build()
@@ -310,7 +311,6 @@ pub fn write_workflow_crate(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let crate_dir = root
         .join(".lightflow/workflows")
-        .join("tests")
         .join(workflow_dir_name(workflow_id));
     fs::create_dir_all(crate_dir.join("src"))?;
     fs::write(
@@ -337,9 +337,7 @@ pub fn write_workflow_crate_in(
     workflow_id: &str,
     source: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let crate_dir = collection
-        .join("local")
-        .join(workflow_dir_name(workflow_id));
+    let crate_dir = collection.join(workflow_dir_name(workflow_id));
     fs::create_dir_all(crate_dir.join("src"))?;
     fs::write(
         crate_dir.join("Cargo.toml"),

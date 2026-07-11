@@ -11,7 +11,7 @@ fn repository_text_to_image_declares_runtime_and_gguf_model()
     let service = ApiService::new(root);
     let workflow = service.get_workflow("lightflow.text_to_image")?;
 
-    assert_eq!(workflow.category.as_deref(), Some("std"));
+    assert!(workflow.category.is_none());
     assert_eq!(workflow.runtimes[0].capability, "lightflow.image.generate");
     assert_eq!(
         workflow.runtimes[0].engine.as_deref(),

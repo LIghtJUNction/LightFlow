@@ -148,16 +148,19 @@ pub fn define() -> WorkflowSpec {
     }
 
     #[test]
-    fn categorized_workflow_manifest_path_finds_category_short_name() {
-        let root = test_dir("manifest-category-short-name");
+    fn categorized_workflow_manifest_path_finds_flat_crate() {
+        let root = test_dir("manifest-flat-crate");
         let crate_dir = root
             .path()
             .join(PROJECT_LIGHTFLOW_DIR)
             .join(WORKFLOW_DIR)
-            .join("text")
             .join("plan");
         fs::create_dir_all(&crate_dir).expect("workflow crate dir");
-        fs::write(crate_dir.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("manifest");
+        fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname = \"lightflow-text-plan\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("manifest");
 
         assert_eq!(
             categorized_workflow_manifest_path(root.path(), "lightflow.text_plan").unwrap(),
@@ -174,22 +177,25 @@ pub fn define() -> WorkflowSpec {
             root.path()
                 .join(PROJECT_LIGHTFLOW_DIR)
                 .join(WORKFLOW_DIR)
-                .join("lightflow.missing")
+                .join("missing")
                 .join("Cargo.toml")
         );
     }
 
     #[test]
-    fn categorized_workflow_manifest_path_falls_back_to_legacy_directory() {
-        let root = test_dir("manifest-legacy-directory");
+    fn categorized_workflow_manifest_path_finds_flat_legacy_collection() {
+        let root = test_dir("manifest-flat-legacy-collection");
         let crate_dir = root
             .path()
             .join(LEGACY_LIGHTFLOW_DIR)
             .join(WORKFLOW_DIR)
-            .join("text")
             .join("plan");
         fs::create_dir_all(&crate_dir).expect("workflow crate dir");
-        fs::write(crate_dir.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("manifest");
+        fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname = \"lightflow-text-plan\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("manifest");
 
         assert_eq!(
             categorized_workflow_manifest_path(root.path(), "lightflow.text_plan").unwrap(),

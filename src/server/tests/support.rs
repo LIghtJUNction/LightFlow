@@ -186,7 +186,7 @@ pub(crate) fn temp_root(name: &str) -> std::path::PathBuf {
 }
 
 pub(crate) fn write_publishable_project_workflow(root: &std::path::Path) {
-    let crate_dir = root.join("projects/lightflow-std/workflows/std/http_publish");
+    let crate_dir = root.join("projects/lightflow-std/workflows/http_publish");
     std::fs::create_dir_all(crate_dir.join("src")).expect("workflow crate dir");
     std::fs::write(
         crate_dir.join("Cargo.toml"),

@@ -37,11 +37,11 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            ".lightflow/workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/example/Cargo.toml",
             "--dry-run"
         ])
     );
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
+    complete_generated_workflow_metadata(&root, "example")?;
     let workflow_plan = lfw(&root, ["publish", "lightflow.example"])?;
     assert_eq!(workflow_plan["publishable"], true);
     assert_eq!(workflow_plan["issues"], serde_json::json!([]));
@@ -151,7 +151,7 @@ local-only = { workspace = true }
             "cargo",
             "publish",
             "--manifest-path",
-            ".lightflow/workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/example/Cargo.toml",
             "--dry-run"
         ])
     );
@@ -162,7 +162,7 @@ local-only = { workspace = true }
             "cargo",
             "publish",
             "--manifest-path",
-            ".lightflow/workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/example/Cargo.toml",
             "--allow-dirty",
             "--dry-run"
         ])
@@ -173,11 +173,11 @@ local-only = { workspace = true }
     assert_eq!(strict_workflows_plan["publishable_count"], 1);
     assert_eq!(strict_workflows_plan["blocked_count"], 0);
 
-    lfw(&root, ["new", "lightflow.base", "--category", "examples"])?;
-    lfw(&root, ["new", "lightflow.top", "--category", "examples"])?;
-    complete_generated_workflow_metadata(&root, "examples", "base")?;
-    complete_generated_workflow_metadata(&root, "examples", "top")?;
-    let top_manifest_path = root.join(".lightflow/workflows/examples/top/Cargo.toml");
+    lfw(&root, ["new", "lightflow.base"])?;
+    lfw(&root, ["new", "lightflow.top"])?;
+    complete_generated_workflow_metadata(&root, "base")?;
+    complete_generated_workflow_metadata(&root, "top")?;
+    let top_manifest_path = root.join(".lightflow/workflows/top/Cargo.toml");
     let mut top_manifest = fs::read_to_string(&top_manifest_path)?;
     top_manifest.push_str("lightflow-base = { path = \"../base\", version = \"0.1.0\" }\n");
     fs::write(&top_manifest_path, top_manifest)?;
@@ -230,7 +230,7 @@ local-only = { workspace = true }
     let mut root_manifest = fs::read_to_string(&root_manifest_path)?;
     root_manifest.push_str("bad-workspace = { path = \"../bad-workspace\" }\n");
     fs::write(&root_manifest_path, root_manifest)?;
-    let example_manifest_path = root.join(".lightflow/workflows/examples/example/Cargo.toml");
+    let example_manifest_path = root.join(".lightflow/workflows/example/Cargo.toml");
     let mut example_manifest = fs::read_to_string(&example_manifest_path)?;
     example_manifest.push_str("bad-workspace = { workspace = true }\n");
     fs::write(&example_manifest_path, example_manifest)?;
@@ -265,12 +265,10 @@ local-only = { workspace = true }
 
 fn complete_generated_workflow_metadata(
     root: &Path,
-    category: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = root
         .join(".lightflow/workflows")
-        .join(category)
         .join(name)
         .join("src/lib.rs");
     let source = fs::read_to_string(&path)?

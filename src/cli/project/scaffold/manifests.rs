@@ -2,11 +2,11 @@ use super::package_name_from_id;
 use std::path::Path;
 
 pub(in crate::cli) fn workspace_manifest(root: &Path) -> String {
-    workflow_workspace_manifest(root, ".lightflow/workflows/*/*")
+    workflow_workspace_manifest(root, ".lightflow/workflows/*")
 }
 
 pub(in crate::cli) fn workflow_collection_manifest(root: &Path) -> String {
-    workflow_workspace_manifest(root, "workflows/*/*")
+    workflow_workspace_manifest(root, "workflows/*")
 }
 
 fn workflow_workspace_manifest(root: &Path, member_glob: &str) -> String {

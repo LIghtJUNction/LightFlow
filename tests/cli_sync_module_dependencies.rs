@@ -16,7 +16,7 @@ fn sync_applies_declared_workflow_module_dependencies() -> Result<(), Box<dyn st
         format!(
             r#"[workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}

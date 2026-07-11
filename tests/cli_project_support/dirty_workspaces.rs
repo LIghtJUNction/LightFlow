@@ -52,7 +52,7 @@ pub fn dirty_project_workspace_fixture()
         )?;
     }
     lfw(&std, ["init"])?;
-    complete_generated_workflow_metadata(&std, "examples", "example")?;
+    complete_generated_workflow_metadata(&std, "example")?;
     git_ok(&std, ["init"])?;
     git_ok(&std, ["add", "."])?;
     git_ok(

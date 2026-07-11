@@ -60,6 +60,10 @@ fn parse_workflow_builder_with_package(
                     workflow.name = string_arg(&call.args, 0, &method, path)?;
                     expect_arg_len(&call.args, 1, &method, path)?;
                 }
+                "category" => {
+                    workflow.category = Some(string_arg(&call.args, 0, &method, path)?);
+                    expect_arg_len(&call.args, 1, &method, path)?;
+                }
                 "description" => {
                     workflow.description = Some(string_arg(&call.args, 0, &method, path)?);
                     expect_arg_len(&call.args, 1, &method, path)?;

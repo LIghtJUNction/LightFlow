@@ -12,7 +12,7 @@ fn flux_text_to_image_uses_external_runner_contract() -> Result<(), Box<dyn std:
         root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = ["workflows/*"]
 
 [workspace.dependencies]
 lightflow = { path = "." }

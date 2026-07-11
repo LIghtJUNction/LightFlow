@@ -18,15 +18,15 @@ fn local_loop_agent_skill_failures_are_summarized() -> Result<(), Box<dyn std::e
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
     use_local_lightflow_dependency(&root)?;
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
+    complete_generated_workflow_metadata(&root, "example")?;
 
     for index in 0..7 {
         let name = format!("weak_skill_{index}");
-        lfw(&root, ["new", &name, "--category", "examples"])?;
-        complete_generated_workflow_metadata(&root, "examples", &name)?;
+        lfw(&root, ["new", &name])?;
+        complete_generated_workflow_metadata(&root, &name)?;
         fs::write(
             root.join(format!(
-                ".lightflow/workflows/examples/{name}/.agent/skills/lightflow-weak-skill-{index}/SKILL.md"
+                ".lightflow/workflows/{name}/.agent/skills/lightflow-weak-skill-{index}/SKILL.md"
             )),
             "# Weak skill\n\nThis file exists but does not describe how to run the workflow.\n",
         )?;
@@ -66,9 +66,9 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
     use_local_lightflow_dependency(&root)?;
-    lfw(&root, ["new", "reviewed", "--category", "examples"])?;
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
-    complete_generated_workflow_metadata(&root, "examples", "reviewed")?;
+    lfw(&root, ["new", "reviewed"])?;
+    complete_generated_workflow_metadata(&root, "example")?;
+    complete_generated_workflow_metadata(&root, "reviewed")?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
     git_ok(
@@ -84,7 +84,7 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
         ],
     )?;
 
-    let source_path = root.join(".lightflow/workflows/examples/reviewed/src/lib.rs");
+    let source_path = root.join(".lightflow/workflows/reviewed/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// reviewed behavior change\n",
@@ -93,7 +93,7 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
     assert!(!missing_skill.status.success());
     let stderr = String::from_utf8_lossy(&missing_skill.stderr);
     assert!(stderr.contains("\"valid\":false"), "stderr:\n{stderr}");
-    assert!(stderr.contains("\"blockers\":[\"examples/reviewed: workflow files changed without a colocated agent skill update\"]"), "stderr:\n{stderr}");
+    assert!(stderr.contains("\"blockers\":[\"reviewed: workflow files changed without a colocated agent skill update\"]"), "stderr:\n{stderr}");
     assert!(
         stderr.contains("workflow files changed without a colocated agent skill update"),
         "stderr:\n{stderr}"
@@ -123,8 +123,8 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
         "stderr:\n{publish_stderr}"
     );
 
-    let skill_path = root
-        .join(".lightflow/workflows/examples/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
+    let skill_path =
+        root.join(".lightflow/workflows/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: behavior changed with source.\n",
@@ -135,10 +135,7 @@ fn lfw_loop_changes_requires_skill_update_with_workflow_edits()
     assert_eq!(paired["warnings"], 0);
     assert_eq!(paired["failed"], 0);
     assert_eq!(paired["blockers"], serde_json::json!([]));
-    assert_eq!(
-        paired["changed_workflows"][0]["workflow_key"],
-        "examples/reviewed"
-    );
+    assert_eq!(paired["changed_workflows"][0]["workflow_key"], "reviewed");
     assert_eq!(paired["changed_workflows"][0]["workflow_changed"], true);
     assert_eq!(paired["changed_workflows"][0]["skill_changed"], true);
     assert_eq!(paired["changed_workflows"][0]["status"], "passed");
@@ -227,7 +224,7 @@ fn lfw_loop_changes_tracks_untracked_workflow_files() -> Result<(), Box<dyn std:
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
     use_local_lightflow_dependency(&root)?;
-    lfw(&root, ["new", "untracked", "--category", "examples"])?;
+    lfw(&root, ["new", "untracked"])?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
     git_ok(
@@ -243,7 +240,7 @@ fn lfw_loop_changes_tracks_untracked_workflow_files() -> Result<(), Box<dyn std:
         ],
     )?;
 
-    let source_path = root.join(".lightflow/workflows/examples/untracked/src/extra.rs");
+    let source_path = root.join(".lightflow/workflows/untracked/src/extra.rs");
     fs::write(&source_path, "pub fn extra_behavior() {}\n")?;
     let missing_skill = lfw_command(&root).args(["loop", "changes"]).output()?;
     assert!(!missing_skill.status.success());
@@ -255,18 +252,15 @@ fn lfw_loop_changes_tracks_untracked_workflow_files() -> Result<(), Box<dyn std:
     );
     assert!(stderr.contains("extra.rs"), "stderr:\n{stderr}");
 
-    let skill_path = root
-        .join(".lightflow/workflows/examples/untracked/.agent/skills/lightflow-untracked/SKILL.md");
+    let skill_path =
+        root.join(".lightflow/workflows/untracked/.agent/skills/lightflow-untracked/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: extra source file added.\n",
     )?;
     let paired = lfw(&root, ["loop", "changes"])?;
     assert_eq!(paired["valid"], true);
-    assert_eq!(
-        paired["changed_workflows"][0]["workflow_key"],
-        "examples/untracked"
-    );
+    assert_eq!(paired["changed_workflows"][0]["workflow_key"], "untracked");
     assert_eq!(paired["changed_workflows"][0]["workflow_changed"], true);
     assert_eq!(paired["changed_workflows"][0]["skill_changed"], true);
     assert_eq!(paired["changed_workflows"][0]["status"], "passed");

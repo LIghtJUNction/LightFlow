@@ -1,15 +1,15 @@
 [submodule "LightFlowUI"]
 	path = LightFlowUI
-	url = https://github.com/LIghtJUNction/LightFlowUI.git
+	url = https://github.com/lightjunction/LightFlowUI.git
 [submodule "projects/lightflow-auto-editing"]
 	path = projects/lightflow-auto-editing
-	url = https://github.com/LIghtJUNction/lightflow-auto-editing.git
+	url = https://github.com/lightjunction/lightflow-auto-editing.git
 [submodule "projects/lightflow-std"]
 	path = projects/lightflow-std
-	url = https://github.com/LIghtJUNction/lightflow-std.git
+	url = https://github.com/lightjunction/lightflow-std.git
 [submodule "projects/lightflow-flux"]
 	path = projects/lightflow-flux
-	url = https://github.com/LIghtJUNction/lightflow-flux.git
+	url = https://github.com/lightjunction/lightflow-flux.git
 [submodule "projects/lightflow-rig"]
 	path = projects/lightflow-rig
-	url = https://github.com/LIghtJUNction/lightflow-rig.git
+	url = https://github.com/lightjunction/lightflow-rig.git

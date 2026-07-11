@@ -1,6 +1,5 @@
 use super::dsl::{read_optional_workflow_source, read_workflow_source};
 use super::project_config::default_project_workflow_sources;
-use super::util::{path_file_name, validate_id_segment};
 use super::{ApiError, ApiResult, LEGACY_LIGHTFLOW_DIR, PROJECT_LIGHTFLOW_DIR, WORKFLOW_DIR};
 use crate::workflow::WorkflowSpec;
 use std::collections::BTreeSet;
@@ -167,7 +166,7 @@ fn project_workflow_collection(root: &Path) -> PathBuf {
 
 fn read_workflow_collection(
     collection: &Path,
-    _strict: bool,
+    strict: bool,
     workflows: &mut Vec<WorkflowSpec>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
@@ -182,23 +181,20 @@ fn read_workflow_collection(
                 if path.file_name().and_then(|name| name.to_str()) == Some("Cargo.toml") {
                     continue;
                 }
-                if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
-                    if path.is_dir() {
-                        if path.join("src").join("lib.rs").exists() {
-                            return Err(ApiError::InvalidRequest(format!(
-                                "workflow crates must be inside a category directory: {:?}",
-                                path
-                            )));
-                        } else {
-                            read_workflow_category(&path, workflows, manifests, visited_libs)?;
-                        }
-                    }
+                if path.is_dir() && path.join("src").join("lib.rs").exists() {
+                    read_one_workflow_crate(
+                        &path,
+                        strict,
+                        None,
+                        workflows,
+                        manifests,
+                        visited_libs,
+                    )?;
                     continue;
                 }
-                return Err(ApiError::InvalidRequest(format!(
-                    "workflow source files must be inside a category directory: {:?}",
-                    path
-                )));
+                if path.is_dir() {
+                    continue;
+                }
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -229,52 +225,14 @@ fn read_one_workflow_crate(
         read_optional_workflow_source(&lib)?
     };
     if let Some(mut workflow) = workflow {
-        workflow.category = category.map(str::to_owned);
+        if let Some(category) = category {
+            workflow.category = Some(category.to_owned());
+        }
         workflows.push(workflow);
         let manifest = crate_dir.join("Cargo.toml");
         if manifest.exists() {
             manifests.insert(normalize_existing_path(&manifest)?);
         }
-    }
-    Ok(())
-}
-
-fn read_workflow_category(
-    category_dir: &Path,
-    workflows: &mut Vec<WorkflowSpec>,
-    manifests: &mut BTreeSet<PathBuf>,
-    visited_libs: &mut BTreeSet<PathBuf>,
-) -> ApiResult<()> {
-    let category = path_file_name(category_dir, "workflow category")?;
-    validate_id_segment(&category, "workflow category")?;
-    match read_dir_paths(category_dir) {
-        Ok(paths) => {
-            for path in paths {
-                if path.is_dir() && path.join("src").join("lib.rs").exists() {
-                    read_one_workflow_crate(
-                        &path,
-                        true,
-                        Some(&category),
-                        workflows,
-                        manifests,
-                        visited_libs,
-                    )?;
-                    continue;
-                }
-                if path.is_dir() {
-                    return Err(ApiError::InvalidRequest(format!(
-                        "nested workflow category directories are not supported: {:?}",
-                        path
-                    )));
-                }
-                return Err(ApiError::InvalidRequest(format!(
-                    "workflow categories must contain standard Rust workflow crates: {:?}",
-                    path
-                )));
-            }
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(ApiError::from(error)),
     }
     Ok(())
 }

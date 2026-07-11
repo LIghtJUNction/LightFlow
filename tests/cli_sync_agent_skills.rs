@@ -14,7 +14,7 @@ fn sync_installs_agent_skills_once_and_locks_choice() -> Result<(), Box<dyn std:
         format!(
             r#"[workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -36,8 +36,7 @@ pub fn define() -> WorkflowSpec {
 }
 "#,
     )?;
-    let skill_dir =
-        project.join(".lightflow/workflows/tests/skillful/.agent/skills/lightflow-skillful");
+    let skill_dir = project.join(".lightflow/workflows/skillful/.agent/skills/lightflow-skillful");
     fs::create_dir_all(&skill_dir)?;
     fs::write(
         skill_dir.join("SKILL.md"),

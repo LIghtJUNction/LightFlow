@@ -31,11 +31,11 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            ".lightflow/workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/example/Cargo.toml",
             "--dry-run"
         ])
     );
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
+    complete_generated_workflow_metadata(&root, "example")?;
     let workflow_plan = lfw(&root, ["publish", "lightflow.example"])?;
     assert_eq!(workflow_plan["publishable"], true);
     assert_eq!(workflow_plan["issues"], serde_json::json!([]));
@@ -123,7 +123,7 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
             "cargo",
             "publish",
             "--manifest-path",
-            ".lightflow/workflows/examples/example/Cargo.toml",
+            ".lightflow/workflows/example/Cargo.toml",
             "--dry-run"
         ])
     );
@@ -188,12 +188,10 @@ fn lfw_publish_plans_publishable_workflow_crates() -> Result<(), Box<dyn std::er
 
 fn complete_generated_workflow_metadata(
     root: &Path,
-    category: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = root
         .join(".lightflow/workflows")
-        .join(category)
         .join(name)
         .join("src/lib.rs");
     let source = fs::read_to_string(&path)?

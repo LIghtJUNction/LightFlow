@@ -28,9 +28,9 @@ fn lfw_release_check_dry_run_reports_source_change_blockers()
     )?;
     lfw(&root, ["init"])?;
     use_local_lightflow_dependency(&root)?;
-    lfw(&root, ["new", "reviewed", "--category", "examples"])?;
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
-    complete_generated_workflow_metadata(&root, "examples", "reviewed")?;
+    lfw(&root, ["new", "reviewed"])?;
+    complete_generated_workflow_metadata(&root, "example")?;
+    complete_generated_workflow_metadata(&root, "reviewed")?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
     git_ok(
@@ -46,7 +46,7 @@ fn lfw_release_check_dry_run_reports_source_change_blockers()
         ],
     )?;
 
-    let source_path = root.join(".lightflow/workflows/examples/reviewed/src/lib.rs");
+    let source_path = root.join(".lightflow/workflows/reviewed/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// release-blocking behavior change\n",
@@ -82,9 +82,7 @@ fn lfw_release_check_dry_run_reports_source_change_blockers()
         review_check["message"]
             .as_str()
             .expect("review message")
-            .contains(
-                "examples/reviewed: workflow files changed without a colocated agent skill update"
-            ),
+            .contains("reviewed: workflow files changed without a colocated agent skill update"),
         "review check:\n{review_check:#?}"
     );
 
@@ -109,9 +107,9 @@ fn lfw_release_check_dry_run_accepts_skill_only_source_changes()
     )?;
     lfw(&root, ["init"])?;
     use_local_lightflow_dependency(&root)?;
-    lfw(&root, ["new", "reviewed", "--category", "examples"])?;
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
-    complete_generated_workflow_metadata(&root, "examples", "reviewed")?;
+    lfw(&root, ["new", "reviewed"])?;
+    complete_generated_workflow_metadata(&root, "example")?;
+    complete_generated_workflow_metadata(&root, "reviewed")?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
     git_ok(
@@ -127,8 +125,8 @@ fn lfw_release_check_dry_run_accepts_skill_only_source_changes()
         ],
     )?;
 
-    let skill_path = root
-        .join(".lightflow/workflows/examples/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
+    let skill_path =
+        root.join(".lightflow/workflows/reviewed/.agent/skills/lightflow-reviewed/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: skill docs clarified.\n",
@@ -195,7 +193,7 @@ fn lfw_release_check_apply_skips_commands_after_source_change_blockers()
     )?;
     lfw(&root, ["init"])?;
     use_local_lightflow_dependency(&root)?;
-    lfw(&root, ["new", "reviewed", "--category", "examples"])?;
+    lfw(&root, ["new", "reviewed"])?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
     git_ok(
@@ -211,7 +209,7 @@ fn lfw_release_check_apply_skips_commands_after_source_change_blockers()
         ],
     )?;
 
-    let source_path = root.join(".lightflow/workflows/examples/reviewed/src/lib.rs");
+    let source_path = root.join(".lightflow/workflows/reviewed/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// apply-blocking behavior change\n",

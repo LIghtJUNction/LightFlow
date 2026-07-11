@@ -15,7 +15,7 @@ editor-facing contracts.
 
 ## Current Scope
 
-- Rust workflow crates under `workflows/<category>/<short-name>/`
+- Rust workflow crates under `workflows/<short-name>/`
 - workflow validation, including nested workflow references and DAG cycle checks
 - recursive workflow dependency resolution
 - lightweight workflow execution plans with temporary node toggles
@@ -37,7 +37,7 @@ src/
   cli.rs         # command-line interface
   cli/mcp.rs     # MCP JSON-RPC adapter and CLI subcommand
   server.rs      # HTTP adapter
-workflows/       # categorized Rust workflow crates
+workflows/       # flat collection of Rust workflow crates
 openapi/
   lightflow.yaml # API contract
 LightFlowUI/     # static backend-backed editor client
@@ -73,6 +73,10 @@ crate. A package named `lightflow-text-plan` therefore owns workflow id
 `lightflow.text_plan` at the package version; workflow source does not repeat or
 override either value.
 
+`.category("text")` may be added as optional list/filter metadata. Category
+metadata does not affect the crate path: every crate still lives directly under
+`workflows/<short-name>/` (or `.lightflow/workflows/<short-name>/`).
+
 The backend parses this DSL statically from Rust ASTs; it does not execute or
 compile workflow source files.
 
@@ -104,7 +108,8 @@ git submodule update --init --recursive
 
 ```bash
 cargo run --bin lfw -- init --workflow
-cargo run --bin lfw -- new demo_echo --category demo --name "Demo Echo"
+cargo run --bin lfw -- migrate
+cargo run --bin lfw -- new demo_echo --name "Demo Echo"
 cargo run --bin lfw -- run lightflow.demo_echo --input value='"hello"'
 cargo run --bin lfw -- serve --port 5174
 ```
@@ -126,13 +131,13 @@ at `http://127.0.0.1:5174/ui`.
 ```bash
 cargo run --bin lfw -- init --workflow
 cargo run --bin lfw -- init --plugin
-cargo run --bin lfw -- new my_flow --category std --name "My Flow"
-cargo run --bin lfw -- new my_flux_sampler --category image --runtime lightflow.image.generate
-cargo run --bin lfw -- new my_global_flow --category std --global
+cargo run --bin lfw -- new my_flow --name "My Flow"
+cargo run --bin lfw -- new my_flux_sampler --runtime lightflow.image.generate
+cargo run --bin lfw -- new my_global_flow --global
 cargo run --bin lfw -- info
 cargo run --bin lfw -- home
 cargo run --bin lfw -- add lightflow-text-prompt --version 0.1.0
-cargo run --bin lfw -- add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
+cargo run --bin lfw -- add lightflow-text-prompt --path projects/lightflow-std/workflows/text_prompt --editable
 cargo run --bin lfw -- add lightflow-text-prompt --version 0.1.0 --global
 cargo run --bin lfw -- import projects/lightflow-flux --global
 cargo run --bin lfw -- list
@@ -519,7 +524,7 @@ manifest, workflow source directory, and repo cache. `LFW_PATH` uses the platfor
 path-list format, so multiple global homes or legacy workflow collections can
 be searched. `lfw` itself reads the environment variable provided by the shell;
 it does not parse `.lfwrc` as a runtime config file. The default global home is
-initialized as a Cargo workspace with `members = ["workflows/*/*"]`, so
+initialized as a Cargo workspace with `members = ["workflows/*"]`, so
 globally imported workflow crates share one dependency environment.
 
 Global installation is Cargo-backed. The default home is not a custom package
@@ -542,14 +547,14 @@ uses the same global home or `LFW_PATH`.
 
 Use `lfw add` when the target is one known Cargo package. Use `lfw import`
 when the target is a workflow repository or collection and LightFlow should
-scan `workflows/<category>/<crate>` for multiple workflow crates.
+scan `workflows/<crate>` for multiple workflow crates.
 
 Workflow dependencies are Cargo dependencies. A local standard workflow can be
 installed with:
 
 ```toml
 [dependencies]
-lightflow-text-prompt = { path = "projects/lightflow-std/workflows/std/text_prompt" }
+lightflow-text-prompt = { path = "projects/lightflow-std/workflows/text_prompt" }
 ```
 
 Registry and Git workflow crates use Cargo directly; no LightFlow package
@@ -584,10 +589,10 @@ Cargo path dependency, keeps the source tree live for edits, and marks the CLI
 result as editable:
 
 ```bash
-lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/text_prompt --editable
 ```
 
-Use an external checkout path such as `../lightflow-std/workflows/std/text_prompt`
+Use an external checkout path such as `../lightflow-std/workflows/text_prompt`
 only when the standard workflow repository is not checked out under
 `projects/`.
 
@@ -616,7 +621,7 @@ lfw import --global https://github.com/lightjunction/lightflow-flux.git
 ```
 
 The repository remains a self-contained Cargo workspace. `lfw import`
-discovers `workflows/<category>/<crate>` and records each workflow crate as a
+discovers `workflows/<crate>` and records each workflow crate as a
 path dependency in the target project or global workspace.
 
 For git URLs, `lfw import` clones the repository into the LightFlow repo cache
@@ -690,7 +695,7 @@ workflow!()
         "lightflow.text_prompt",
         "0.1.0",
         "lightflow-text-prompt",
-        "projects/lightflow-std/workflows/std/text_prompt",
+        "projects/lightflow-std/workflows/text_prompt",
     )
     .depends_on_git(
         "lightflow.text_prompt",
@@ -746,7 +751,7 @@ includes `--dry-run`.
 `--require-publishable` keeps the command non-networked but exits non-zero when
 the selected publish plan has blockers, which is useful for CI and release
 gates.
-`--workflows` scans workflow crates under `workflows/*/*` plus present linked
+`--workflows` scans workflow crates under `workflows/*` plus present linked
 workflow project workspaces under `projects/`, orders local path dependencies
 before dependents, and refuses to upload anything unless every workflow crate
 passes the static publish checks. Duplicate workflow ids are deduped in favor

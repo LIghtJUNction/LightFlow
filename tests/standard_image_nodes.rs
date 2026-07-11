@@ -19,7 +19,7 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
         ("lightflow.image_crop", "lightflow.image.crop"),
     ] {
         let workflow = service.get_workflow(workflow_id)?;
-        assert_eq!(workflow.category.as_deref(), Some("std"));
+        assert!(workflow.category.is_none());
         assert_eq!(workflow.runtimes[0].capability, capability);
         assert!(workflow.outputs.iter().any(|port| {
             port.name == "image" && port.artifact_kind.as_deref() == Some("image")

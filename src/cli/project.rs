@@ -77,7 +77,6 @@ fn init_usage() -> String {
 pub(super) struct AddWorkflowOptions {
     pub(super) workflow_id: String,
     pub(super) name: Option<String>,
-    pub(super) category: Option<String>,
     pub(super) runtime: Option<String>,
     pub(super) global: bool,
 }
@@ -85,7 +84,6 @@ pub(super) struct AddWorkflowOptions {
 pub(super) fn parse_add_workflow_options(args: &[String]) -> CliResult<AddWorkflowOptions> {
     let mut workflow_id = None;
     let mut name = None;
-    let mut category = None;
     let mut runtime = None;
     let mut global = false;
     let mut index = 0;
@@ -103,14 +101,6 @@ pub(super) fn parse_add_workflow_options(args: &[String]) -> CliResult<AddWorkfl
                     return Err(CliError::Usage("duplicate flag --name".to_owned()));
                 }
                 name = Some(required_new_flag_value(args, index)?.to_owned());
-            }
-            "--category" => {
-                if category.is_some() {
-                    return Err(CliError::Usage("duplicate flag --category".to_owned()));
-                }
-                let value = required_new_flag_value(args, index)?;
-                validate_spec_id(value, "workflow category")?;
-                category = Some(value.to_owned());
             }
             "--runtime" => {
                 if runtime.is_some() {
@@ -140,7 +130,6 @@ pub(super) fn parse_add_workflow_options(args: &[String]) -> CliResult<AddWorkfl
     Ok(AddWorkflowOptions {
         workflow_id,
         name,
-        category,
         runtime,
         global,
     })
@@ -159,10 +148,9 @@ fn required_new_flag_value(args: &[String], index: usize) -> CliResult<&str> {
 fn new_usage() -> String {
     [
         "usage:",
-        "  lfw new <workflow_id> --category <name> [--name <name>] [--runtime <capability>] [--global|-g]",
+        "  lfw new <workflow_id> [--name <name>] [--runtime <capability>] [--global|-g]",
         "",
         "Creates a workflow crate with starter source, Cargo metadata, and a colocated agent skill.",
-        "--category selects the workflows/<category>/<crate> directory and is required.",
         "--runtime selects a runtime-aware template, such as lightflow.image.generate.",
         "--global creates the workflow under the default LightFlow home workspace instead of the current project.",
     ]

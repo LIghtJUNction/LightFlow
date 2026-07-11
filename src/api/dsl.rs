@@ -126,6 +126,31 @@ mod tests {
     }
 
     #[test]
+    fn workflow_builder_parses_category_metadata() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let crate_dir = root.path().join("categorized");
+        fs::create_dir_all(crate_dir.join("src")).expect("source dir");
+        fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname = \"lightflow-categorized\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("manifest");
+        let source = crate_dir.join("src/lib.rs");
+        fs::write(
+            &source,
+            r#"pub fn define() -> WorkflowSpec {
+    workflow!().category("media").name("Categorized").build()
+}
+"#,
+        )
+        .expect("source");
+
+        let workflow = read_workflow_source(&source).expect("workflow");
+
+        assert_eq!(workflow.category.as_deref(), Some("media"));
+    }
+
+    #[test]
     fn optional_discovery_ignores_non_public_or_wrong_return_define() {
         for (name, source) in [
             (

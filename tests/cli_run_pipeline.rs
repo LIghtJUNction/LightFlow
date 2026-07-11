@@ -11,7 +11,7 @@ fn lfw_run_chains_workflows_with_pipe() -> Result<(), Box<dyn std::error::Error>
         root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = ["workflows/*"]
 
 [workspace.dependencies]
 lightflow = { path = "." }

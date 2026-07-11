@@ -1,7 +1,7 @@
 use super::*;
 
-const TEMPLATE_WORKSPACE: &str = "[workspace]\nmembers = [\".lightflow/workflows/*/*\"]\n";
-const ROOT_TEMPLATE_WORKSPACE: &str = "[workspace]\nmembers = [\"workflows/*/*\"]\n";
+const TEMPLATE_WORKSPACE: &str = "[workspace]\nmembers = [\".lightflow/workflows/*\"]\n";
+const ROOT_TEMPLATE_WORKSPACE: &str = "[workspace]\nmembers = [\"workflows/*\"]\n";
 const HOST_TEMPLATE_WORKSPACE: &str = r#"[package]
 name = "fixture-lightflow-host"
 version = "0.0.0"
@@ -14,7 +14,7 @@ path = ".lightflow/workspace.rs"
 [dependencies]
 
 [workspace]
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 "#;
 
 #[test]
@@ -69,7 +69,7 @@ fn template_workspace_with_only_lightflow_dependency_skips_metadata() {
     let root = tempfile::tempdir().expect("tempdir");
     let manifest = root.path().join("Cargo.toml");
     fs::write(&manifest, TEMPLATE_WORKSPACE).expect("manifest");
-    let workflow = root.path().join(".lightflow/workflows/tests/example");
+    let workflow = root.path().join(".lightflow/workflows/example");
     fs::create_dir_all(&workflow).expect("workflow dir");
     fs::write(
         workflow.join("Cargo.toml"),
@@ -94,7 +94,7 @@ fn root_template_workspace_with_dependency_free_workflow_skips_metadata() {
     let root = tempfile::tempdir().expect("tempdir");
     let manifest = root.path().join("Cargo.toml");
     fs::write(&manifest, ROOT_TEMPLATE_WORKSPACE).expect("manifest");
-    let workflow = root.path().join("workflows/tests/example");
+    let workflow = root.path().join("workflows/example");
     fs::create_dir_all(&workflow).expect("workflow dir");
     fs::write(
         workflow.join("Cargo.toml"),
@@ -110,7 +110,7 @@ fn template_workspace_with_extra_dependency_runs_metadata() {
     let root = tempfile::tempdir().expect("tempdir");
     let manifest = root.path().join("Cargo.toml");
     fs::write(&manifest, TEMPLATE_WORKSPACE).expect("manifest");
-    let workflow = root.path().join(".lightflow/workflows/tests/example");
+    let workflow = root.path().join(".lightflow/workflows/example");
     fs::create_dir_all(&workflow).expect("workflow dir");
     fs::write(
         workflow.join("Cargo.toml"),
@@ -126,7 +126,7 @@ fn template_workspace_with_renamed_lightflow_dependency_skips_metadata() {
     let root = tempfile::tempdir().expect("tempdir");
     let manifest = root.path().join("Cargo.toml");
     fs::write(&manifest, TEMPLATE_WORKSPACE).expect("manifest");
-    let workflow = root.path().join(".lightflow/workflows/tests/example");
+    let workflow = root.path().join(".lightflow/workflows/example");
     fs::create_dir_all(&workflow).expect("workflow dir");
     fs::write(
         workflow.join("Cargo.toml"),

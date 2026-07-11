@@ -19,7 +19,7 @@ fn cargo_path_dependency_installs_workflow_for_dependency_resolution()
         format!(
             r#"[workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}

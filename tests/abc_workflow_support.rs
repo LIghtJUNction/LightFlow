@@ -11,7 +11,7 @@ pub(crate) fn write_empty_workspace(root: &Path) -> Result<(), Box<dyn std::erro
         format!(
             r#"[workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -67,7 +67,7 @@ pub(crate) fn write_leaf_project_in_workspace(
     workflow_id: &str,
     display_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let crate_dir = root.join(".lightflow/workflows/abc").join(short_name);
+    let crate_dir = root.join(".lightflow/workflows").join(short_name);
     write_workflow_crate_at(
         &crate_dir,
         &workflow_id.replace('.', "-"),
@@ -94,8 +94,8 @@ pub(crate) fn write_a_project(
     project_c: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write_empty_workspace(root)?;
-    let b_hint = relative_path(root, &project_b.join(".lightflow/workflows/abc/b"));
-    let c_hint = relative_path(root, &project_c.join(".lightflow/workflows/abc/c"));
+    let b_hint = relative_path(root, &project_b.join(".lightflow/workflows/b"));
+    let c_hint = relative_path(root, &project_c.join(".lightflow/workflows/c"));
     let source = format!(
         r#"use lightflow::preload::*;
 
@@ -112,7 +112,7 @@ pub fn define() -> WorkflowSpec {{
 }}
 "#
     );
-    let crate_dir = root.join(".lightflow/workflows/abc/a");
+    let crate_dir = root.join(".lightflow/workflows/a");
     write_workflow_crate_at(&crate_dir, "lightflow-a", &source)?;
     write_skill(root, "a", "lightflow.a")?;
     Ok(())
@@ -218,7 +218,7 @@ fn write_skill(
     workflow_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let skill_dir = project
-        .join(".lightflow/workflows/abc")
+        .join(".lightflow/workflows")
         .join(short_name)
         .join(".agent/skills")
         .join(workflow_id.replace('.', "-"));
@@ -243,8 +243,8 @@ Run with `lfw run {workflow_id}`.
 }
 
 pub(crate) fn workflow_manifest(project: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let abc = project.join(".lightflow/workflows/abc");
-    let mut entries = fs::read_dir(abc)?
+    let workflows = project.join(".lightflow/workflows");
+    let mut entries = fs::read_dir(workflows)?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<Result<Vec<_>, _>>()?;
     entries.sort();

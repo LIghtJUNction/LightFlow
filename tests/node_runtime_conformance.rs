@@ -362,7 +362,7 @@ fn write_skill(root: &Path, workflow_id: &str) -> Result<(), Box<dyn std::error:
         .unwrap_or(workflow_id)
         .replace('.', "_");
     let skill_dir = root
-        .join(".lightflow/workflows/tests")
+        .join(".lightflow/workflows")
         .join(crate_name)
         .join(".agent/skills/test-node");
     fs::create_dir_all(&skill_dir)?;

@@ -3,7 +3,7 @@ use super::templates::{
     example_workflow_source, package_ident_from_id, package_name_from_id, title_from_id,
     workflow_skill_name,
 };
-use crate::cli::{CliError, CliResult};
+use crate::cli::CliResult;
 use files::{write_init_text, write_new_text};
 use manifests::{plugin_manifest, project_gitignore, workflow_manifest};
 use paths::{
@@ -44,29 +44,23 @@ pub(in crate::cli) fn init_workflow_project(root: &Path) -> CliResult<serde_json
     }
     write_init_text(
         &workflows.join("README.md"),
-        "# Workflows\n\nEach top-level directory is one category. Workflow crates live at `<category>/<short-name>/src/lib.rs`.\n",
+        "# Workflows\n\nEach top-level directory is one workflow crate with source at `<crate>/src/lib.rs`.\n",
         &mut created,
     )?;
     if create_example {
         let skill_name = workflow_skill_name("lightflow.example");
         write_init_text(
-            &workflow_manifest_path(root, "lightflow.example", Some("examples"), false),
+            &workflow_manifest_path(root, "lightflow.example", false),
             &workflow_manifest("lightflow.example"),
             &mut created,
         )?;
         write_init_text(
-            &workflow_source_path(root, "lightflow.example", Some("examples"), false),
+            &workflow_source_path(root, "lightflow.example", false),
             &example_workflow_source("lightflow.example", "Example Workflow", None),
             &mut created,
         )?;
         write_init_text(
-            &workflow_skill_path(
-                root,
-                "lightflow.example",
-                Some("examples"),
-                &skill_name,
-                false,
-            ),
+            &workflow_skill_path(root, "lightflow.example", &skill_name, false),
             &example_skill_source("Example Workflow", "lightflow.example", None),
             &mut created,
         )?;
@@ -130,27 +124,16 @@ pub(in crate::cli) fn add_workflow(
     root: &Path,
     workflow_id: &str,
     name: Option<&str>,
-    category: Option<&str>,
     runtime: Option<&str>,
     global: bool,
 ) -> CliResult<serde_json::Value> {
     validate_spec_id(workflow_id, "workflow id")?;
-    if let Some(category) = category {
-        validate_spec_id(category, "workflow category")?;
-    }
     let mut created = Vec::new();
     ensure_workspace_manifest(root, global, &mut created)?;
-    let category =
-        category.ok_or_else(|| CliError::Usage("lfw new requires --category <name>".to_owned()))?;
-    let manifest_path = workflow_manifest_path(root, workflow_id, Some(category), global);
-    let source_path = workflow_source_path(root, workflow_id, Some(category), global);
-    let skill_path = workflow_skill_path(
-        root,
-        workflow_id,
-        Some(category),
-        &workflow_skill_name(workflow_id),
-        global,
-    );
+    let manifest_path = workflow_manifest_path(root, workflow_id, global);
+    let source_path = workflow_source_path(root, workflow_id, global);
+    let skill_path =
+        workflow_skill_path(root, workflow_id, &workflow_skill_name(workflow_id), global);
     let template = NodeTemplate::for_runtime(runtime);
     let generated_title = title_from_id(workflow_id);
     let title = name.unwrap_or(&generated_title);
@@ -169,7 +152,7 @@ pub(in crate::cli) fn add_workflow(
         &example_skill_source(title, workflow_id, Some(&template)),
         &mut created,
     )?;
-    let test_path = workflow_crate_dir(root, workflow_id, Some(category), global)
+    let test_path = workflow_crate_dir(root, workflow_id, global)
         .join("tests")
         .join("contract.rs");
     write_new_text(
@@ -179,11 +162,10 @@ pub(in crate::cli) fn add_workflow(
     )?;
     Ok(json!({
         "workflow_id": workflow_id,
-        "category": category,
         "runtime": template.runtime,
         "example": template.example_command(workflow_id),
         "global": global,
-        "crate_dir": workflow_crate_dir(root, workflow_id, Some(category), global),
+        "crate_dir": workflow_crate_dir(root, workflow_id, global),
         "path": source_path,
         "created": created
     }))

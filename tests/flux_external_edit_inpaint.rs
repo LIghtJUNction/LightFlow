@@ -12,7 +12,7 @@ fn flux_edit_and_inpaint_use_external_runner_contracts() -> Result<(), Box<dyn s
         root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = ["workflows/*"]
 
 [workspace.dependencies]
 lightflow = { path = "." }

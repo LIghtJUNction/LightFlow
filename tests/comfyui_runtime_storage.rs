@@ -117,8 +117,6 @@ fn generated_comfy_project() -> Result<std::path::PathBuf, Box<dyn std::error::E
         [
             "new",
             "comfy_run",
-            "--category",
-            "image",
             "--runtime",
             "lightflow.comfyui.workflow",
         ],

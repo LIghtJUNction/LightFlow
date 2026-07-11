@@ -20,6 +20,12 @@ impl WorkflowBuilder {
     }
 
     #[must_use]
+    pub fn category(mut self, category: impl Into<String>) -> Self {
+        self.spec.category = Some(category.into());
+        self
+    }
+
+    #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.spec.description = Some(description.into());
         self
@@ -269,5 +275,19 @@ impl WorkflowBuilder {
 impl From<WorkflowBuilder> for WorkflowSpec {
     fn from(builder: WorkflowBuilder) -> Self {
         builder.spec
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::workflow::workflow_with_identity;
+
+    #[test]
+    fn category_sets_optional_workflow_metadata() {
+        let workflow = workflow_with_identity("lightflow.example", "0.1.0")
+            .category("media")
+            .build();
+
+        assert_eq!(workflow.category.as_deref(), Some("media"));
     }
 }

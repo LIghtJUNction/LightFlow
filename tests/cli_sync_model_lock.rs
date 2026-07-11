@@ -14,7 +14,7 @@ fn sync_apply_writes_lfw_lock_with_model_hash() -> Result<(), Box<dyn std::error
         format!(
             r#"[workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}

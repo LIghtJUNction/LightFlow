@@ -155,14 +155,14 @@ impl ApiService {
     }
 
     /// Save one workflow spec under the official project collection at
-    /// `.lightflow/workflows/<category>/<short-name>/src/lib.rs`.
+    /// `.lightflow/workflows/<crate>/src/lib.rs`.
     pub fn save_workflow(&self, workflow: WorkflowSpec) -> ApiResult<WorkflowSpec> {
         ensure_workflow_save_workspace(&self.repo_root)?;
         let validation = self.validate_workflow(&workflow);
         if !validation.valid {
             return Err(ApiError::InvalidRequest(validation.issues.join("; ")));
         }
-        let path = self.workflow_path(&workflow.id, workflow.category.as_deref())?;
+        let path = self.workflow_path(&workflow.id)?;
         let crate_dir = path
             .parent()
             .and_then(std::path::Path::parent)
@@ -172,20 +172,13 @@ impl ApiService {
         Ok(workflow)
     }
 
-    fn workflow_path(&self, workflow_id: &str, category: Option<&str>) -> ApiResult<PathBuf> {
+    fn workflow_path(&self, workflow_id: &str) -> ApiResult<PathBuf> {
         validate_id_segment(workflow_id, "workflow id")?;
         let path = self
             .repo_root
             .join(PROJECT_LIGHTFLOW_DIR)
             .join(WORKFLOW_DIR);
-        let Some(category) = category else {
-            return Err(ApiError::InvalidRequest(
-                "workflow category is required for local workflow files".to_owned(),
-            ));
-        };
-        validate_id_segment(category, "workflow category")?;
         Ok(path
-            .join(category)
             .join(workflow_crate_dir_name(workflow_id))
             .join("src")
             .join("lib.rs"))
@@ -413,7 +406,7 @@ path = ".lightflow/workspace.rs"
 
 [workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}
@@ -439,7 +432,7 @@ lightflow = {{ path = {:?} }}
             .expect("reload workflow");
         let workflow_manifest = root
             .path()
-            .join(".lightflow/workflows/tests/saved_flow/Cargo.toml");
+            .join(".lightflow/workflows/saved_flow/Cargo.toml");
         let manifest = fs::read_to_string(&workflow_manifest).expect("manifest");
         let metadata = Command::new("cargo")
             .args(["metadata", "--format-version", "1", "--no-deps"])
@@ -467,8 +460,15 @@ lightflow = {{ path = {:?} }}
 
         assert_eq!(reloaded.id, "lightflow.saved_flow");
         assert_eq!(reloaded.version, "2.3.4");
+        assert_eq!(reloaded.category.as_deref(), Some("tests"));
         assert!(manifest.contains("name = \"lightflow-saved-flow\""));
         assert!(manifest.contains("version = \"2.3.4\""));
         assert!(manifest.contains("lightflow = { workspace = true }"));
+        let source = fs::read_to_string(
+            root.path()
+                .join(".lightflow/workflows/saved_flow/src/lib.rs"),
+        )
+        .expect("workflow source");
+        assert!(source.contains(".category(\"tests\")"));
     }
 }

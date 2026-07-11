@@ -16,7 +16,7 @@ fn repository_standard_control_nodes_are_discoverable_and_runnable()
         ("lightflow.control_split", "lightflow.control.split"),
     ] {
         let workflow = service.get_workflow(workflow_id)?;
-        assert_eq!(workflow.category.as_deref(), Some("std"));
+        assert!(workflow.category.is_none());
         assert_eq!(workflow.runtimes[0].capability, capability);
     }
 

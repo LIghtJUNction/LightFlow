@@ -121,7 +121,7 @@ paths:
                 $ref: "#/components/schemas/WorkflowList"
     post:
       summary: Save a workflow
-      description: Saves the workflow as `lightflow/workflows/<workflow_id>/src/lib.rs`.
+      description: Saves the workflow as `.lightflow/workflows/<crate>/src/lib.rs`.
       requestBody:
         required: true
         content:

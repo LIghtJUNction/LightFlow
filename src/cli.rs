@@ -15,6 +15,7 @@ mod info;
 mod list;
 pub(crate) mod loop_check;
 pub mod mcp;
+mod migrate;
 mod models;
 mod node;
 mod node_conformance;
@@ -40,6 +41,7 @@ use import::{import_workflow_repo, parse_import_options};
 use info::architecture_info;
 use list::{list_workflows, parse_list_options};
 use loop_check::manage_loop;
+use migrate::{migrate_workflow_collections, parse_migrate_root};
 use models::manage_models;
 use node::manage_nodes;
 use patches::manage_patches;
@@ -154,7 +156,6 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 root,
                 &workflow_id,
                 options.name.as_deref(),
-                options.category.as_deref(),
                 options.runtime.as_deref(),
                 options.global,
             )?)?;
@@ -180,6 +181,10 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
                 (Path::new("."), cwd.join(".lightflow").join("repos"))
             };
             print_json(&import_workflow_repo(root, &repo_store_root, &options)?)?;
+        }
+        "migrate" => {
+            let root = parse_migrate_root(args)?;
+            print_json(&migrate_workflow_collections(&root)?)?;
         }
         "home" => {
             if args

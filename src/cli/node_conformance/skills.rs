@@ -1,5 +1,5 @@
 use super::NodeConformanceCheck;
-use crate::api::agent_skill_issues;
+use crate::api::{agent_skill_issues, workflow_package_identity};
 use crate::workflow::WorkflowSpec;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -73,43 +73,16 @@ fn push_skill_source_check(
 }
 
 fn workflow_skill_dir(root: &Path, workflow: &WorkflowSpec) -> Option<PathBuf> {
-    let category = workflow.category.as_deref()?;
     [
         root.join(".lightflow").join("workflows"),
         root.join("workflows"),
     ]
     .into_iter()
-    .map(|collection| {
-        collection
-            .join(category)
-            .join(workflow_crate_dir_name_for_category(
-                &workflow.id,
-                Some(category),
-            ))
+    .filter_map(|collection| fs::read_dir(collection).ok())
+    .flat_map(|entries| entries.filter_map(Result::ok).map(|entry| entry.path()))
+    .find(|crate_dir| {
+        workflow_package_identity(&crate_dir.join("Cargo.toml"))
+            .is_ok_and(|(workflow_id, _)| workflow_id == workflow.id)
     })
-    .find(|crate_dir| crate_dir.exists())
     .map(|crate_dir| crate_dir.join(".agent").join("skills"))
-}
-
-fn workflow_crate_dir_name_for_category(workflow_id: &str, category: Option<&str>) -> String {
-    let without_namespace = workflow_id
-        .strip_prefix("lightflow.")
-        .unwrap_or(workflow_id);
-    let short = category
-        .and_then(|category| without_namespace.strip_prefix(&format!("{category}_")))
-        .unwrap_or(without_namespace);
-    short.replace('.', "_")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::workflow_crate_dir_name_for_category;
-
-    #[test]
-    fn category_prefix_is_removed_from_cargo_derived_workflow_id() {
-        assert_eq!(
-            workflow_crate_dir_name_for_category("lightflow.flux_text_to_image", Some("flux")),
-            "text_to_image"
-        );
-    }
 }

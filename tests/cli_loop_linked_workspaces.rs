@@ -38,7 +38,7 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
     )?;
 
     lfw(&sibling, ["init"])?;
-    lfw(&sibling, ["new", "linked", "--category", "examples"])?;
+    lfw(&sibling, ["new", "linked"])?;
     git_ok(&sibling, ["init"])?;
     git_ok(&sibling, ["add", "."])?;
     git_ok(
@@ -58,7 +58,7 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
     fs::create_dir_all(&projects)?;
     std::os::unix::fs::symlink(&sibling, projects.join("lightflow-std"))?;
 
-    let source_path = sibling.join(".lightflow/workflows/examples/linked/src/lib.rs");
+    let source_path = sibling.join(".lightflow/workflows/linked/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// linked behavior change\n",
@@ -67,17 +67,14 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
     assert!(!missing_skill.status.success());
     let stderr = String::from_utf8_lossy(&missing_skill.stderr);
     assert!(stderr.contains("\"valid\":false"), "stderr:\n{stderr}");
+    assert!(stderr.contains("lightflow-std:linked"), "stderr:\n{stderr}");
     assert!(
-        stderr.contains("lightflow-std:examples/linked"),
-        "stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("projects/lightflow-std/.lightflow/workflows/examples/linked/src/lib.rs"),
+        stderr.contains("projects/lightflow-std/.lightflow/workflows/linked/src/lib.rs"),
         "stderr:\n{stderr}"
     );
 
-    let skill_path = sibling
-        .join(".lightflow/workflows/examples/linked/.agent/skills/lightflow-linked/SKILL.md");
+    let skill_path =
+        sibling.join(".lightflow/workflows/linked/.agent/skills/lightflow-linked/SKILL.md");
     fs::write(
         &skill_path,
         fs::read_to_string(&skill_path)? + "\nReview note: linked behavior changed.\n",
@@ -86,11 +83,11 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
     assert_eq!(paired["valid"], true);
     assert_eq!(
         paired["changed_workflows"][0]["workflow_key"],
-        "lightflow-std:examples/linked"
+        "lightflow-std:linked"
     );
     assert_eq!(
         paired["changed_workflows"][0]["workflow_paths"][0],
-        "projects/lightflow-std/.lightflow/workflows/examples/linked/src/lib.rs"
+        "projects/lightflow-std/.lightflow/workflows/linked/src/lib.rs"
     );
     assert_eq!(paired["changed_workflows"][0]["status"], "passed");
 
@@ -103,7 +100,7 @@ fn lfw_loop_changes_checks_linked_project_workspaces() -> Result<(), Box<dyn std
         "stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("projects/lightflow-std/.lightflow/workflows/examples/linked"),
+        stderr.contains("projects/lightflow-std/.lightflow/workflows/linked"),
         "stderr:\n{stderr}"
     );
     assert!(
@@ -142,7 +139,7 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
     )?;
 
     lfw(&sibling, ["init"])?;
-    lfw(&sibling, ["new", "extra", "--category", "examples"])?;
+    lfw(&sibling, ["new", "extra"])?;
     git_ok(&sibling, ["init"])?;
     git_ok(&sibling, ["add", "."])?;
     git_ok(
@@ -162,7 +159,7 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
     fs::create_dir_all(&projects)?;
     std::os::unix::fs::symlink(&sibling, projects.join("custom-workflows"))?;
 
-    let source_path = sibling.join(".lightflow/workflows/examples/extra/src/lib.rs");
+    let source_path = sibling.join(".lightflow/workflows/extra/src/lib.rs");
     fs::write(
         &source_path,
         fs::read_to_string(&source_path)? + "\n// extra linked behavior change\n",
@@ -171,11 +168,11 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
     assert!(!missing_skill.status.success());
     let stderr = String::from_utf8_lossy(&missing_skill.stderr);
     assert!(
-        stderr.contains("custom-workflows:examples/extra"),
+        stderr.contains("custom-workflows:extra"),
         "stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("projects/custom-workflows/.lightflow/workflows/examples/extra/src/lib.rs"),
+        stderr.contains("projects/custom-workflows/.lightflow/workflows/extra/src/lib.rs"),
         "stderr:\n{stderr}"
     );
     let publish_catalog = serde_json::to_value(ApiService::new(&root).workflow_publish_checks()?)?;
@@ -185,9 +182,7 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
         .iter()
         .find(|check| {
             check["manifest"].as_str().is_some_and(|manifest| {
-                manifest.contains(
-                    "projects/custom-workflows/.lightflow/workflows/examples/extra/Cargo.toml",
-                )
+                manifest.contains("projects/custom-workflows/.lightflow/workflows/extra/Cargo.toml")
             })
         })
         .expect("extra linked workflow publish check");
@@ -206,9 +201,7 @@ fn lfw_loop_changes_checks_extra_linked_project_workspaces()
         .iter()
         .find(|plan| {
             plan["manifest"].as_str().is_some_and(|manifest| {
-                manifest.contains(
-                    "projects/custom-workflows/.lightflow/workflows/examples/extra/Cargo.toml",
-                )
+                manifest.contains("projects/custom-workflows/.lightflow/workflows/extra/Cargo.toml")
             })
         })
         .expect("extra linked workflow publish plan");

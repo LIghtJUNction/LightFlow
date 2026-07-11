@@ -35,14 +35,14 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
     );
 
     let b_path = project_b
-        .join(".lightflow/workflows/abc/b")
+        .join(".lightflow/workflows/b")
         .display()
         .to_string();
     let c_path = project_c
-        .join(".lightflow/workflows/abc/c")
+        .join(".lightflow/workflows/c")
         .display()
         .to_string();
-    let c_relative_path = "../lightflow-c/.lightflow/workflows/abc/c";
+    let c_relative_path = "../lightflow-c/.lightflow/workflows/c";
     let editable_b = lfw(
         &project_a,
         [
@@ -68,7 +68,7 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
     let manifest = fs::read_to_string(project_a.join("Cargo.toml"))?;
     assert!(manifest.contains(&format!("lightflow-b = {{ path = \"{b_path}\" }}")));
     assert!(
-        manifest.contains("lightflow-c = { path = \"../lightflow-c/.lightflow/workflows/abc/c\" }")
+        manifest.contains("lightflow-c = { path = \"../lightflow-c/.lightflow/workflows/c\" }")
     );
     assert!(!manifest.contains("editable"));
 
@@ -194,7 +194,7 @@ fn abc_workflow_projects_resolve_import_run_and_add_modes() -> Result<(), Box<dy
     assert!(
         git_imported_paths
             .iter()
-            .all(|path| path.contains(".lightflow/repos/abc-import/.lightflow/workflows/abc/")),
+            .all(|path| path.contains(".lightflow/repos/abc-import/.lightflow/workflows/")),
         "git import paths should use the local repo cache: {git_imported_paths:?}"
     );
     assert!(

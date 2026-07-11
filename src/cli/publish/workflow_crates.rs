@@ -27,7 +27,7 @@ pub(super) fn publish_workflow_crates(
     if manifests.is_empty() {
         let message = match project {
             Some(project) => format!("no workflow crates found for project workspace: {project}"),
-            None => "no workflow crates found under workflows/*/*".to_owned(),
+            None => "no workflow crates found under workflows/*".to_owned(),
         };
         return Err(CliError::Usage(message));
     }

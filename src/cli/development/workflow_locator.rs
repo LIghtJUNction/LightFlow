@@ -60,22 +60,13 @@ fn preferred_project_names(workflow_id: &str) -> Vec<String> {
 
 fn workflow_crates_in_collection(collection: &Path) -> CliResult<Vec<PathBuf>> {
     let mut crates = Vec::new();
-    for category_path in read_sorted_dirs(collection)? {
-        if !category_path.is_dir() {
+    for crate_dir in read_sorted_dirs(collection)? {
+        if !crate_dir.is_dir() {
             continue;
         }
-        if category_path.join("Cargo.toml").is_file()
-            && category_path.join("src").join("lib.rs").is_file()
+        if crate_dir.join("Cargo.toml").is_file() && crate_dir.join("src").join("lib.rs").is_file()
         {
-            crates.push(category_path);
-            continue;
-        }
-        for crate_dir in read_sorted_dirs(&category_path)? {
-            if crate_dir.join("Cargo.toml").is_file()
-                && crate_dir.join("src").join("lib.rs").is_file()
-            {
-                crates.push(crate_dir);
-            }
+            crates.push(crate_dir);
         }
     }
     crates.sort();

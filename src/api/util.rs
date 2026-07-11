@@ -120,13 +120,6 @@ pub(super) fn validate_id_segment(value: &str, label: &str) -> ApiResult<()> {
     Ok(())
 }
 
-pub(super) fn path_file_name(path: &Path, label: &str) -> ApiResult<String> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_owned)
-        .ok_or_else(|| ApiError::InvalidRequest(format!("{label} path has no file name: {path:?}")))
-}
-
 pub(super) fn workflow_crate_dir_name(workflow_id: &str) -> String {
     workflow_id
         .strip_prefix("lightflow.")

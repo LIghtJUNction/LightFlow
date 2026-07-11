@@ -45,22 +45,13 @@ fn collect_workflow_collection_agent_skills(
     collection: &Path,
     skills: &mut BTreeMap<String, AgentSkillCandidate>,
 ) -> CliResult<()> {
-    let Ok(categories) = fs::read_dir(collection) else {
+    let Ok(workflows) = fs::read_dir(collection) else {
         return Ok(());
     };
-    for category in categories {
-        let category = category?.path();
-        if !category.is_dir() {
-            continue;
-        }
-        let Ok(workflows) = fs::read_dir(&category) else {
-            continue;
-        };
-        for workflow in workflows {
-            let workflow = workflow?.path();
-            if workflow.is_dir() {
-                collect_agent_skills_from(&workflow.join(".agent").join("skills"), skills)?;
-            }
+    for workflow in workflows {
+        let workflow = workflow?.path();
+        if workflow.is_dir() {
+            collect_agent_skills_from(&workflow.join(".agent").join("skills"), skills)?;
         }
     }
     Ok(())

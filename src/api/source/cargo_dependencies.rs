@@ -62,13 +62,13 @@ fn discover_metadata_workflows(
         else {
             continue;
         };
-        workflow.category = Some(
+        workflow.category.get_or_insert_with(|| {
             package
                 .manifest_path
                 .parent()
                 .and_then(dependency_category)
-                .unwrap_or_else(|| "extensions".to_owned()),
-        );
+                .unwrap_or_else(|| "extensions".to_owned())
+        });
         if visited_libs.insert(lib) {
             workflows.push(workflow);
         }

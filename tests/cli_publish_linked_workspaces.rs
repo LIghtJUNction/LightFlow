@@ -23,8 +23,8 @@ fn lfw_publish_workflows_dedupes_linked_workspace_duplicates()
 
     lfw(&root, ["init"])?;
     lfw(&sibling, ["init"])?;
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
-    complete_generated_workflow_metadata(&sibling, "examples", "example")?;
+    complete_generated_workflow_metadata(&root, "example")?;
+    complete_generated_workflow_metadata(&sibling, "example")?;
 
     let projects = root.join("projects");
     fs::create_dir_all(&projects)?;

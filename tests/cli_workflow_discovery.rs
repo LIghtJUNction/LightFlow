@@ -69,14 +69,18 @@ fn cli_reads_rust_workflows_and_resolves_dependencies() -> Result<(), Box<dyn st
     let categories = lfw(&root, ["list", "--categories"])?;
     assert_eq!(
         categories["categories"],
-        serde_json::json!([{ "category": "tests", "workflows": 3 }])
+        serde_json::json!([
+            { "category": "tests", "workflows": 1 },
+            { "category": "uncategorized", "workflows": 2 }
+        ])
     );
     let filtered = lfw(&root, ["list", "--category", "tests"])?;
-    assert_eq!(filtered["workflows"].as_array().unwrap().len(), 3);
+    assert_eq!(filtered["workflows"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["workflows"][0]["id"], "lightflow.child");
 
     let detail = lfw(&root, ["ls", "--detail"])?;
     assert_eq!(detail["workflows"][1]["id"], "lightflow.parent");
-    assert_eq!(detail["workflows"][1]["category"], "tests");
+    assert!(detail["workflows"][1]["category"].is_null());
     assert_eq!(detail["workflows"][1]["nodes"][0]["id"], "nested");
     assert_eq!(detail["workflows"][1]["edges"][0]["from"]["node"], "nested");
 
@@ -87,7 +91,10 @@ fn cli_reads_rust_workflows_and_resolves_dependencies() -> Result<(), Box<dyn st
     assert_eq!(info["workflows"]["composite"], 1);
     assert_eq!(
         info["workflows"]["categories"],
-        serde_json::json!([{ "category": "tests", "workflows": 3 }])
+        serde_json::json!([
+            { "category": "tests", "workflows": 1 },
+            { "category": "uncategorized", "workflows": 2 }
+        ])
     );
     assert!(
         info["executors"]

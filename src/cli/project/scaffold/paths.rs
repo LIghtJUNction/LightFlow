@@ -19,20 +19,12 @@ pub(super) fn plugin_title(root: &Path) -> String {
     )
 }
 
-pub(super) fn workflow_crate_dir(
-    root: &Path,
-    workflow_id: &str,
-    category: Option<&str>,
-    global: bool,
-) -> PathBuf {
-    let mut path = if global {
+pub(super) fn workflow_crate_dir(root: &Path, workflow_id: &str, global: bool) -> PathBuf {
+    let path = if global {
         root.join("workflows")
     } else {
         project_workflow_dir(root)
     };
-    if let Some(category) = category {
-        path = path.join(category);
-    }
     path.join(workflow_crate_dir_name(workflow_id))
 }
 
@@ -47,22 +39,12 @@ pub(in crate::cli) fn workflow_crate_dir_name(workflow_id: &str) -> String {
         .replace('.', "_")
 }
 
-pub(super) fn workflow_manifest_path(
-    root: &Path,
-    workflow_id: &str,
-    category: Option<&str>,
-    global: bool,
-) -> PathBuf {
-    workflow_crate_dir(root, workflow_id, category, global).join("Cargo.toml")
+pub(super) fn workflow_manifest_path(root: &Path, workflow_id: &str, global: bool) -> PathBuf {
+    workflow_crate_dir(root, workflow_id, global).join("Cargo.toml")
 }
 
-pub(super) fn workflow_source_path(
-    root: &Path,
-    workflow_id: &str,
-    category: Option<&str>,
-    global: bool,
-) -> PathBuf {
-    workflow_crate_dir(root, workflow_id, category, global)
+pub(super) fn workflow_source_path(root: &Path, workflow_id: &str, global: bool) -> PathBuf {
+    workflow_crate_dir(root, workflow_id, global)
         .join("src")
         .join("lib.rs")
 }
@@ -70,11 +52,10 @@ pub(super) fn workflow_source_path(
 pub(super) fn workflow_skill_path(
     root: &Path,
     workflow_id: &str,
-    category: Option<&str>,
     skill_name: &str,
     global: bool,
 ) -> PathBuf {
-    workflow_crate_dir(root, workflow_id, category, global)
+    workflow_crate_dir(root, workflow_id, global)
         .join(".agent")
         .join("skills")
         .join(skill_name)

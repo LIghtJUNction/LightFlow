@@ -20,7 +20,7 @@ fn write_rig_workflow(root: &std::path::Path) -> Result<(), Box<dyn std::error::
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = ["workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?}, features = ["rig"] }}
@@ -143,7 +143,7 @@ fn rig_llm_runtime_requires_rig_feature() -> Result<(), Box<dyn std::error::Erro
         format!(
             r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = ["workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}

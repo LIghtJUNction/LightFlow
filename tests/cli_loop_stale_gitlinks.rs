@@ -21,7 +21,7 @@ fn lfw_loop_projects_reports_stale_parent_gitlinks() -> Result<(), Box<dyn std::
     fs::write(root.join("README.md"), "# core\n")?;
 
     lfw(&std, ["init"])?;
-    complete_generated_workflow_metadata(&std, "examples", "example")?;
+    complete_generated_workflow_metadata(&std, "example")?;
     git_ok(&std, ["init"])?;
     git_ok(&std, ["add", "."])?;
     git_ok(

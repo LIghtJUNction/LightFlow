@@ -8,12 +8,7 @@ fn publish_catalog_resolves_project_workspace_dependencies_and_filters_duplicate
 -> Result<(), Box<dyn std::error::Error>> {
     let root = temp_root();
     fs::create_dir_all(&root)?;
-    write_publishable_workflow(
-        &root,
-        "workflows/std/app",
-        "lightflow.shared_app",
-        "shared-app",
-    )?;
+    write_publishable_workflow(&root, "workflows/app", "lightflow.shared_app", "shared-app")?;
 
     let project_root = root.join("projects/lightflow-std");
     fs::create_dir_all(&project_root)?;
@@ -21,21 +16,21 @@ fn publish_catalog_resolves_project_workspace_dependencies_and_filters_duplicate
         project_root.join("Cargo.toml"),
         r#"
 [workspace]
-members = ["workflows/std/base", "workflows/std/app"]
+members = ["workflows/base", "workflows/app"]
 
 [workspace.dependencies]
-project-base = { path = "workflows/std/base", version = "0.1.0" }
+project-base = { path = "workflows/base", version = "0.1.0" }
 "#,
     )?;
     write_publishable_workflow(
         &project_root,
-        "workflows/std/base",
+        "workflows/base",
         "lightflow.project_base",
         "project-base",
     )?;
     write_publishable_workflow_with_dependencies(
         &project_root,
-        "workflows/std/app",
+        "workflows/app",
         "lightflow.shared_app",
         "shared-app",
         "[dependencies]\nproject-base = { workspace = true }\n",
@@ -120,7 +115,7 @@ fn scoped_publish_catalog_ignores_unselected_manifest_errors()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = temp_root();
     fs::create_dir_all(&root)?;
-    let broken_root_crate = root.join("workflows/std/broken");
+    let broken_root_crate = root.join("workflows/broken");
     fs::create_dir_all(broken_root_crate.join("src"))?;
     fs::write(broken_root_crate.join("src/lib.rs"), "pub fn define() {}")?;
     fs::write(broken_root_crate.join("Cargo.toml"), "[package")?;
@@ -129,7 +124,7 @@ fn scoped_publish_catalog_ignores_unselected_manifest_errors()
     fs::create_dir_all(&project_root)?;
     write_publishable_workflow(
         &project_root,
-        "workflows/std/app",
+        "workflows/app",
         "lightflow.project_app",
         "project-app",
     )?;

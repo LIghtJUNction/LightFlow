@@ -83,18 +83,6 @@ fn discover_workflow_manifests(
                 workspace_root: workspace_root.to_path_buf(),
                 project_name: project_name.clone(),
             });
-            continue;
-        }
-        for child in sorted_dir_entries(&path)? {
-            let crate_dir = child.path();
-            if crate_dir.is_dir() && is_workflow_crate_dir(&crate_dir) {
-                manifests.push(WorkflowManifestRef {
-                    path: crate_dir.join("Cargo.toml"),
-                    workspace: workspace.to_owned(),
-                    workspace_root: workspace_root.to_path_buf(),
-                    project_name: project_name.clone(),
-                });
-            }
         }
     }
     manifests.sort_by(|left, right| left.path.cmp(&right.path));

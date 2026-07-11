@@ -117,8 +117,7 @@ pub fn define() -> WorkflowSpec {
 }
 "#,
     )?;
-    let xdg_skill_dir =
-        xdg_data_workflows.join("local/xdg_default/.agent/skills/lightflow-xdg-default");
+    let xdg_skill_dir = xdg_data_workflows.join("xdg_default/.agent/skills/lightflow-xdg-default");
     fs::create_dir_all(&xdg_skill_dir)?;
     fs::write(
         xdg_skill_dir.join("SKILL.md"),

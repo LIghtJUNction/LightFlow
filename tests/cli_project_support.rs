@@ -62,12 +62,10 @@ pub fn git_output<const N: usize>(
 
 pub fn complete_generated_workflow_metadata(
     root: &Path,
-    category: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = root
         .join(".lightflow/workflows")
-        .join(category)
         .join(name)
         .join("src/lib.rs");
     let source = fs::read_to_string(&path)?

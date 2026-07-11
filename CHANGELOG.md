@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+## 0.1.4 - 2026-07-11
+
 ### CLI
 
+- Flatten project, global, imported, and linked workflow collections to
+  `workflows/<crate>` and remove the required `lfw new --category` argument.
+- Add `lfw migrate [path]` with collision preflight, precise Cargo workspace
+  member updates, rollback on failure, and idempotent legacy-layout migration.
 - Validate run ids used by `lfw trace`, `lfw runs get`, `lfw runs rm`,
   `lfw replay`, and `lfw batch resume` as single path segments.
 - Validate `lfw batch run --run-id` before writing batch state.
@@ -13,6 +19,8 @@
 
 ### API
 
+- Persist optional workflow categories as DSL metadata so category filtering is
+  independent from the on-disk crate layout.
 - Reject workflow execution when recursive dependency validation reports missing
   workflows, dependency cycles, or version mismatches.
 - Return structured HTTP error objects with `error`, `code`, `message`, and

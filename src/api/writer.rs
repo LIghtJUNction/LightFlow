@@ -65,6 +65,9 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
     source.push_str("pub fn define() -> WorkflowSpec {\n");
     source.push_str("    workflow!()\n");
     source.push_str(&format!("        .name({})\n", rust_string(&workflow.name)));
+    if let Some(category) = &workflow.category {
+        source.push_str(&format!("        .category({})\n", rust_string(category)));
+    }
     if let Some(description) = &workflow.description {
         source.push_str(&format!(
             "        .description({})\n",

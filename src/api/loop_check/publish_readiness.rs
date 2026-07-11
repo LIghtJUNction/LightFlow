@@ -192,18 +192,18 @@ mod tests {
         let root = Path::new("/repo");
 
         assert_eq!(
-            publish_workspace_label(root, &root.join("workflows/text/plan/Cargo.toml")),
+            publish_workspace_label(root, &root.join("workflows/plan/Cargo.toml")),
             "root"
         );
         assert_eq!(
             publish_workspace_label(
                 root,
-                &root.join("projects/lightflow-std/workflows/std/text_prompt/Cargo.toml"),
+                &root.join("projects/lightflow-std/workflows/text_prompt/Cargo.toml"),
             ),
             "projects/lightflow-std"
         );
         assert_eq!(
-            publish_workspace_label(root, Path::new("/other/workflows/text/plan/Cargo.toml")),
+            publish_workspace_label(root, Path::new("/other/workflows/plan/Cargo.toml")),
             "external"
         );
     }

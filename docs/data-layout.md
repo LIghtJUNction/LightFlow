@@ -7,12 +7,15 @@ LightFlow project workflow files are ordinary source-controlled files under
 ```text
 .lightflow/
   workflows/
-    <category>/
-      <short-name>/
-        Cargo.toml
-        src/
-          lib.rs
+    <short-name>/
+      Cargo.toml
+      src/
+        lib.rs
 ```
+
+Legacy two-level collections are not discovered implicitly. Run `lfw migrate`
+at their repository root to move `<category>/<crate>` entries to `<crate>` and
+update known Cargo workspace member globs after a full conflict preflight.
 
 The core repository Cargo workspace contains only the backend crate and core
 support crates that ship with it:
@@ -255,20 +258,19 @@ A LightFlow home is a normal Cargo workspace:
   Cargo.toml
   repos/
   workflows/
-    <category>/
-      <short-name>/
-        Cargo.toml
-        src/
-          lib.rs
+    <short-name>/
+      Cargo.toml
+      src/
+        lib.rs
 ```
 
 The default home at `~/.lightflow` is initialized as a Cargo workspace root.
-Its generated manifest uses `members = ["workflows/*/*"]`.
+Its generated manifest uses `members = ["workflows/*"]`.
 This gives globally imported workflows one shared dependency environment,
 analogous to a small language-specific environment for LightFlow workflows.
 `lfw home` prints this root, its `Cargo.toml`, the workflow source directory,
 and the repo cache. `lfw new --global` creates workflow crates under
-`workflows/<category>/<short-name>`, and `lfw add --global` writes dependencies
+`workflows/<short-name>`, and `lfw add --global` writes dependencies
 to the home `Cargo.toml`. The backend scans this global workspace manifest for
 Cargo `path` dependencies, so global CLI-installed path workflows are available
 through normal workflow lookup. `lfw update --global` runs `cargo fetch` in this
@@ -280,7 +282,7 @@ There is no separate LightFlow package database. The global home is a Cargo
 workspace, and global installation means adding workspace members or Cargo
 dependencies to that workspace. `lfw add` targets one known Cargo package;
 `lfw import` targets a workflow repository or collection, discovers
-`workflows/<category>/<crate>` entries, and adds each discovered workflow crate
+`workflows/<crate>` entries, and adds each discovered workflow crate
 as a Cargo path dependency.
 
 The directory name is a short slug, not the full workflow id. For example,
@@ -579,7 +581,7 @@ readiness, project workspace catalog, and selected-workflow or project-scoped
 release readiness templates.
 
 Standard workflow nodes live in the `lightflow-std` workflow project under
-`projects/lightflow-std/workflows/std/<short-name>` when that sibling project is
+`projects/lightflow-std/workflows/<short-name>` when that sibling project is
 checked out as part of the local project set. The core repository discovers
 project workflow sources listed in `projects/lightflow-projects.toml`
 `[workflows].default_sources`; this repo keeps `lightflow-std` there so
@@ -635,12 +637,12 @@ import plugin or workflow crates.
 ## Imported Workflow Dependencies
 
 A workflow can be installed as a Cargo dependency. The backend scans local
-workflow crates under `workflows/<category>/<short-name>/` and also
+workflow crates under `workflows/<short-name>/` and also
 scans `path` dependencies declared in the project `Cargo.toml`:
 
 ```toml
 [dependencies]
-lightflow-text-prompt = { path = "projects/lightflow-std/workflows/std/text_prompt" }
+lightflow-text-prompt = { path = "projects/lightflow-std/workflows/text_prompt" }
 ```
 
 If the dependency target contains `src/lib.rs` with `pub fn define() ->
@@ -659,8 +661,8 @@ lightflow-text-prompt = { git = "https://github.com/lightjunction/lightflow-std"
 
 ```bash
 lfw add lightflow-text-prompt --version 0.1.0
-lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt
-lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/text_prompt
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/text_prompt --editable
 lfw add lightflow-text-prompt --git https://github.com/lightjunction/lightflow-std --package lightflow-text-prompt
 lfw add lightflow-text-prompt --version 0.1.0 --global
 ```
@@ -674,7 +676,7 @@ lfw import --global /path/to/lightflow-flux
 lfw import --global https://github.com/lightjunction/lightflow-flux.git
 ```
 
-`lfw import` discovers `workflows/<category>/<crate>` entries and records each
+`lfw import` discovers `workflows/<crate>` entries and records each
 workflow crate as a Cargo path dependency in the target project or global
 workspace. Git sources are cloned into LightFlow's managed repo store first,
 then installed from that clone. The original workflow repository remains the
@@ -707,7 +709,7 @@ workflow!()
         "lightflow.local_std",
         "0.1.0",
         "lightflow-text-prompt",
-        "projects/lightflow-std/workflows/std/text_prompt",
+        "projects/lightflow-std/workflows/text_prompt",
     )
     .depends_on_git(
         "lightflow.remote_std",

@@ -24,8 +24,6 @@ fn lfw_new_comfyui_runtime_generates_api_workflow_contract()
         [
             "new",
             "comfy_run",
-            "--category",
-            "image",
             "--name",
             "Comfy Run",
             "--runtime",
@@ -34,7 +32,7 @@ fn lfw_new_comfyui_runtime_generates_api_workflow_contract()
     )?;
 
     assert_eq!(created["runtime"], "lightflow.comfyui.workflow");
-    let workflow_root = root.join(".lightflow/workflows/image/comfy_run");
+    let workflow_root = root.join(".lightflow/workflows/comfy_run");
     let source = fs::read_to_string(workflow_root.join("src/lib.rs"))?;
     assert!(source.contains(
         ".builtin_runtime(\"comfyui_runtime\", \"lightflow.comfyui.workflow\", \"comfyui.api.v1\")"
@@ -404,8 +402,6 @@ fn generated_comfy_project() -> Result<std::path::PathBuf, Box<dyn std::error::E
         [
             "new",
             "comfy_run",
-            "--category",
-            "image",
             "--name",
             "Comfy Run",
             "--runtime",

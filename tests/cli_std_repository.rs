@@ -20,8 +20,8 @@ fn repository_standard_workflow_is_library_only() -> Result<(), Box<dyn std::err
     assert!(workflow.nodes.is_empty());
     assert!(workflow.edges.is_empty());
 
-    assert_eq!(workflow.category.as_deref(), Some("std"));
-    let crate_dir = root.join("projects/lightflow-std/workflows/std/text_prompt");
+    assert!(workflow.category.is_none());
+    let crate_dir = root.join("projects/lightflow-std/workflows/text_prompt");
     assert!(crate_dir.join("src/lib.rs").exists());
     assert!(!crate_dir.join("src/main.rs").exists());
 
@@ -40,12 +40,11 @@ fn repository_std_project_workflows_are_discovered_by_default()
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let service = ApiService::new(root);
 
-    assert_eq!(
+    assert!(
         service
             .get_workflow("lightflow.text_prompt")?
             .category
-            .as_deref(),
-        Some("std")
+            .is_none()
     );
     assert!(service.get_workflow("lightflow.text_template").is_ok());
 

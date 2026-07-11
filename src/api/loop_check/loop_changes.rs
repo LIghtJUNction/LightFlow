@@ -196,23 +196,22 @@ pub(super) fn classify_workflow_change(
         let name = path.file_stem()?.to_str()?;
         return Some((format!("patch:{name}"), WorkflowChangeKind::Patch));
     }
-    let workflows_index = parts.iter().position(|part| *part == "workflows")?;
-    let first = parts.get(workflows_index + 1)?;
-    let second = parts.get(workflows_index + 2)?;
-    let collection = if workflows_index > 0 && parts.get(workflows_index - 1) == Some(&".lightflow")
-    {
-        root.join(".lightflow").join("workflows")
-    } else {
-        root.join("workflows")
+    let (workflows_index, collection) = match parts.as_slice() {
+        ["workflows", ..] => (0, root.join("workflows")),
+        [".lightflow", "workflows", ..] => (1, root.join(".lightflow/workflows")),
+        _ => return None,
     };
-    let direct_crate_manifest = collection.join(first).join("Cargo.toml").is_file();
-    let (workflow_key, relative_start) =
-        if direct_crate_manifest || is_direct_workflow_entry(second) {
-            ((*first).to_owned(), workflows_index + 2)
-        } else {
-            (format!("{first}/{second}"), workflows_index + 3)
-        };
+    let first = parts.get(workflows_index + 1)?;
+    let relative_start = workflows_index + 2;
     let relative = &parts[relative_start..];
+    let crate_dir = collection.join(first);
+    let complete_crate =
+        crate_dir.join("Cargo.toml").is_file() && crate_dir.join("src/lib.rs").is_file();
+    let crate_deletion_marker = matches!(relative, ["Cargo.toml"] | ["src", "lib.rs"]);
+    if !complete_crate && !crate_deletion_marker {
+        return None;
+    }
+    let workflow_key = (*first).to_owned();
     if relative.first() == Some(&".agent")
         && relative.get(1) == Some(&"skills")
         && relative.last() == Some(&"SKILL.md")
@@ -223,22 +222,4 @@ pub(super) fn classify_workflow_change(
         return None;
     }
     Some((workflow_key, WorkflowChangeKind::Workflow))
-}
-
-fn is_direct_workflow_entry(entry: &str) -> bool {
-    matches!(
-        entry,
-        ".agent"
-            | "src"
-            | "tests"
-            | "Cargo.toml"
-            | "Cargo.lock"
-            | "build.rs"
-            | "README"
-            | "README.md"
-            | "LICENSE"
-            | "LICENSE.md"
-            | "LICENSE-APACHE"
-            | "LICENSE-MIT"
-    )
 }

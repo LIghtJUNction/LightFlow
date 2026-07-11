@@ -28,7 +28,7 @@ fn lfw_release_check_dry_run_reports_local_loop_warnings() -> Result<(), Box<dyn
     )?;
     lfw(&root, ["init"])?;
     use_local_lightflow_dependency(&root)?;
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
+    complete_generated_workflow_metadata(&root, "example")?;
     git_ok(&root, ["init"])?;
     git_ok(&root, ["add", "."])?;
     git_ok(

@@ -34,9 +34,9 @@ pub(super) fn read_path_dependency_workflows(
                 continue;
             }
             if let Some(mut workflow) = read_optional_workflow_source(&lib)? {
-                workflow.category = Some(
-                    dependency_category(&dependency_dir).unwrap_or_else(|| "extensions".to_owned()),
-                );
+                workflow.category.get_or_insert_with(|| {
+                    dependency_category(&dependency_dir).unwrap_or_else(|| "extensions".to_owned())
+                });
                 workflows.push(workflow);
             }
         }

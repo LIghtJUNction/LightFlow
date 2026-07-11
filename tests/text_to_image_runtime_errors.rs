@@ -104,7 +104,7 @@ fn flux_runtime_rejects_missing_locked_model_before_runner()
         root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = ["workflows/*"]
 
 [workspace.dependencies]
 lightflow = { path = "." }

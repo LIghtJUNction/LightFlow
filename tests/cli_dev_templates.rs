@@ -18,13 +18,11 @@ fn lfw_loop_check_rejects_unusable_workflow_agent_skills() -> Result<(), Box<dyn
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
     lfw(&root, ["init"])?;
-    lfw(&root, ["new", "weak_skill", "--category", "examples"])?;
-    complete_generated_workflow_metadata(&root, "examples", "example")?;
-    complete_generated_workflow_metadata(&root, "examples", "weak_skill")?;
+    lfw(&root, ["new", "weak_skill"])?;
+    complete_generated_workflow_metadata(&root, "example")?;
+    complete_generated_workflow_metadata(&root, "weak_skill")?;
     fs::write(
-        root.join(
-            ".lightflow/workflows/examples/weak_skill/.agent/skills/lightflow-weak-skill/SKILL.md",
-        ),
+        root.join(".lightflow/workflows/weak_skill/.agent/skills/lightflow-weak-skill/SKILL.md"),
         "# Weak skill\n\nThis file exists but does not describe how to run the workflow.\n",
     )?;
 
@@ -91,7 +89,7 @@ fn lfw_dev_skill_template_writes_without_accidental_overwrite()
     use_local_lightflow_dependency(&root)?;
 
     let skill_path =
-        root.join(".lightflow/workflows/examples/example/.agent/skills/lightflow-example/SKILL.md");
+        root.join(".lightflow/workflows/example/.agent/skills/lightflow-example/SKILL.md");
     fs::remove_file(&skill_path)?;
     let written = lfw(
         &root,
@@ -167,7 +165,7 @@ pub fn define() -> WorkflowSpec {
         [("LFW_PATH", lfw_path.as_str())],
     )?;
     let skill_path =
-        project.join("workflows/local/flux_sample/.agent/skills/lightflow-flux-sample/SKILL.md");
+        project.join("workflows/flux_sample/.agent/skills/lightflow-flux-sample/SKILL.md");
     assert_eq!(written["written"], true);
     assert_eq!(written["path"], skill_path.to_string_lossy().as_ref());
     let source = fs::read_to_string(&skill_path)?;

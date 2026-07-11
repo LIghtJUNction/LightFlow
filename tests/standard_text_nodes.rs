@@ -11,7 +11,7 @@ fn repository_standard_text_nodes_are_discoverable_and_runnable()
     let service = ApiService::new(root);
 
     let concat = service.get_workflow("lightflow.text_concat")?;
-    assert_eq!(concat.category.as_deref(), Some("std"));
+    assert!(concat.category.is_none());
     assert_eq!(concat.runtimes[0].capability, "lightflow.text.concat");
     assert_eq!(
         concat

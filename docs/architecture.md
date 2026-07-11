@@ -28,7 +28,7 @@ what would otherwise become a component.
 ## Workflow Crates
 
 Workflows are source-controlled Rust library crates under
-`workflows/<category>/<short-name>/`. Reusable workflows define
+`workflows/<short-name>/`. Reusable workflows define
 `src/lib.rs` and do not define `src/main.rs`.
 Metadata and graph structure live in the library entrypoint:
 
@@ -44,6 +44,10 @@ pub fn define() -> WorkflowSpec {
 }
 ```
 
+Workflows may declare an optional `.category("example")` for listing and
+filtering. It is metadata only; it never introduces another filesystem level or
+changes the flat `workflows/<short-name>/` crate path.
+
 The `workflow!()` macro injects the calling crate's Cargo package name and
 version. Static discovery applies the same mapping from the adjacent
 `Cargo.toml`, so compiled and source-parsed identities cannot drift.
@@ -53,7 +57,8 @@ does not compile or execute workflow files.
 
 Workflow crates are reusable libraries by default. `lfw init --workflow`
 creates the collection project, and `lfw new` creates one workflow crate inside
-a required category.
+the flat workflow collection. Category is optional workflow metadata and never
+changes the crate path.
 
 Core SDK support crates are different from workflow crates. `lightflow-macros`
 is a root Cargo workspace member because it provides procedural macros for the
@@ -317,8 +322,8 @@ Domain-specific sibling projects such as `lightflow-flux` and `lightflow-rig`
 are discovered when they are added through `LFW_PATH`, `lfw import`, explicit
 workflow search paths, or the configured default source list.
 
-Local workflow collections are organized as one category level plus one crate
-level, such as `std/text_plan`. Project workflows and the baseline std project
+Local workflow collections contain workflow crates directly, such as
+`workflows/text_plan`. Project workflows and the baseline std project
 are loaded before global `LFW_PATH` workflows, and Cargo dependency workflows
 are scanned after both. This keeps project-local definitions authoritative
 while still allowing global and dependency-provided workflows.

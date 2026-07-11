@@ -27,7 +27,7 @@ fn repository_standard_model_diffusion_and_llm_nodes_are_runnable()
         ),
     ] {
         let workflow = service.get_workflow(workflow_id)?;
-        assert_eq!(workflow.category.as_deref(), Some("std"));
+        assert!(workflow.category.is_none());
         assert_eq!(workflow.runtimes[0].capability, capability);
     }
 

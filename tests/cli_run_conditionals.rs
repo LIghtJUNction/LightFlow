@@ -11,7 +11,7 @@ fn lfw_run_executes_if_node_selected_branch() -> Result<(), Box<dyn std::error::
         root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "3"
-members = ["workflows/*/*"]
+members = ["workflows/*"]
 
 [workspace.dependencies]
 lightflow = { path = "." }

@@ -360,8 +360,6 @@ fn generated_comfy_project() -> Result<PathBuf, Box<dyn std::error::Error>> {
         [
             "new",
             "comfy_run",
-            "--category",
-            "image",
             "--runtime",
             "lightflow.comfyui.workflow",
         ],

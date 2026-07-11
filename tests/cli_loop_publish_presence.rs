@@ -38,7 +38,7 @@ fn lfw_loop_check_uses_project_workspaces_for_publish_crate_presence()
         ],
     )?;
     lfw(&std, ["init"])?;
-    complete_generated_workflow_metadata(&std, "examples", "example")?;
+    complete_generated_workflow_metadata(&std, "example")?;
     git_ok(&std, ["init"])?;
     git_ok(&std, ["add", "."])?;
     git_ok(

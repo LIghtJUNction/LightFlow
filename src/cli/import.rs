@@ -87,7 +87,7 @@ fn import_usage() -> String {
         "usage:",
         "  lfw import <path-or-git-url> [--git] [--name <name>] [--global|-g]",
         "",
-        "Imports a workflow repository or collection by scanning workflows/<category>/<crate> for workflow crates.",
+        "Imports a workflow repository or collection by scanning workflows/<crate> for workflow crates.",
         "Use lfw add when the target is one known Cargo package.",
         "Path imports record editable local path dependencies.",
         "Git imports clone into the LightFlow repo cache, then record path dependencies to discovered workflow crates.",
@@ -137,7 +137,6 @@ pub(super) fn import_workflow_repo(
         )?;
         imported.push(json!({
             "package": workflow_crate.package,
-            "category": workflow_crate.category,
             "path": path,
             "dependency": dependency,
         }));
@@ -154,7 +153,6 @@ pub(super) fn import_workflow_repo(
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct WorkflowCrate {
-    category: String,
     package: String,
     path: PathBuf,
 }
@@ -169,33 +167,21 @@ fn discover_workflow_crates(root: &Path) -> CliResult<Vec<WorkflowCrate>> {
         root.to_path_buf()
     };
     let mut crates = Vec::new();
-    let Ok(categories) = fs::read_dir(&collection) else {
+    let Ok(entries) = fs::read_dir(&collection) else {
         return Ok(crates);
     };
-    for category in categories {
-        let category = category?;
-        let category_path = category.path();
-        if !category_path.is_dir() {
+    for entry in entries {
+        let crate_path = entry?.path();
+        if !crate_path.is_dir()
+            || !crate_path.join("Cargo.toml").is_file()
+            || !crate_path.join("src").join("lib.rs").is_file()
+        {
             continue;
         }
-        let category_name = category.file_name().to_string_lossy().into_owned();
-        let Ok(entries) = fs::read_dir(&category_path) else {
-            continue;
-        };
-        for entry in entries {
-            let entry = entry?;
-            let crate_path = entry.path();
-            if !crate_path.join("Cargo.toml").is_file()
-                || !crate_path.join("src").join("lib.rs").is_file()
-            {
-                continue;
-            }
-            crates.push(WorkflowCrate {
-                category: category_name.clone(),
-                package: package_name(&crate_path.join("Cargo.toml"))?,
-                path: crate_path.canonicalize()?,
-            });
-        }
+        crates.push(WorkflowCrate {
+            package: package_name(&crate_path.join("Cargo.toml"))?,
+            path: crate_path.canonicalize()?,
+        });
     }
     crates.sort_by(|left, right| left.package.cmp(&right.package));
     Ok(crates)

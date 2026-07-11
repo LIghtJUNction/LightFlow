@@ -7,12 +7,12 @@ use toml_edit::DocumentMut;
 #[test]
 fn cargo_publish_command_matches_cli_argument_order() {
     assert_eq!(
-        cargo_publish_command(Path::new("./workflows/std/demo/Cargo.toml"), true, true),
+        cargo_publish_command(Path::new("./workflows/demo/Cargo.toml"), true, true),
         vec![
             "cargo",
             "publish",
             "--manifest-path",
-            "workflows/std/demo/Cargo.toml",
+            "workflows/demo/Cargo.toml",
             "--allow-dirty",
             "--dry-run",
         ]
@@ -22,12 +22,12 @@ fn cargo_publish_command_matches_cli_argument_order() {
 #[test]
 fn cargo_publish_command_omits_optional_flags_when_disabled() {
     assert_eq!(
-        cargo_publish_command(Path::new("workflows/std/demo/Cargo.toml"), false, false),
+        cargo_publish_command(Path::new("workflows/demo/Cargo.toml"), false, false),
         vec![
             "cargo",
             "publish",
             "--manifest-path",
-            "workflows/std/demo/Cargo.toml",
+            "workflows/demo/Cargo.toml",
         ]
     );
 }

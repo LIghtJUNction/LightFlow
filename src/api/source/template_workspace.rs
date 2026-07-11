@@ -27,7 +27,7 @@ pub(in crate::api) fn ensure_workflow_save_workspace(root: &Path) -> ApiResult<(
         .is_some_and(|members| {
             members
                 .iter()
-                .any(|member| member.as_str() == Some(".lightflow/workflows/*/*"))
+                .any(|member| member.as_str() == Some(".lightflow/workflows/*"))
         });
     let has_core_lightflow = document
         .get("workspace")
@@ -78,21 +78,18 @@ pub(super) fn should_skip_empty_template_workspace_metadata(manifest: &Path) -> 
         return Ok(false);
     }
     let collection = match members.get(0).and_then(|member| member.as_str()) {
-        Some(".lightflow/workflows/*/*") => root.join(PROJECT_LIGHTFLOW_DIR).join(WORKFLOW_DIR),
-        Some("workflows/*/*") => root.join(WORKFLOW_DIR),
+        Some(".lightflow/workflows/*") => root.join(PROJECT_LIGHTFLOW_DIR).join(WORKFLOW_DIR),
+        Some("workflows/*") => root.join(WORKFLOW_DIR),
         _ => return Ok(false),
     };
     match read_dir_paths(&collection) {
-        Ok(categories) => {
-            for category in categories.into_iter().filter(|path| path.is_dir()) {
-                let crates = read_dir_paths(&category).map_err(ApiError::from)?;
-                for crate_dir in crates.into_iter().filter(|path| path.is_dir()) {
-                    let crate_manifest = crate_dir.join("Cargo.toml");
-                    if crate_manifest.is_file()
-                        && !has_only_core_lightflow_dependencies(&crate_manifest)?
-                    {
-                        return Ok(false);
-                    }
+        Ok(crates) => {
+            for crate_dir in crates.into_iter().filter(|path| path.is_dir()) {
+                let crate_manifest = crate_dir.join("Cargo.toml");
+                if crate_manifest.is_file()
+                    && !has_only_core_lightflow_dependencies(&crate_manifest)?
+                {
+                    return Ok(false);
                 }
             }
             Ok(true)

@@ -15,7 +15,7 @@ fn sync_apply_reports_hf_repo_url_when_approval_is_required()
         format!(
             r#"[workspace]
 resolver = "3"
-members = [".lightflow/workflows/*/*"]
+members = [".lightflow/workflows/*"]
 
 [workspace.dependencies]
 lightflow = {{ path = {:?} }}

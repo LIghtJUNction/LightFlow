@@ -44,28 +44,42 @@ Cargo.toml
 .lightflow/
   workspace.rs
   workflows/
-    <category>/
-      <short-name>/
-        Cargo.toml
-        src/
-          lib.rs
-        .agent/
-          skills/
-            <skill-name>/
-              SKILL.md
+    <short-name>/
+      Cargo.toml
+      src/
+        lib.rs
+      .agent/
+        skills/
+          <skill-name>/
+            SKILL.md
 ```
 
 Then create a workflow crate inside the collection:
 
 ```bash
-lfw new image_prompt --category image --name "Image Prompt"
+lfw new image_prompt --name "Image Prompt"
 ```
+
+Add `.category("image")` to `workflow!()` only when list/filter metadata is
+useful. It does not change the generated or discovered crate path; workflow
+crates remain direct children of the collection.
+
+Older collections may still use `workflows/<category>/<crate>`. Migrate them
+explicitly before using current discovery commands:
+
+```bash
+lfw migrate
+```
+
+The command preflights all moves and workspace member globs before flattening
+the project, global, and legacy collections. Conflicting target crate names
+cause the entire migration to stop without moving files.
 
 Use a runtime-aware template when the workflow should execute through a known
 runtime capability:
 
 ```bash
-lfw new image_generate --category image --runtime lightflow.image.generate
+lfw new image_generate --runtime lightflow.image.generate
 ```
 
 Runtime-aware templates include Node Schema metadata, a starter runtime
@@ -83,7 +97,7 @@ Use the global workflow home when a workflow should be available to many local
 projects without adding it to each project repository:
 
 ```bash
-lfw new my_global_flow --category std --global
+lfw new my_global_flow --global
 ```
 
 ## Add Workflows To A Project
@@ -95,7 +109,7 @@ To add an external workflow crate as a dependency, use `lfw add`:
 
 ```bash
 lfw add lightflow-text-prompt --version 0.1.0
-lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/std/text_prompt --editable
+lfw add lightflow-text-prompt --path projects/lightflow-std/workflows/text_prompt --editable
 lfw add lightflow-text-prompt --git https://github.com/lightjunction/lightflow-std --package lightflow-text-prompt
 ```
 
@@ -120,7 +134,7 @@ not cause LightFlow to scan their full transitive graphs.
 
 Use `--editable` for local development. It records a Cargo path dependency and
 keeps edits live.
-Use an external checkout path such as `../lightflow-std/workflows/std/text_prompt`
+Use an external checkout path such as `../lightflow-std/workflows/text_prompt`
 only when `lightflow-std` is not checked out under `projects/`.
 
 To import a repository that contains many workflow crates, use `lfw import`:
@@ -132,14 +146,14 @@ lfw import --global https://github.com/lightjunction/lightflow-flux.git
 
 Use `add` when the dependency target is one known Cargo package. Use
 `import` when the target is a workflow repository or collection and LightFlow
-should discover all workflow crates under `workflows/<category>/<crate>/`.
+should discover all workflow crates under `workflows/<crate>/`.
 
 In practice:
 
-- `lfw add lightflow-text-template --path projects/lightflow-std/workflows/std/text_template`
+- `lfw add lightflow-text-template --path projects/lightflow-std/workflows/text_template`
   adds one workflow crate.
 - `lfw import projects/lightflow-std` scans the repository and adds every workflow
-  crate it finds under `workflows/std/*`.
+  crate it finds under `workflows/*`.
 
 Global installs are written into the default LightFlow home, usually
 `~/.lightflow`, or another directory listed in `LFW_PATH`.
@@ -279,7 +293,7 @@ workflow requires a specific builtin engine, such as `builtin.preview.v1` or
 Generate the API executor scaffold with:
 
 ```bash
-lfw new comfy_run --category image --runtime lightflow.comfyui.workflow
+lfw new comfy_run --runtime lightflow.comfyui.workflow
 ```
 
 Export a graph from ComfyUI with **Save (API Format)** and keep the prompt graph
@@ -435,7 +449,7 @@ workflow!()
         "lightflow.text_to_image",
         "0.1.0",
         "lightflow-text-to-image",
-        "projects/lightflow-std/workflows/std/text_to_image",
+        "projects/lightflow-std/workflows/text_to_image",
     )
     .depends_on_git(
         "lightflow.text_template",

@@ -49,7 +49,7 @@ pub(super) fn test_workflow_crate_dir(root: &Path, workflow_id: &str) -> PathBuf
         .strip_prefix("lightflow.")
         .unwrap_or(workflow_id)
         .replace('.', "_");
-    root.join("workflows").join("tests").join(crate_dir_name)
+    root.join("workflows").join(crate_dir_name)
 }
 
 pub(super) fn test_workflow_manifest(root: &Path, workflow_id: &str) -> PathBuf {

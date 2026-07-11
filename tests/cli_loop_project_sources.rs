@@ -26,7 +26,7 @@ fn lfw_loop_projects_reports_project_workspace_directories()
     fs::create_dir_all(&std)?;
 
     lfw(&std, ["init"])?;
-    lfw(&std, ["new", "linked", "--category", "examples"])?;
+    lfw(&std, ["new", "linked"])?;
 
     let report = lfw(&root, ["loop", "projects"])?;
     assert_eq!(report["valid"], true);
@@ -249,7 +249,7 @@ fn lfw_list_uses_configured_default_project_workflow_sources()
     )?;
 
     lfw(&custom, ["init"])?;
-    lfw(&custom, ["new", "custom", "--category", "examples"])?;
+    lfw(&custom, ["new", "custom"])?;
     let listed = lfw(&root, ["list"])?;
     assert!(
         listed["workflows"]

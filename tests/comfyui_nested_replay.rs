@@ -111,8 +111,6 @@ fn nested_project() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
         [
             "new",
             "comfy_run",
-            "--category",
-            "image",
             "--runtime",
             "lightflow.comfyui.workflow",
         ],
