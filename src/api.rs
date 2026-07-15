@@ -423,8 +423,26 @@ lightflow = {{ path = {:?} }}
         let service = ApiService::new(root.path());
         let mut workflow = workflow_with_identity("lightflow.saved_flow", "2.3.4")
             .name("Saved Flow")
+            .input("condition", "boolean")
+            .input_description("condition", "Whether to render.")
+            .input_required("condition", true)
+            .input_default_json("condition", "false")
+            .input_widget("condition", "checkbox")
+            .input("strength", "number")
+            .input_range("strength", 0.0, 1.0, 0.05)
+            .input_enum_json("strength", "[0.25,0.5,0.75,1.0]")
+            .input("source", "artifact")
+            .input_artifact_kind("source", "image")
+            .input_model_requirement("source", "image_model")
+            .output("image", "artifact")
+            .output_description("image", "Generated image.")
+            .output_artifact_kind("image", "image")
+            .output_model_requirement("image", "image_model")
+            .model("image_model", "image-generation")
+            .runtime("test_runtime", "lightflow.test")
             .build();
         workflow.category = Some("tests".to_owned());
+        let expected = workflow.clone();
 
         service.save_workflow(workflow).expect("save workflow");
         let reloaded = service
@@ -461,6 +479,7 @@ lightflow = {{ path = {:?} }}
         assert_eq!(reloaded.id, "lightflow.saved_flow");
         assert_eq!(reloaded.version, "2.3.4");
         assert_eq!(reloaded.category.as_deref(), Some("tests"));
+        assert_eq!(reloaded, expected);
         assert!(manifest.contains("name = \"lightflow-saved-flow\""));
         assert!(manifest.contains("version = \"2.3.4\""));
         assert!(manifest.contains("lightflow = { workspace = true }"));
@@ -470,5 +489,11 @@ lightflow = {{ path = {:?} }}
         )
         .expect("workflow source");
         assert!(source.contains(".category(\"tests\")"));
+        assert!(source.contains("input \"condition\": \"boolean\" {"));
+        assert!(source.contains("default: false,"));
+        assert!(source.contains("choices: [0.25,0.5,0.75,1.0],"));
+        assert!(source.contains("output \"image\": \"artifact\" {"));
+        assert!(!source.contains(".input_description("));
+        assert!(!source.contains(".output_artifact_kind("));
     }
 }

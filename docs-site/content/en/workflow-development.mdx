@@ -1,0 +1,97 @@
+---
+title: Workflow Development
+description: Build reusable library workflows and directly executable workflows.
+---
+
+# Workflow Development
+
+## One package, one library workflow
+
+Every workflow package exposes one reusable definition from `src/lib.rs`:
+
+```rust
+use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow! {
+        input "text": "text" {
+            description: "Text to echo.",
+            required: true,
+            default: "",
+            widget: "textarea",
+        }
+        input "strength": "number" {
+            description: "Effect strength.",
+            range: [0.0, 1.0, 0.05],
+            choices: [0.25, 0.5, 0.75, 1.0],
+        }
+        output "text": "text" {
+            description: "Echoed text.",
+        }
+    }
+        .name("Text Echo")
+        .category("text")
+        .build()
+}
+```
+
+Do not hard-code the workflow ID or version. `workflow!()` reads
+`CARGO_PKG_NAME` and `CARGO_PKG_VERSION`. Optional category metadata is only for
+`lfw list --category`; it never changes the crate path.
+Input metadata supports `description`, `required`, native JSON `default`,
+`range`, `choices`, `widget`, `artifact`, and `model`. Outputs support
+`description`, `artifact`, and `model`. Empty port blocks and the legacy
+`.input(...)` / `.output(...)` builder calls remain compatible.
+
+## Compose library workflows
+
+Install child crates with Cargo, declare exact workflow dependencies, and join
+nodes with ports:
+
+```rust
+workflow! {
+    input "topic": "text" { description: "Planning topic.", required: true, }
+    output "result": "text" { description: "Rendered plan.", }
+}
+    .name("Text Plan")
+    .depends_on("lightflow.text_prompt", "0.1.0")
+    .depends_on("lightflow.text_result", "0.1.0")
+    .node("prompt", "lightflow.text_prompt")
+    .node("result", "lightflow.text_result")
+    .edge("prompt", "prompt", "result", "text")
+    .build()
+```
+
+Validate the public contract before sharing:
+
+```bash
+lfw node test lightflow.text_plan
+lfw plan lightflow.text_plan
+lfw run lightflow.text_plan --input value='{"topic":"demo"}'
+```
+
+## Multiple executable workflows
+
+The same package may expose several executables while retaining one library
+workflow. Add `src/bin/<name>.rs` files or explicit Cargo targets:
+
+```toml
+[[bin]]
+name = "text-plan"
+path = "src/bin/text-plan.rs"
+
+[[bin]]
+name = "text-plan-batch"
+path = "src/bin/text-plan-batch.rs"
+```
+
+Each executable delegates to the package's library definition:
+
+```rust
+fn main() -> lightflow::runner::RunnerResult<()> {
+    lightflow::runner::run_workflow_from_env(lightflow_text_plan::define())
+}
+```
+
+This reuses Cargo's library/binary packaging instead of introducing a separate
+workflow archive format.

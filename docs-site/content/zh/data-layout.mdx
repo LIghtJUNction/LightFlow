@@ -1,0 +1,44 @@
+---
+title: 扁平布局与迁移
+description: LightFlow 0.1.4 的项目、仓库和全局工作流集合。
+---
+
+# 扁平布局与迁移
+
+当前所有集合都直接包含工作流 crate：
+
+| 范围 | 路径 |
+| --- | --- |
+| LightFlow 项目 | `.lightflow/workflows/<crate>` |
+| 工作流仓库 | `workflows/<crate>` |
+| 默认全局 home | `~/.lightflow/workflows/<crate>` |
+
+`LFW_PATH` 可以加入其他项目根目录、集合或单个 crate。一个工作流 crate 包含
+`Cargo.toml`、`src/lib.rs`、测试，以及共置的
+`.agent/skills/<skill>/SKILL.md`。
+
+Category 是可选 DSL 元数据。`.category("image")` 只改变分组和过滤，目录中
+不存在 category 层。
+
+## 迁移旧仓库
+
+旧集合可能使用 `workflows/<category>/<crate>`。运行：
+
+```bash
+lfw migrate
+lfw migrate /path/to/workflow-repository
+```
+
+`lfw migrate [path]` 会在移动前预检所有源、目标和已知 Cargo manifest。它把
+crate 移到扁平集合，只改写精确匹配的旧 workspace member。名称冲突会在零
+移动状态下停止；执行中失败会回滚移动和 manifest 变更。
+
+迁移后检查：
+
+```bash
+lfw list
+cargo metadata --no-deps
+```
+
+运行记录保存在项目的 `.lightflow/runs/`。模型文件继续位于 provider cache，
+选中的路径和 hash 记录在 `lfw.lock`。

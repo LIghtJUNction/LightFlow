@@ -1,0 +1,58 @@
+---
+title: CLI 与发布
+description: 项目、依赖、模型、运行和发布的常用命令。
+---
+
+# CLI 与发布
+
+## 项目与全局工作流
+
+```bash
+lfw init --workflow
+lfw new text_echo --name "Text Echo"
+lfw new global_echo --name "Global Echo" --global
+lfw home
+lfw list
+lfw list --category text
+lfw info
+```
+
+## 依赖与共享仓库
+
+```bash
+lfw add lightflow-text-prompt --version 0.1.0
+lfw add lightflow-text-prompt --path ../lightflow-std/workflows/text_prompt --editable
+lfw import ../lightflow-std
+lfw import https://github.com/example/lightflow-workflows.git --global
+lfw update
+lfw upgrade --global
+lfw sync lightflow.image_prompt --auto-model --apply
+```
+
+## 验证与运行
+
+```bash
+lfw help lightflow.text_plan
+lfw deps lightflow.text_plan
+lfw node test lightflow.text_plan
+lfw plan lightflow.text_plan
+lfw run lightflow.text_plan --input value='{"topic":"demo"}'
+lfw trace last
+lfw replay
+```
+
+## 发布与 release gate
+
+```bash
+lfw publish lightflow.text_plan
+lfw publish lightflow.text_plan --apply
+lfw publish --workflows --require-publishable
+lfw release check
+cargo publish -p lightflow-text-plan
+cargo install my-workflow --bin my-workflow-cli
+```
+
+纯包操作优先使用 Cargo。需要工作流验证、模型就绪检查、skill、执行、项目/全局
+范围或依赖感知发布时使用 `lfw`。
+该安装示例要求 `my-workflow` 确实声明
+`[[bin]] name = "my-workflow-cli"`。

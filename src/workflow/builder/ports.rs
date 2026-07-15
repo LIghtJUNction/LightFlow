@@ -56,6 +56,14 @@ impl WorkflowBuilder {
     }
 
     #[must_use]
+    pub fn input_default(mut self, name: impl AsRef<str>, value: serde_json::Value) -> Self {
+        if let Some(port) = find_port_mut(&mut self.spec.inputs, name.as_ref()) {
+            port.default = Some(value);
+        }
+        self
+    }
+
+    #[must_use]
     pub fn input_range(mut self, name: impl AsRef<str>, min: f64, max: f64, step: f64) -> Self {
         if let Some(port) = find_port_mut(&mut self.spec.inputs, name.as_ref()) {
             port.min = Some(min);
@@ -70,6 +78,17 @@ impl WorkflowBuilder {
         if let Some(port) = find_port_mut(&mut self.spec.inputs, name.as_ref()) {
             port.enum_values = serde_json::from_str(values.as_ref())
                 .expect("enum values must be a valid JSON array");
+        }
+        self
+    }
+
+    #[must_use]
+    pub fn input_choices(mut self, name: impl AsRef<str>, values: serde_json::Value) -> Self {
+        if let Some(port) = find_port_mut(&mut self.spec.inputs, name.as_ref()) {
+            port.enum_values = values
+                .as_array()
+                .cloned()
+                .expect("choices must be a JSON array");
         }
         self
     }

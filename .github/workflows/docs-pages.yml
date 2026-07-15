@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'docs-site/**'
+      - 'README.md'
+      - 'docs/**'
+      - 'Cargo.toml'
       - '.github/workflows/docs-pages.yml'
   workflow_dispatch:
 

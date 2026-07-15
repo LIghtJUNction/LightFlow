@@ -1,0 +1,60 @@
+---
+title: Quick Start
+description: Initialize, create, discover, and run a LightFlow workflow.
+---
+
+# Quick Start
+
+## Build the CLI
+
+```bash
+git clone --recurse-submodules https://github.com/lightjunction/LightFlow.git
+cd LightFlow
+cargo build --bin lfw
+```
+
+## Initialize a project
+
+```bash
+cargo run --bin lfw -- init --workflow
+cargo run --bin lfw -- new demo_echo --name "Demo Echo"
+```
+
+`lfw new` creates `.lightflow/workflows/demo_echo/`. It has no category path
+argument. If category labels are useful for listing, add optional
+`.category("demo")` metadata inside `workflow!()`.
+The generated `workflow! { ... }` block keeps descriptions and other Node
+Schema metadata beside each input or output declaration.
+
+## Inspect and run
+
+```bash
+cargo run --bin lfw -- list
+cargo run --bin lfw -- help lightflow.demo_echo
+cargo run --bin lfw -- run lightflow.demo_echo --input value='"hello"'
+cargo run --bin lfw -- trace last
+```
+
+The package name `lightflow-demo-echo` becomes workflow ID
+`lightflow.demo_echo`; the package version becomes the workflow version.
+
+## Add an existing workflow
+
+Use Cargo directly for one library workflow:
+
+```bash
+cargo add lightflow-text-prompt
+cargo add lightflow-text-prompt --path ../lightflow-std/workflows/text_prompt
+```
+
+Or use LightFlow's thin Cargo-backed layer:
+
+```bash
+lfw add lightflow-text-prompt --version 0.1.0
+lfw import ../lightflow-std
+lfw sync --apply
+```
+
+`lfw import` is the convenient path for a repository containing multiple
+workflow crates. `lfw sync` resolves declared Cargo dependencies, agent skills,
+and selected model requirements.

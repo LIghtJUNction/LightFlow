@@ -1,0 +1,30 @@
+---
+title: LightFlow 0.1.4
+description: 可通过 Cargo 安装、共享和发布的 Rust 工作流。
+---
+
+# LightFlow 0.1.4
+
+LightFlow 是面向人类决策的 backend-first AI 工作流环境。工作流就是普通
+Rust library crate：Cargo 负责包身份、依赖、安装与发布；LightFlow 负责发现、
+验证、执行、模型、运行历史，以及 CLI、HTTP、MCP 和编辑器契约。
+
+## 0.1.4 的核心变化
+
+- 工作流集合改为扁平布局：`workflows/<crate>` 和
+  `.lightflow/workflows/<crate>`。
+- `workflow!()` 自动从 Cargo 包名和版本派生工作流 ID 与版本。
+- 一个 Cargo 包拥有一个可复用 library workflow，并可通过多个 `[[bin]]`
+  暴露多个可执行工作流。
+- 直接复用 `cargo add`、`cargo install --bin` 和 `cargo publish`。
+- `lfw migrate [path]` 在完整冲突预检后迁移旧的两层目录。
+
+## 推荐阅读顺序
+
+1. [快速开始](/zh/getting-started/)：创建并运行本地工作流。
+2. [工作流开发](/zh/workflow-development/)：开发库工作流与可执行工作流。
+3. [Cargo 包与共享](/zh/cargo-sharing/)：依赖、安装、多工作流仓库和发布。
+4. [扁平布局与迁移](/zh/data-layout/)：项目、仓库和全局目录的准确含义。
+
+LightFlow 不依赖外部执行基底。工作流源码是可审查的事实来源；运行状态和
+模型文件不会写进工作流 crate。

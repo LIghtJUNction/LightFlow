@@ -1,0 +1,46 @@
+---
+title: Flat Layout and Migration
+description: Project, repository, and global workflow collections in LightFlow 0.1.4.
+---
+
+# Flat Layout and Migration
+
+All current collections contain workflow crates directly:
+
+| Scope | Path |
+| --- | --- |
+| LightFlow project | `.lightflow/workflows/<crate>` |
+| Workflow repository | `workflows/<crate>` |
+| Default global home | `~/.lightflow/workflows/<crate>` |
+
+`LFW_PATH` may add other project roots, collections, or individual crates. A
+workflow crate contains `Cargo.toml`, `src/lib.rs`, tests, and its colocated
+`.agent/skills/<skill>/SKILL.md`.
+
+Category is optional DSL metadata. `.category("image")` changes grouping and
+filtering only; there is no category directory level.
+
+## Migrate older repositories
+
+Older collections may contain `workflows/<category>/<crate>`. Run:
+
+```bash
+lfw migrate
+lfw migrate /path/to/workflow-repository
+```
+
+`lfw migrate [path]` preflights every source, target, and known Cargo manifest
+before moving anything. It moves crates to the flat collection and rewrites
+only exact legacy workspace member entries. Name conflicts stop the operation
+without partial moves; execution failures roll back moves and manifest changes.
+
+After migration:
+
+```bash
+lfw list
+cargo metadata --no-deps
+```
+
+Runtime records remain project-local under `.lightflow/runs/`. Model files stay
+in their provider caches, while selected paths and hashes are recorded in
+`lfw.lock`.

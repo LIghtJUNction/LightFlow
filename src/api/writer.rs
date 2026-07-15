@@ -63,7 +63,14 @@ fn workflow_package_name(workflow_id: &str) -> ApiResult<String> {
 pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
     let mut source = String::from("use lightflow::preload::*;\n\n");
     source.push_str("pub fn define() -> WorkflowSpec {\n");
-    source.push_str("    workflow!()\n");
+    source.push_str("    workflow! {\n");
+    for input in &workflow.inputs {
+        push_input_port(&mut source, input);
+    }
+    for output in &workflow.outputs {
+        push_output_port(&mut source, output);
+    }
+    source.push_str("    }\n");
     source.push_str(&format!("        .name({})\n", rust_string(&workflow.name)));
     if let Some(category) = &workflow.category {
         source.push_str(&format!("        .category({})\n", rust_string(category)));
@@ -73,22 +80,6 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
             "        .description({})\n",
             rust_string(description)
         ));
-    }
-    for input in &workflow.inputs {
-        source.push_str(&format!(
-            "        .input({}, {})\n",
-            rust_string(&input.name),
-            rust_string(&input.ty)
-        ));
-        push_input_port_metadata(&mut source, input);
-    }
-    for output in &workflow.outputs {
-        source.push_str(&format!(
-            "        .output({}, {})\n",
-            rust_string(&output.name),
-            rust_string(&output.ty)
-        ));
-        push_output_port_metadata(&mut source, output);
     }
     for dependency in &workflow.dependencies {
         if let Some(install) = &dependency.install {
@@ -126,6 +117,22 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
                 "        .depends_on({}, {})\n",
                 rust_string(&dependency.workflow_id),
                 rust_string(dependency.version.as_deref().unwrap_or("*"))
+            ));
+        }
+    }
+    for runtime in &workflow.runtimes {
+        if let Some(engine) = &runtime.engine {
+            source.push_str(&format!(
+                "        .builtin_runtime({}, {}, {})\n",
+                rust_string(&runtime.id),
+                rust_string(&runtime.capability),
+                rust_string(engine)
+            ));
+        } else {
+            source.push_str(&format!(
+                "        .runtime({}, {})\n",
+                rust_string(&runtime.id),
+                rust_string(&runtime.capability)
             ));
         }
     }
@@ -201,83 +208,95 @@ fn rust_string(value: &str) -> String {
     format!("{value:?}")
 }
 
-fn push_input_port_metadata(source: &mut String, port: &PortSpec) {
+fn push_input_port(source: &mut String, port: &PortSpec) {
+    let has_metadata = port.description.is_some()
+        || port.required.is_some()
+        || port.default.is_some()
+        || port.min.is_some()
+        || !port.enum_values.is_empty()
+        || port.widget.is_some()
+        || port.artifact_kind.is_some()
+        || port.model_requirement.is_some();
+    source.push_str(&format!(
+        "        input {}: {}",
+        rust_string(&port.name),
+        rust_string(&port.ty)
+    ));
+    if !has_metadata {
+        source.push('\n');
+        return;
+    }
+    source.push_str(" {\n");
     if let Some(description) = &port.description {
         source.push_str(&format!(
-            "        .input_description({}, {})\n",
-            rust_string(&port.name),
+            "            description: {},\n",
             rust_string(description)
         ));
     }
     if let Some(required) = port.required {
-        source.push_str(&format!(
-            "        .input_required({}, {required})\n",
-            rust_string(&port.name)
-        ));
+        source.push_str(&format!("            required: {required},\n"));
     }
     if let Some(default) = &port.default {
-        source.push_str(&format!(
-            "        .input_default_json({}, {})\n",
-            rust_string(&port.name),
-            rust_string(&default.to_string())
-        ));
+        source.push_str(&format!("            default: {default},\n"));
     }
     if let (Some(min), Some(max), Some(step)) = (port.min, port.max, port.step) {
-        source.push_str(&format!(
-            "        .input_range({}, {min}, {max}, {step})\n",
-            rust_string(&port.name)
-        ));
+        source.push_str(&format!("            range: [{min}, {max}, {step}],\n"));
     }
     if !port.enum_values.is_empty() {
         source.push_str(&format!(
-            "        .input_enum_json({}, {})\n",
-            rust_string(&port.name),
-            rust_string(&serde_json::Value::Array(port.enum_values.clone()).to_string())
+            "            choices: {},\n",
+            serde_json::Value::Array(port.enum_values.clone())
         ));
     }
     if let Some(widget) = &port.widget {
-        source.push_str(&format!(
-            "        .input_widget({}, {})\n",
-            rust_string(&port.name),
-            rust_string(widget)
-        ));
+        source.push_str(&format!("            widget: {},\n", rust_string(widget)));
     }
     if let Some(artifact_kind) = &port.artifact_kind {
         source.push_str(&format!(
-            "        .input_artifact_kind({}, {})\n",
-            rust_string(&port.name),
+            "            artifact: {},\n",
             rust_string(artifact_kind)
         ));
     }
     if let Some(model_requirement) = &port.model_requirement {
         source.push_str(&format!(
-            "        .input_model_requirement({}, {})\n",
-            rust_string(&port.name),
+            "            model: {},\n",
             rust_string(model_requirement)
         ));
     }
+    source.push_str("        }\n");
 }
 
-fn push_output_port_metadata(source: &mut String, port: &PortSpec) {
+fn push_output_port(source: &mut String, port: &PortSpec) {
+    let has_metadata = port.description.is_some()
+        || port.artifact_kind.is_some()
+        || port.model_requirement.is_some();
+    source.push_str(&format!(
+        "        output {}: {}",
+        rust_string(&port.name),
+        rust_string(&port.ty)
+    ));
+    if !has_metadata {
+        source.push('\n');
+        return;
+    }
+    source.push_str(" {\n");
     if let Some(description) = &port.description {
         source.push_str(&format!(
-            "        .output_description({}, {})\n",
-            rust_string(&port.name),
+            "            description: {},\n",
             rust_string(description)
         ));
     }
     if let Some(artifact_kind) = &port.artifact_kind {
         source.push_str(&format!(
-            "        .output_artifact_kind({}, {})\n",
-            rust_string(&port.name),
+            "            artifact: {},\n",
             rust_string(artifact_kind)
         ));
     }
     if let Some(model_requirement) = &port.model_requirement {
         source.push_str(&format!(
-            "        .output_model_requirement({}, {})\n",
-            rust_string(&port.name),
+            "            model: {},\n",
             rust_string(model_requirement)
         ));
     }
+    source.push_str("        }\n");
 }

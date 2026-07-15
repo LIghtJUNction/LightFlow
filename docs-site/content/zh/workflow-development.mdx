@@ -1,0 +1,95 @@
+---
+title: 工作流开发
+description: 开发可复用库工作流和可直接安装的可执行工作流。
+---
+
+# 工作流开发
+
+## 一个包，一个 library workflow
+
+每个工作流包从 `src/lib.rs` 暴露一个可复用定义：
+
+```rust
+use lightflow::preload::*;
+
+pub fn define() -> WorkflowSpec {
+    workflow! {
+        input "text": "text" {
+            description: "需要回显的文本。",
+            required: true,
+            default: "",
+            widget: "textarea",
+        }
+        input "strength": "number" {
+            description: "效果强度。",
+            range: [0.0, 1.0, 0.05],
+            choices: [0.25, 0.5, 0.75, 1.0],
+        }
+        output "text": "text" {
+            description: "回显文本。",
+        }
+    }
+        .name("Text Echo")
+        .category("text")
+        .build()
+}
+```
+
+不要硬编码工作流 ID 或版本。`workflow!()` 读取 `CARGO_PKG_NAME` 和
+`CARGO_PKG_VERSION`。可选 category 只服务于 `lfw list --category`，绝不
+改变 crate 路径。
+Input 支持 `description`、`required`、原生 JSON `default`、`range`、
+`choices`、`widget`、`artifact` 和 `model`；output 支持 `description`、
+`artifact` 和 `model`。空端口块及旧 `.input(...)` / `.output(...)` builder
+写法继续兼容。
+
+## 组合库工作流
+
+用 Cargo 安装子工作流 crate，声明精确依赖，再通过端口连接节点：
+
+```rust
+workflow! {
+    input "topic": "text" { description: "规划主题。", required: true, }
+    output "result": "text" { description: "生成的计划。", }
+}
+    .name("Text Plan")
+    .depends_on("lightflow.text_prompt", "0.1.0")
+    .depends_on("lightflow.text_result", "0.1.0")
+    .node("prompt", "lightflow.text_prompt")
+    .node("result", "lightflow.text_result")
+    .edge("prompt", "prompt", "result", "text")
+    .build()
+```
+
+共享前验证公开契约：
+
+```bash
+lfw node test lightflow.text_plan
+lfw plan lightflow.text_plan
+lfw run lightflow.text_plan --input value='{"topic":"demo"}'
+```
+
+## 多个可执行工作流
+
+同一个包保留一个 library workflow，同时可以暴露多个 executable。创建
+`src/bin/<name>.rs`，或显式声明 Cargo target：
+
+```toml
+[[bin]]
+name = "text-plan"
+path = "src/bin/text-plan.rs"
+
+[[bin]]
+name = "text-plan-batch"
+path = "src/bin/text-plan-batch.rs"
+```
+
+每个 executable 调用该包的 library 定义：
+
+```rust
+fn main() -> lightflow::runner::RunnerResult<()> {
+    lightflow::runner::run_workflow_from_env(lightflow_text_plan::define())
+}
+```
+
+这直接复用了 Cargo 的 library/binary 打包能力，不引入新的工作流归档格式。

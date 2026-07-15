@@ -1,5 +1,9 @@
 # LightFlow
 
+[Documentation](https://lightjunction.github.io/LightFlow/) ·
+[Workflow Development](docs/workflow-development.md) ·
+[Architecture](docs/architecture.md)
+
 LightFlow is a backend-first, source-controlled workflow environment for
 human-directed AI pipelines. The current backend deliberately keeps the domain
 model small:
@@ -13,9 +17,28 @@ them. LightFlow provides the local loop around that source model: validate,
 run, inspect, patch, replay, and publish through shared CLI, HTTP, MCP, and
 editor-facing contracts.
 
+## LightFlow 0.1.4
+
+Version 0.1.4 uses flat workflow collections: `.lightflow/workflows/<crate>`
+for project workflows, `workflows/<crate>` for workflow repositories, and
+`~/.lightflow/workflows/<crate>` for the default global home. Existing
+two-level collections can be converted safely with `lfw migrate [path]`.
+
+Workflow packages use Cargo without a parallel package format:
+
+```bash
+cargo add lightflow-text-prompt
+cargo install my-workflow --bin my-workflow-cli
+cargo publish -p lightflow-text-plan
+```
+
+Each Cargo package defines one reusable library workflow and may provide
+multiple executable `[[bin]]` targets. `workflow!()` derives workflow ID and
+version from `CARGO_PKG_NAME` and `CARGO_PKG_VERSION`.
+
 ## Current Scope
 
-- Rust workflow crates under `workflows/<short-name>/`
+- Rust workflow crates under `workflows/<crate>/`
 - workflow validation, including nested workflow references and DAG cycle checks
 - recursive workflow dependency resolution
 - lightweight workflow execution plans with temporary node toggles
@@ -51,14 +74,17 @@ Reusable workflows are library crates with `src/lib.rs` and no `src/main.rs`:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow!()
+    workflow! {
+        input "value": "json" {
+            description: "Structured request payload.",
+            required: true,
+            widget: "json",
+        }
+        output "result": "text" {
+            description: "Generated text result.",
+        }
+    }
         .name("Text Plan")
-        .input("value", "json")
-        .input_description("value", "Structured request payload.")
-        .input_required("value", true)
-        .input_widget("value", "json")
-        .output("result", "text")
-        .output_description("result", "Generated text result.")
         .depends_on("lightflow.text_prompt", "0.1.0")
         .depends_on("lightflow.text_result", "0.1.0")
         .node("prompt", "lightflow.text_prompt")
@@ -68,6 +94,9 @@ pub fn define() -> WorkflowSpec {
 }
 ```
 
+The macro block keeps each port's Node Schema metadata with the declaration.
+Legacy `.input(...)` and port metadata builder calls remain supported.
+
 `workflow!()` reads `CARGO_PKG_NAME` and `CARGO_PKG_VERSION` in the workflow
 crate. A package named `lightflow-text-plan` therefore owns workflow id
 `lightflow.text_plan` at the package version; workflow source does not repeat or
@@ -75,7 +104,7 @@ override either value.
 
 `.category("text")` may be added as optional list/filter metadata. Category
 metadata does not affect the crate path: every crate still lives directly under
-`workflows/<short-name>/` (or `.lightflow/workflows/<short-name>/`).
+`workflows/<crate>/` (or `.lightflow/workflows/<crate>/`).
 
 The backend parses this DSL statically from Rust ASTs; it does not execute or
 compile workflow source files.
@@ -108,10 +137,15 @@ git submodule update --init --recursive
 
 ```bash
 cargo run --bin lfw -- init --workflow
-cargo run --bin lfw -- migrate
 cargo run --bin lfw -- new demo_echo --name "Demo Echo"
 cargo run --bin lfw -- run lightflow.demo_echo --input value='"hello"'
 cargo run --bin lfw -- serve --port 5174
+```
+
+For a repository created before 0.1.4, migrate the legacy layout first:
+
+```bash
+cargo run --bin lfw -- migrate /path/to/workflow-repository
 ```
 
 After `lfw serve` starts, inspect the backend contract used by editor clients:
@@ -578,8 +612,11 @@ passes it to `lightflow::runner::run_workflow_from_env`. Install that binary
 with Cargo:
 
 ```bash
-cargo install my-workflow --bin my-workflow
+cargo install my-workflow --bin my-workflow-cli
 ```
+
+The install command applies only when `my-workflow` declares a `[[bin]]`
+target named `my-workflow-cli`.
 
 Publish a crate with standard `cargo publish`; `lfw publish <workflow_id>` is
 the optional LightFlow readiness/dry-run gate before Cargo publishing.

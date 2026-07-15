@@ -28,7 +28,7 @@ what would otherwise become a component.
 ## Workflow Crates
 
 Workflows are source-controlled Rust library crates under
-`workflows/<short-name>/`. Reusable workflows define
+`workflows/<crate>/`. Reusable workflows define
 `src/lib.rs` and do not define `src/main.rs`.
 Metadata and graph structure live in the library entrypoint:
 
@@ -36,17 +36,18 @@ Metadata and graph structure live in the library entrypoint:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow!()
+    workflow! {
+        input "value": "json"
+        output "value": "json"
+    }
         .name("Example")
-        .input("value", "json")
-        .output("value", "json")
         .build()
 }
 ```
 
 Workflows may declare an optional `.category("example")` for listing and
 filtering. It is metadata only; it never introduces another filesystem level or
-changes the flat `workflows/<short-name>/` crate path.
+changes the flat `workflows/<crate>/` crate path.
 
 The `workflow!()` macro injects the calling crate's Cargo package name and
 version. Static discovery applies the same mapping from the adjacent

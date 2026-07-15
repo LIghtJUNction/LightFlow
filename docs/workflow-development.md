@@ -44,7 +44,7 @@ Cargo.toml
 .lightflow/
   workspace.rs
   workflows/
-    <short-name>/
+    <crate>/
       Cargo.toml
       src/
         lib.rs
@@ -193,10 +193,12 @@ fn main() -> lightflow::runner::RunnerResult<()> {
 Install the binary through Cargo:
 
 ```bash
-cargo install my-workflow --bin my-workflow
+cargo install my-workflow --bin my-workflow-cli
 ```
 
-There is no separate executable-workflow archive or manifest format.
+This applies only when the package declares a `[[bin]]` target named
+`my-workflow-cli`. There is no separate executable-workflow archive or manifest
+format.
 
 Publish reusable and executable workflow packages with `cargo publish`.
 `lfw publish <workflow_id>` provides LightFlow validation and Cargo dry-run
@@ -210,15 +212,16 @@ A minimal leaf workflow declares metadata and ports:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow!()
+    workflow! {
+        input "text": "text" {
+            description: "Text to echo.",
+            required: true,
+            widget: "textarea",
+        }
+        output "text": "text" { description: "Echoed text.", }
+    }
         .name("Text Echo")
         .description("Return the input text unchanged.")
-        .input("text", "text")
-        .input_description("text", "Text to echo.")
-        .input_required("text", true)
-        .input_widget("text", "textarea")
-        .output("text", "text")
-        .output_description("text", "Echoed text.")
         .build()
 }
 ```
@@ -230,19 +233,11 @@ adds the `lightflow.` prefix. For example, package `lightflow-text-echo`
 defines workflow `lightflow.text_echo`; changing the Cargo package version
 changes the workflow version without editing `src/lib.rs`.
 
-Port metadata follows Node Schema v1. Prefer adding it for user-facing
-workflows:
-
-- `input_description` / `output_description` for help and editor labels.
-- `input_required` and `input_default_json` for validation and defaults.
-- `input_range` for numeric sliders or steppers.
-- `input_enum_json` for select controls.
-- `input_widget` for editor rendering hints such as `textarea`, `prompt`,
-  `image`, `file_save`, `json`, `toggle`, or `model_select`.
-- `input_artifact_kind` / `output_artifact_kind` for artifacts such as `image`
-  and `mask`.
-- `input_model_requirement` / `output_model_requirement` to bind ports to a
-  declared model requirement.
+Port metadata follows Node Schema v1. Inputs support `description`, `required`,
+native JSON `default`, `range`, `choices`, `widget`, `artifact`, and `model`;
+outputs support `description`, `artifact`, and `model`. The macro keeps metadata
+with its port. Legacy `.input(...)`, `.output(...)`, and port metadata builder
+calls remain supported for existing source.
 
 ## Write A Runtime-Backed Workflow
 
@@ -252,24 +247,29 @@ A runtime-backed workflow declares a capability from the Executor Registry:
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow!()
+    workflow! {
+        input "prompt": "text" {
+            description: "Prompt text.",
+            required: true,
+            widget: "prompt",
+        }
+        input "output_path": "path" {
+            description: "Optional PNG output path.",
+            required: false,
+            widget: "file_save",
+            artifact: "image",
+        }
+        output "image": "artifact" {
+            description: "Generated image artifact metadata.",
+            artifact: "image",
+        }
+        output "image_path": "path" {
+            description: "Path to the generated image.",
+            artifact: "image",
+        }
+    }
         .name("Image Preview")
         .description("Generate a deterministic preview image.")
-        .input("prompt", "text")
-        .input_description("prompt", "Prompt text.")
-        .input_required("prompt", true)
-        .input_widget("prompt", "prompt")
-        .input("output_path", "path")
-        .input_description("output_path", "Optional PNG output path.")
-        .input_required("output_path", false)
-        .input_widget("output_path", "file_save")
-        .input_artifact_kind("output_path", "image")
-        .output("image", "artifact")
-        .output_description("image", "Generated image artifact metadata.")
-        .output_artifact_kind("image", "image")
-        .output("image_path", "path")
-        .output_description("image_path", "Path to the generated image.")
-        .output_artifact_kind("image_path", "image")
         .builtin_runtime("image_runtime", "lightflow.image.generate", "builtin.preview.v1")
         .hf_model(
             "image_model",
@@ -409,19 +409,23 @@ to connect output ports to input ports.
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow!()
+    workflow! {
+        input "topic": "text" {
+            description: "Subject to render.",
+            required: true,
+            widget: "text",
+        }
+        output "image": "artifact" {
+            description: "Generated image artifact.",
+            artifact: "image",
+        }
+        output "image_path": "path" {
+            description: "Generated PNG path.",
+            artifact: "image",
+        }
+    }
         .name("Prompted Image")
         .description("Render a prompt template, then generate an image.")
-        .input("topic", "text")
-        .input_description("topic", "Subject to render.")
-        .input_required("topic", true)
-        .input_widget("topic", "text")
-        .output("image", "artifact")
-        .output_description("image", "Generated image artifact.")
-        .output_artifact_kind("image", "image")
-        .output("image_path", "path")
-        .output_description("image_path", "Generated PNG path.")
-        .output_artifact_kind("image_path", "image")
         .depends_on("lightflow.text_template", "0.1.0")
         .depends_on("lightflow.text_to_image", "0.1.0")
         .node("template", "lightflow.text_template")

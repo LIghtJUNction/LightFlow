@@ -1,0 +1,58 @@
+---
+title: 快速开始
+description: 初始化、创建、发现并运行 LightFlow 工作流。
+---
+
+# 快速开始
+
+## 构建 CLI
+
+```bash
+git clone --recurse-submodules https://github.com/lightjunction/LightFlow.git
+cd LightFlow
+cargo build --bin lfw
+```
+
+## 初始化项目
+
+```bash
+cargo run --bin lfw -- init --workflow
+cargo run --bin lfw -- new demo_echo --name "Demo Echo"
+```
+
+`lfw new` 会创建 `.lightflow/workflows/demo_echo/`，没有 category 路径参数。
+如果列表需要分类，可在 `workflow!()` 中添加可选的 `.category("demo")` 元数据。
+生成的 `workflow! { ... }` 会把 description 等 Node Schema 元数据内聚在对应
+input/output 声明中。
+
+## 查看并运行
+
+```bash
+cargo run --bin lfw -- list
+cargo run --bin lfw -- help lightflow.demo_echo
+cargo run --bin lfw -- run lightflow.demo_echo --input value='"hello"'
+cargo run --bin lfw -- trace last
+```
+
+Cargo 包名 `lightflow-demo-echo` 会派生出工作流 ID `lightflow.demo_echo`；
+Cargo 包版本就是工作流版本。
+
+## 添加现有工作流
+
+添加单个库工作流时可以直接使用 Cargo：
+
+```bash
+cargo add lightflow-text-prompt
+cargo add lightflow-text-prompt --path ../lightflow-std/workflows/text_prompt
+```
+
+也可以使用 LightFlow 的 Cargo 薄封装：
+
+```bash
+lfw add lightflow-text-prompt --version 0.1.0
+lfw import ../lightflow-std
+lfw sync --apply
+```
+
+`lfw import` 适合一次添加包含多个工作流 crate 的仓库。`lfw sync` 会解析已
+声明的 Cargo 依赖、agent skill 和选中的模型需求。

@@ -5,6 +5,7 @@ use std::path::Path;
 
 mod arguments;
 mod builder;
+mod macro_ports;
 use builder::{define_expression, parse_workflow_builder, parse_workflow_builder_with_identity};
 
 pub(super) fn read_optional_workflow_source(path: &Path) -> ApiResult<Option<WorkflowSpec>> {
@@ -126,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    fn workflow_builder_parses_category_metadata() {
+    fn workflow_builder_parses_macro_ports_and_metadata() {
         let root = tempfile::tempdir().expect("tempdir");
         let crate_dir = root.path().join("categorized");
         fs::create_dir_all(crate_dir.join("src")).expect("source dir");
@@ -139,7 +140,36 @@ mod tests {
         fs::write(
             &source,
             r#"pub fn define() -> WorkflowSpec {
-    workflow!().category("media").name("Categorized").build()
+    workflow! {
+        output "image": "artifact" {
+            description: "Generated image.",
+            artifact: "image",
+            model: "image_model",
+        }
+        input "condition": "boolean" {
+            description: "Whether to render.",
+            required: true,
+            default: false,
+            widget: "checkbox",
+        }
+        input "strength": "number" {
+            range: [-1.0, 1.0, 0.05],
+            choices: [0.25, 0.5, 0.75, 1.0],
+        }
+        input "config": "json" {
+            default: {
+                "enabled": true,
+                "items": [null, false, {"offset": -2,},],
+            },
+        }
+        input "negative": "integer" { default: -1, }
+        input "nothing": "json" { default: null, }
+        input "items": "json" { default: [1, "two", false], }
+        input "label": "text" { default: "demo", }
+    }
+    .category("media")
+    .name("Categorized")
+    .build()
 }
 "#,
         )
@@ -148,6 +178,127 @@ mod tests {
         let workflow = read_workflow_source(&source).expect("workflow");
 
         assert_eq!(workflow.category.as_deref(), Some("media"));
+        assert_eq!(workflow.inputs.len(), 7);
+        assert_eq!(workflow.outputs.len(), 1);
+        assert_eq!(workflow.inputs[0].required, Some(true));
+        assert_eq!(workflow.inputs[0].default, Some(serde_json::json!(false)));
+        assert_eq!(workflow.inputs[1].min, Some(-1.0));
+        assert_eq!(workflow.inputs[1].step, Some(0.05));
+        assert_eq!(workflow.inputs[1].enum_values.len(), 4);
+        assert_eq!(
+            workflow.inputs[2].default,
+            Some(serde_json::json!({
+                "enabled": true,
+                "items": [null, false, {"offset": -2}],
+            }))
+        );
+        assert_eq!(workflow.inputs[3].default, Some(serde_json::json!(-1)));
+        assert_eq!(workflow.inputs[4].default, Some(serde_json::Value::Null));
+        assert_eq!(
+            workflow.inputs[5].default,
+            Some(serde_json::json!([1, "two", false]))
+        );
+        assert_eq!(workflow.inputs[6].default, Some(serde_json::json!("demo")));
+        assert_eq!(
+            workflow.outputs[0].model_requirement.as_deref(),
+            Some("image_model")
+        );
+    }
+
+    #[test]
+    fn workflow_builder_rejects_invalid_macro_ports() {
+        for (name, body, expected) in [
+            (
+                "output-required",
+                r#"output "value": "json" { required: true }"#,
+                "unsupported output metadata key: required",
+            ),
+            (
+                "unknown-port",
+                r#"stream "value": "json""#,
+                "must start with input or output",
+            ),
+            (
+                "non-string-name",
+                r#"input value: "json""#,
+                "expected string literal",
+            ),
+            (
+                "choices-not-array",
+                r#"input "value": "json" { choices: true }"#,
+                "choices must be a JSON array",
+            ),
+            (
+                "unknown-input-key",
+                r#"input "value": "json" { mystery: true }"#,
+                "unsupported input metadata key: mystery",
+            ),
+            (
+                "required-expression",
+                r#"input "value": "json" { required: bool::default() }"#,
+                "expected boolean literal",
+            ),
+            (
+                "range-expression",
+                r#"input "value": "number" { range: [minimum(), 1, 1] }"#,
+                "range values must be numeric literals",
+            ),
+            (
+                "duplicate-metadata",
+                r#"input "value": "json" { required: true, required: false }"#,
+                "duplicate metadata key: required",
+            ),
+            (
+                "nested-expression",
+                r#"input "value": "json" { default: {"items": [bool::default()]} }"#,
+                "strict JSON literal syntax",
+            ),
+            (
+                "choices-expression",
+                r#"input "value": "json" { choices: [1, make_value()] }"#,
+                "strict JSON literal syntax",
+            ),
+            (
+                "unquoted-object-key",
+                r#"input "value": "json" { default: {enabled: true} }"#,
+                "expected string literal",
+            ),
+            (
+                "arithmetic-default",
+                r#"input "value": "json" { default: 1 + 2 }"#,
+                "expected `,`",
+            ),
+            (
+                "suffixed-number",
+                r#"input "value": "json" { default: 1u32 }"#,
+                "JSON numbers cannot use Rust suffixes",
+            ),
+        ] {
+            let root = tempfile::tempdir().expect("tempdir");
+            let crate_dir = root.path().join(name);
+            fs::create_dir_all(crate_dir.join("src")).expect("source dir");
+            fs::write(
+                crate_dir.join("Cargo.toml"),
+                format!("[package]\nname = {name:?}\nversion = \"0.1.0\"\n"),
+            )
+            .expect("manifest");
+            let source = crate_dir.join("src/lib.rs");
+            fs::write(
+                &source,
+                format!(
+                    "pub fn define() -> WorkflowSpec {{ workflow! {{ {body} }}.name(\"Invalid\").build() }}\n"
+                ),
+            )
+            .expect("source");
+
+            let error = read_workflow_source(&source).expect_err("invalid macro port");
+
+            assert!(
+                error.message().contains(expected),
+                "{name}: expected {expected:?}, got {:?}",
+                error.message()
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,72 @@
+---
+title: Cargo Packages and Sharing
+description: Add, install, group, and publish workflow packages with Cargo.
+---
+
+# Cargo Packages and Sharing
+
+Package source uses the metadata-rich `workflow! { input ... output ... }`
+syntax. Older builder-style port calls remain source compatible.
+
+## Add a reusable library workflow
+
+```bash
+cargo add lightflow-text-prompt
+cargo add lightflow-text-prompt --git https://github.com/example/workflows.git
+cargo add lightflow-text-prompt --path ../workflows/text_prompt
+```
+
+`lfw add` writes the same standard dependency forms and adds LightFlow-specific
+reporting:
+
+```bash
+lfw add lightflow-text-prompt --version 0.1.0
+lfw add lightflow-text-prompt --path ../workflows/text_prompt --editable
+lfw add lightflow-text-prompt --git https://github.com/example/workflows.git \
+  --package lightflow-text-prompt
+```
+
+## Install an executable workflow
+
+```bash
+cargo install my-workflow --bin my-workflow-cli
+cargo install --git https://github.com/example/workflows.git \
+  my-workflow --bin my-workflow-cli
+```
+
+One package can publish one library workflow and multiple named binaries.
+Consumers choose the reusable library with `cargo add` or an executable with
+`cargo install --bin`. Installation works only when that package actually
+declares the selected `[[bin]]` target.
+
+## Manage a workflow family
+
+A repository can be a normal Cargo workspace whose `workflows/` directory
+contains many independent crates:
+
+```text
+Cargo.toml
+workflows/
+  text_prompt/
+  text_result/
+  text_plan/
+```
+
+Use `lfw import /path/to/repository` to discover and add every
+`workflows/<crate>` member. Use `--global` to install into the LightFlow home.
+The source repository keeps its own `[workspace.dependencies]`; Cargo still
+owns resolution and `Cargo.lock`.
+
+## Publish
+
+```bash
+cargo publish -p lightflow-text-prompt
+cargo publish -p lightflow-text-plan
+lfw publish lightflow.text_plan
+lfw publish lightflow.text_plan --apply
+lfw publish --workflows --require-publishable
+```
+
+`cargo publish` is the package publisher. `lfw publish` adds workflow validation,
+agent-skill checks, dependency ordering, loop review gates, and Cargo dry-run
+checks before delegating to Cargo.

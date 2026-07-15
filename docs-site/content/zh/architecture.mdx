@@ -1,0 +1,34 @@
+---
+title: 系统架构
+description: LightFlow 的源码、服务、运行时和适配器边界。
+---
+
+# 系统架构
+
+LightFlow 只保留一个主要领域概念：Workflow。Leaf workflow 暴露端口和 runtime
+capability；composite workflow 用其他工作流组成 DAG。系统没有独立的顶层
+component 概念，也没有编辑器私有文件格式。
+
+## 事实来源
+
+- Cargo 包名和版本定义工作流身份。
+- `src/lib.rs` 通过 `workflow!()` 定义元数据、端口、依赖、模型、runtime 和 DAG。
+- 后端通过 Rust AST 静态发现；列出工作流时不会编译工作流文件。
+- Agent 使用说明共置在 `.agent/skills/`。
+
+## 后端分层
+
+1. Source discovery 读取扁平本地集合、配置项目、`LFW_PATH` 和 Cargo 依赖。
+2. `ApiService` 独立于 HTTP，统一完成验证和查询。
+3. Planner 解析工作流依赖、runtime capability 和 model lock。
+4. Runner 执行 leaf 与 composite DAG，并记录 run、event 和 artifact。
+5. CLI、HTTP、MCP 和编辑器使用同一组 service contract。
+
+## 复用边界
+
+Cargo 负责包下载、feature、lockfile、库依赖、可执行安装和发布。LightFlow 增加
+工作流发现、node contract、模型选择、agent-skill sync、执行与 review gate。
+因此工作流打包始终兼容 Rust 生态。
+
+更完整的实现地图见仓库中的
+[`docs/architecture.md`](https://github.com/lightjunction/LightFlow/blob/main/docs/architecture.md)。

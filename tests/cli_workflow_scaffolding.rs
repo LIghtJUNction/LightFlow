@@ -88,12 +88,13 @@ fn lfw_init_and_add_create_rust_workflow_files() -> Result<(), Box<dyn std::erro
     assert_eq!(second_init["config"]["workflow_workspace_created"], false);
     let path = root.join(".lightflow/workflows/extra/src/lib.rs");
     let source = fs::read_to_string(path)?;
-    assert!(source.contains("workflow!()"));
+    assert!(source.contains("workflow! {"));
     assert!(!source.contains(".version("));
     assert!(source.contains(".name(\"Extra Workflow\")"));
-    assert!(source.contains(".input_description(\"value\""));
-    assert!(source.contains(".input_required(\"value\", true)"));
-    assert!(source.contains(".input_widget(\"value\", \"json\")"));
+    assert!(source.contains("input \"value\": \"json\" {"));
+    assert!(source.contains("description: \"TODO: describe the input value.\","));
+    assert!(source.contains("required: true,"));
+    assert!(source.contains("widget: \"json\","));
     let skill = fs::read_to_string(
         root.join(".lightflow/workflows/extra/.agent/skills/lightflow-extra/SKILL.md"),
     )?;
@@ -279,10 +280,12 @@ fn lfw_new_runtime_template_creates_node_contract_files() -> Result<(), Box<dyn 
         ".builtin_runtime(\"image_runtime\", \"lightflow.image.generate\", \"builtin.preview.v1\")"
     ));
     assert!(!source.contains(".model(\"image_model\", \"text-to-image\")"));
-    assert!(source.contains(".input_widget(\"prompt\", \"prompt\")"));
+    assert!(source.contains("input \"prompt\": \"text\" {"));
+    assert!(source.contains("widget: \"prompt\","));
     assert!(!source.contains(".input_model_requirement("));
     assert!(!source.contains(".output_model_requirement("));
-    assert!(source.contains(".output_artifact_kind(\"image\", \"image\")"));
+    assert!(source.contains("output \"image\": \"artifact\" {"));
+    assert!(source.contains("artifact: \"image\","));
 
     let skill =
         fs::read_to_string(crate_dir.join(".agent/skills/lightflow-my-flux-sampler/SKILL.md"))?;

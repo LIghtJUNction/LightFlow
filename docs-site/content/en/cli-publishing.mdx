@@ -1,0 +1,59 @@
+---
+title: CLI and Publishing
+description: Common project, dependency, model, run, and release commands.
+---
+
+# CLI and Publishing
+
+## Project and global workflows
+
+```bash
+lfw init --workflow
+lfw new text_echo --name "Text Echo"
+lfw new global_echo --name "Global Echo" --global
+lfw home
+lfw list
+lfw list --category text
+lfw info
+```
+
+## Dependencies and shared repositories
+
+```bash
+lfw add lightflow-text-prompt --version 0.1.0
+lfw add lightflow-text-prompt --path ../lightflow-std/workflows/text_prompt --editable
+lfw import ../lightflow-std
+lfw import https://github.com/example/lightflow-workflows.git --global
+lfw update
+lfw upgrade --global
+lfw sync lightflow.image_prompt --auto-model --apply
+```
+
+## Validate and run
+
+```bash
+lfw help lightflow.text_plan
+lfw deps lightflow.text_plan
+lfw node test lightflow.text_plan
+lfw plan lightflow.text_plan
+lfw run lightflow.text_plan --input value='{"topic":"demo"}'
+lfw trace last
+lfw replay
+```
+
+## Publish and release
+
+```bash
+lfw publish lightflow.text_plan
+lfw publish lightflow.text_plan --apply
+lfw publish --workflows --require-publishable
+lfw release check
+cargo publish -p lightflow-text-plan
+cargo install my-workflow --bin my-workflow-cli
+```
+
+Use Cargo commands when the operation is purely package-oriented. Use `lfw`
+when workflow validation, model readiness, skills, execution, project/global
+scope, or dependency-aware publishing matters.
+The install example requires `my-workflow` to declare
+`[[bin]] name = "my-workflow-cli"`.

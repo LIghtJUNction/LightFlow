@@ -1,0 +1,38 @@
+---
+title: LightFlow 0.1.4
+description: Source-controlled Rust workflows that Cargo can install, share, and publish.
+---
+
+# LightFlow 0.1.4
+
+LightFlow is a backend-first workflow environment for human-directed AI
+pipelines. A workflow is an ordinary Rust library crate: Cargo owns package
+identity, dependencies, installation, and publishing, while LightFlow provides
+discovery, validation, execution, models, local history, HTTP, MCP, and editor
+contracts.
+
+## What changed in 0.1.4
+
+- Workflow collections are flat: `workflows/<crate>` and
+  `.lightflow/workflows/<crate>`.
+- `workflow!()` derives the workflow ID and version from Cargo package metadata.
+- A package owns one reusable library workflow and may expose multiple executable
+  workflows through `[[bin]]` targets.
+- Standard Cargo flows work: `cargo add`, `cargo install --bin`, and
+  `cargo publish`.
+- `lfw migrate [path]` converts legacy two-level collections after a full
+  conflict preflight.
+
+## Choose a path
+
+1. [Quick Start](/en/getting-started/) creates and runs a local workflow.
+2. [Workflow Development](/en/workflow-development/) explains library and
+   executable workflows.
+3. [Cargo Packages and Sharing](/en/cargo-sharing/) covers dependencies,
+   installation, multi-workflow repositories, and publishing.
+4. [Flat Layout and Migration](/en/data-layout/) documents every supported
+   collection path.
+
+LightFlow does not require an external execution substrate. Workflow source is
+the reviewable source of truth; runtime state and model files stay outside the
+workflow crates.

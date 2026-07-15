@@ -280,6 +280,7 @@ impl From<WorkflowBuilder> for WorkflowSpec {
 
 #[cfg(test)]
 mod tests {
+    use crate::workflow;
     use crate::workflow::workflow_with_identity;
 
     #[test]
@@ -289,5 +290,64 @@ mod tests {
             .build();
 
         assert_eq!(workflow.category.as_deref(), Some("media"));
+    }
+
+    #[test]
+    fn workflow_macro_builds_ports_with_native_metadata() {
+        let workflow = workflow! {
+            output "image": "artifact" {
+                description: "Generated image.",
+                artifact: "image",
+                model: "image_model",
+            }
+            input "condition": "boolean" {
+                description: "Whether to render.",
+                required: true,
+                default: false,
+                widget: "checkbox",
+            }
+            input "strength": "number" {
+                range: [0.0, 1.0, 0.05],
+                choices: [0.25, 0.5, 0.75, 1.0],
+            }
+            input "images": "artifact[]"
+            input "config": "json" {
+                default: {
+                    "enabled": true,
+                    "items": [null, false, {"offset": -2,},],
+                },
+            }
+            input "offset": "integer" {
+                default: -1,
+                range: [-10, 10, 1],
+            }
+        }
+        .name("Macro ports")
+        .build();
+
+        assert_eq!(workflow.inputs.len(), 5);
+        assert_eq!(workflow.outputs.len(), 1);
+        assert_eq!(workflow.inputs[0].default, Some(serde_json::json!(false)));
+        assert_eq!(
+            workflow.inputs[1].enum_values,
+            serde_json::json!([0.25, 0.5, 0.75, 1.0])
+                .as_array()
+                .expect("choices")
+                .clone()
+        );
+        assert_eq!(
+            workflow.outputs[0].model_requirement.as_deref(),
+            Some("image_model")
+        );
+        assert_eq!(workflow.inputs[2].ty, "artifact[]");
+        assert_eq!(
+            workflow.inputs[3].default,
+            Some(serde_json::json!({
+                "enabled": true,
+                "items": [null, false, {"offset": -2}],
+            }))
+        );
+        assert_eq!(workflow.inputs[4].default, Some(serde_json::json!(-1)));
+        assert_eq!(workflow.inputs[4].min, Some(-10.0));
     }
 }

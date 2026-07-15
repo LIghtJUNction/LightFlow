@@ -1,0 +1,68 @@
+---
+title: Cargo 包与共享
+description: 用 Cargo 添加、安装、集中管理和发布工作流包。
+---
+
+# Cargo 包与共享
+
+包源码使用元数据内聚的 `workflow! { input ... output ... }` 语法；旧 builder
+端口调用继续保持源码兼容。
+
+## 添加可复用库工作流
+
+```bash
+cargo add lightflow-text-prompt
+cargo add lightflow-text-prompt --git https://github.com/example/workflows.git
+cargo add lightflow-text-prompt --path ../workflows/text_prompt
+```
+
+`lfw add` 写入同样的标准 Cargo 依赖，并补充 LightFlow 报告：
+
+```bash
+lfw add lightflow-text-prompt --version 0.1.0
+lfw add lightflow-text-prompt --path ../workflows/text_prompt --editable
+lfw add lightflow-text-prompt --git https://github.com/example/workflows.git \
+  --package lightflow-text-prompt
+```
+
+## 安装可执行工作流
+
+```bash
+cargo install my-workflow --bin my-workflow-cli
+cargo install --git https://github.com/example/workflows.git \
+  my-workflow --bin my-workflow-cli
+```
+
+一个包可以发布一个 library workflow 和多个命名 binary。使用方通过
+`cargo add` 选择可复用库，通过 `cargo install --bin` 选择可执行入口。
+只有包确实声明了对应 `[[bin]]` target 时，安装命令才成立。
+
+## 集中管理工作流家族
+
+一个仓库可以是普通 Cargo workspace，`workflows/` 直接包含多个独立 crate：
+
+```text
+Cargo.toml
+workflows/
+  text_prompt/
+  text_result/
+  text_plan/
+```
+
+执行 `lfw import /path/to/repository` 可发现并添加所有
+`workflows/<crate>` 成员；添加 `--global` 则安装到 LightFlow 全局 home。
+源仓库继续拥有自己的 `[workspace.dependencies]`，依赖解析和 `Cargo.lock`
+仍由 Cargo 负责。
+
+## 发布
+
+```bash
+cargo publish -p lightflow-text-prompt
+cargo publish -p lightflow-text-plan
+lfw publish lightflow.text_plan
+lfw publish lightflow.text_plan --apply
+lfw publish --workflows --require-publishable
+```
+
+`cargo publish` 是真正的包发布器。`lfw publish` 会先增加工作流验证、agent
+skill 检查、依赖排序、loop review gate 和 Cargo dry-run，再交给 Cargo。

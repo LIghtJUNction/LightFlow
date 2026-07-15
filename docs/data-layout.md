@@ -7,7 +7,7 @@ LightFlow project workflow files are ordinary source-controlled files under
 ```text
 .lightflow/
   workflows/
-    <short-name>/
+    <crate>/
       Cargo.toml
       src/
         lib.rs
@@ -258,7 +258,7 @@ A LightFlow home is a normal Cargo workspace:
   Cargo.toml
   repos/
   workflows/
-    <short-name>/
+    <crate>/
       Cargo.toml
       src/
         lib.rs
@@ -270,7 +270,7 @@ This gives globally imported workflows one shared dependency environment,
 analogous to a small language-specific environment for LightFlow workflows.
 `lfw home` prints this root, its `Cargo.toml`, the workflow source directory,
 and the repo cache. `lfw new --global` creates workflow crates under
-`workflows/<short-name>`, and `lfw add --global` writes dependencies
+`workflows/<crate>`, and `lfw add --global` writes dependencies
 to the home `Cargo.toml`. The backend scans this global workspace manifest for
 Cargo `path` dependencies, so global CLI-installed path workflows are available
 through normal workflow lookup. `lfw update --global` runs `cargo fetch` in this
@@ -308,15 +308,16 @@ Each workflow is a Rust library crate with embedded metadata and definition in
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow!()
+    workflow! {
+        input "value": "json" {
+            description: "Value to process.",
+            required: true,
+            widget: "json",
+        }
+        output "text": "text" { description: "Processed text output.", }
+    }
         .name("Example")
         .description("Reusable workflow definition.")
-        .input("value", "json")
-        .input_description("value", "Value to process.")
-        .input_required("value", true)
-        .input_widget("value", "json")
-        .output("text", "text")
-        .output_description("text", "Processed text output.")
         .build()
 }
 ```
@@ -328,9 +329,9 @@ from `Cargo.toml`. Package `lightflow-example-flow` maps to
 
 Input and output ports can carry Node Schema v1 metadata for editor and agent
 tooling: descriptions, required/default values, numeric ranges, enum choices,
-widget hints, artifact kinds, and model requirement bindings. The short
-`.input(name, type)` and `.output(name, type)` forms remain valid for minimal
-workflows.
+widget hints, artifact kinds, and model requirement bindings. The block form
+`workflow! { input ... output ... }` keeps metadata with each port, and
+legacy `.input(...)` / `.output(...)` calls remain source-compatible.
 
 Composite workflows nest other workflows with `.node()` and connect node ports
 with `.edge()`:
@@ -581,7 +582,7 @@ readiness, project workspace catalog, and selected-workflow or project-scoped
 release readiness templates.
 
 Standard workflow nodes live in the `lightflow-std` workflow project under
-`projects/lightflow-std/workflows/<short-name>` when that sibling project is
+`projects/lightflow-std/workflows/<crate>` when that sibling project is
 checked out as part of the local project set. The core repository discovers
 project workflow sources listed in `projects/lightflow-projects.toml`
 `[workflows].default_sources`; this repo keeps `lightflow-std` there so
@@ -637,7 +638,7 @@ import plugin or workflow crates.
 ## Imported Workflow Dependencies
 
 A workflow can be installed as a Cargo dependency. The backend scans local
-workflow crates under `workflows/<short-name>/` and also
+workflow crates under `workflows/<crate>/` and also
 scans `path` dependencies declared in the project `Cargo.toml`:
 
 ```toml

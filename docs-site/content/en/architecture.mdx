@@ -1,0 +1,39 @@
+---
+title: Architecture
+description: The source, service, runtime, and adapter boundaries of LightFlow.
+---
+
+# Architecture
+
+LightFlow keeps one primary domain concept: a workflow. A leaf workflow exposes
+ports and a runtime capability; a composite workflow forms a DAG from other
+workflows. There is no separate top-level component or visual-editor format.
+
+## Source of truth
+
+- Cargo package name and version define workflow identity.
+- `src/lib.rs` defines metadata, ports, dependencies, models, runtimes, and DAG
+  structure through `workflow!()`.
+- The backend parses the Rust AST statically for discovery; it does not compile
+  workflow files during listing.
+- Agent guidance is colocated under `.agent/skills/`.
+
+## Backend layers
+
+1. Source discovery reads flat local collections, configured projects,
+   `LFW_PATH`, and Cargo dependencies.
+2. `ApiService` validates and exposes workflows without depending on HTTP.
+3. The planner resolves dependencies, runtime capabilities, and model locks.
+4. The runner executes leaves and composite DAGs, recording runs, events, and
+   artifacts.
+5. CLI, HTTP, MCP, and the editor use the same service contracts.
+
+## Reuse boundaries
+
+Cargo handles package fetch, features, lockfiles, library dependencies,
+executable installation, and publication. LightFlow adds workflow discovery,
+node contracts, model selection, agent-skill sync, execution, and review gates.
+This keeps workflow packaging compatible with the Rust ecosystem.
+
+For the detailed implementation map, see the repository's
+[`docs/architecture.md`](https://github.com/lightjunction/LightFlow/blob/main/docs/architecture.md).

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 mod builder;
 mod execution;
 mod patch_types;
+mod port_macro;
 mod program;
 mod requirements;
 pub use builder::WorkflowBuilder;
@@ -293,10 +294,144 @@ pub(crate) fn workflow_with_identity(
     }
 }
 
+#[doc(hidden)]
+pub const fn assert_workflow_json_literal(source: &str) {
+    let bytes = source.as_bytes();
+    assert!(!bytes.is_empty(), "JSON literal cannot be empty");
+    if bytes[0] == b'"' {
+        assert!(
+            bytes.len() >= 2 && bytes[bytes.len() - 1] == b'"',
+            "JSON strings must use ordinary quoted string literals"
+        );
+        return;
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        assert!(
+            byte.is_ascii_digit()
+                || byte == b'-'
+                || byte == b'+'
+                || byte == b'.'
+                || byte == b'e'
+                || byte == b'E',
+            "JSON numbers cannot use Rust suffixes or non-JSON tokens"
+        );
+        index += 1;
+    }
+}
+
+#[doc(hidden)]
+pub const fn assert_workflow_json_string_literal(source: &str) {
+    let bytes = source.as_bytes();
+    assert!(
+        bytes.len() >= 2 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"',
+        "JSON object keys must use ordinary quoted string literals"
+    );
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn parse_workflow_json_literal(source: &str) -> serde_json::Value {
+    serde_json::from_str(source).expect("validated workflow JSON literal")
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn parse_workflow_json_string_literal(source: &str) -> String {
+    serde_json::from_str(source).expect("validated workflow JSON string literal")
+}
+
 /// Starts a workflow definition using the calling Cargo package name and version.
+///
+/// Port metadata is declared with the port. Output-only metadata is deliberately
+/// restricted to descriptions, artifact kinds, and model bindings.
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+///
+/// let _ = workflow! {
+///     output "value": "json" { required: true }
+/// };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { required: bool::default() } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! {
+///     input "value": "json" { description: "first", description: "second" }
+/// };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// fn minimum() -> f64 { 0.0 }
+/// let _ = workflow! { input "value": "number" { range: [minimum(), 1.0, 0.1] } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! {
+///     input "value": "json" { default: {"items": [bool::default()]} }
+/// };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// fn make_value() -> i32 { 1 }
+/// let _ = workflow! { input "value": "json" { choices: [1, make_value()] } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { default: {enabled: true} } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { default: 1 + 2 } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { default: 1u32 } };
+/// ```
 #[macro_export]
 macro_rules! workflow {
     () => {
         $crate::workflow::workflow_from_package(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
     };
+    (@ports $builder:ident;) => {
+        $builder
+    };
+    (@ports $builder:ident; input $name:literal : $ty:literal { $($metadata:tt)* } $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.input($name, $ty);
+        let __lightflow_builder = $crate::__lightflow_input_metadata!(
+            __lightflow_builder, $name; [no no no no no no no no]; $($metadata)* ,);
+        $crate::workflow!(@ports __lightflow_builder; $($rest)*)
+    }};
+    (@ports $builder:ident; input $name:literal : $ty:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.input($name, $ty);
+        $crate::workflow!(@ports __lightflow_builder; $($rest)*)
+    }};
+    (@ports $builder:ident; output $name:literal : $ty:literal { $($metadata:tt)* } $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.output($name, $ty);
+        let __lightflow_builder = $crate::__lightflow_output_metadata!(
+            __lightflow_builder, $name; [no no no]; $($metadata)* ,);
+        $crate::workflow!(@ports __lightflow_builder; $($rest)*)
+    }};
+    (@ports $builder:ident; output $name:literal : $ty:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.output($name, $ty);
+        $crate::workflow!(@ports __lightflow_builder; $($rest)*)
+    }};
+
+    ($($ports:tt)+) => {{
+        let __lightflow_builder =
+            $crate::workflow::workflow_from_package(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        $crate::workflow!(@ports __lightflow_builder; $($ports)+)
+    }};
 }

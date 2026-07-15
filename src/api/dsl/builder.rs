@@ -10,6 +10,7 @@ use std::path::Path;
 
 mod ports;
 
+use super::macro_ports::apply_workflow_macro_ports;
 use ports::apply_port_builder_method;
 
 pub(super) fn define_expression(function: &syn::ItemFn) -> Option<&syn::Expr> {
@@ -234,17 +235,11 @@ fn parse_workflow_builder_with_package(
             Ok(workflow)
         }
         syn::Expr::Macro(call) if is_workflow_macro(&call.mac.path) => {
-            if !call.mac.tokens.is_empty() {
-                return Err(ApiError::InvalidRequest(format!(
-                    "workflow!() takes no arguments in {:?}",
-                    path
-                )));
-            }
             let (id, version) = match package_identity {
                 Some((id, version)) => (id.to_owned(), version.to_owned()),
                 None => workflow_package_identity_from_source(path)?,
             };
-            Ok(WorkflowSpec {
+            let mut workflow = WorkflowSpec {
                 id,
                 version,
                 name: String::new(),
@@ -258,7 +253,9 @@ fn parse_workflow_builder_with_package(
                 runtimes: Vec::new(),
                 nodes: Vec::new(),
                 edges: Vec::new(),
-            })
+            };
+            apply_workflow_macro_ports(&mut workflow, call, path)?;
+            Ok(workflow)
         }
         _ => Err(ApiError::InvalidRequest(format!(
             "unsupported workflow definition expression in {:?}",
