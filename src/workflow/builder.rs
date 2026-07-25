@@ -1,7 +1,7 @@
 use super::{
     CargoDependency, CargoDependencySource, ModelProvider, ModelRequirement, ModelVariant,
-    RuntimeRequirement, WorkflowCondition, WorkflowDependencyRequirement, WorkflowEdge,
-    WorkflowEndpoint, WorkflowNode, WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
+    RuntimeRequirement, WorkflowCondition, WorkflowEdge, WorkflowEndpoint, WorkflowNode,
+    WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
 };
 
 mod ports;
@@ -307,33 +307,19 @@ impl WorkflowBuilder {
         version: Option<String>,
         install: Option<CargoDependency>,
     ) {
-        if let Some(existing) = self
-            .spec
-            .dependencies
-            .iter_mut()
-            .find(|dependency| dependency.workflow_id == workflow_id)
-        {
-            if let Some(version) = version {
-                existing.version = Some(version);
-            }
-            if install.is_some() {
-                existing.install = install;
-            }
-            return;
-        }
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id,
-            version,
-            install,
-        });
+        self.spec.merge_dependency(workflow_id, version, install);
     }
 }
 
 fn split_endpoint(value: &str) -> (String, String) {
-    match value.split_once('.') {
-        Some((node, port)) => (node.to_owned(), port.to_owned()),
-        None => (value.to_owned(), String::new()),
-    }
+    let (node, port) = value
+        .split_once('.')
+        .unwrap_or_else(|| panic!("invalid endpoint {value:?}: expected `<node>.<port>`"));
+    assert!(
+        !node.is_empty() && !port.is_empty(),
+        "invalid endpoint {value:?}: node and port must both be non-empty"
+    );
+    (node.to_owned(), port.to_owned())
 }
 
 impl From<WorkflowBuilder> for WorkflowSpec {
@@ -485,5 +471,11 @@ mod tests {
 
         assert_eq!(workflow.edges[0].from.port, "out");
         assert_eq!(workflow.edges[0].to.port, "in");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid endpoint")]
+    fn wire_rejects_endpoint_without_dot() {
+        let _ = workflow_with_identity("lightflow.example", "0.1.0").wire("a", "b.in");
     }
 }

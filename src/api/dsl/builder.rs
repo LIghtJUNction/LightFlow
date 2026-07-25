@@ -3,8 +3,8 @@ use crate::api::workflow_package_identity_from_source;
 use crate::api::{ApiError, ApiResult};
 use crate::workflow::{
     CargoDependency, CargoDependencySource, ModelProvider, ModelRequirement, ModelVariant,
-    RuntimeRequirement, WorkflowCondition, WorkflowDependencyRequirement, WorkflowEdge,
-    WorkflowEndpoint, WorkflowNode, WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
+    RuntimeRequirement, WorkflowCondition, WorkflowEdge, WorkflowEndpoint, WorkflowNode,
+    WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
 };
 use std::path::Path;
 
@@ -323,31 +323,18 @@ fn register_dependency(
     version: Option<String>,
     install: Option<CargoDependency>,
 ) {
-    if let Some(existing) = workflow
-        .dependencies
-        .iter_mut()
-        .find(|dependency| dependency.workflow_id == workflow_id)
-    {
-        if let Some(version) = version {
-            existing.version = Some(version);
-        }
-        if install.is_some() {
-            existing.install = install;
-        }
-        return;
-    }
-    workflow.dependencies.push(WorkflowDependencyRequirement {
-        workflow_id,
-        version,
-        install,
-    });
+    workflow.merge_dependency(workflow_id, version, install);
 }
 
 fn split_endpoint(value: &str) -> (String, String) {
-    match value.split_once('.') {
-        Some((node, port)) => (node.to_owned(), port.to_owned()),
-        None => (value.to_owned(), String::new()),
-    }
+    let (node, port) = value
+        .split_once('.')
+        .unwrap_or_else(|| panic!("invalid endpoint {value:?}: expected `<node>.<port>`"));
+    assert!(
+        !node.is_empty() && !port.is_empty(),
+        "invalid endpoint {value:?}: node and port must both be non-empty"
+    );
+    (node.to_owned(), port.to_owned())
 }
 
 fn push_hf_model_variant(

@@ -52,6 +52,38 @@ pub struct WorkflowSpec {
     pub edges: Vec<WorkflowEdge>,
 }
 
+impl WorkflowSpec {
+    /// Insert or update a dependency requirement keyed by `workflow_id`.
+    ///
+    /// A later non-empty `version` or `install` overwrites the previous value;
+    /// omitting either field leaves the existing entry unchanged.
+    pub fn merge_dependency(
+        &mut self,
+        workflow_id: String,
+        version: Option<String>,
+        install: Option<CargoDependency>,
+    ) {
+        if let Some(existing) = self
+            .dependencies
+            .iter_mut()
+            .find(|dependency| dependency.workflow_id == workflow_id)
+        {
+            if let Some(version) = version {
+                existing.version = Some(version);
+            }
+            if install.is_some() {
+                existing.install = install;
+            }
+            return;
+        }
+        self.dependencies.push(WorkflowDependencyRequirement {
+            workflow_id,
+            version,
+            install,
+        });
+    }
+}
+
 /// A named typed input or output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PortSpec {

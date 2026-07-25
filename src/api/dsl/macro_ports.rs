@@ -1,7 +1,7 @@
 use crate::api::{ApiError, ApiResult};
 use crate::workflow::{
-    PortSpec, WorkflowDependencyRequirement, WorkflowEdge, WorkflowEndpoint, WorkflowNode,
-    WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
+    PortSpec, WorkflowEdge, WorkflowEndpoint, WorkflowNode, WorkflowNodeKind, WorkflowPosition,
+    WorkflowSpec,
 };
 use std::path::Path;
 use syn::parse::{Parse, ParseStream};
@@ -81,21 +81,7 @@ pub(super) fn apply_workflow_macro_ports(
 }
 
 fn register_dependency(workflow: &mut WorkflowSpec, workflow_id: String, version: Option<String>) {
-    if let Some(existing) = workflow
-        .dependencies
-        .iter_mut()
-        .find(|dependency| dependency.workflow_id == workflow_id)
-    {
-        if let Some(version) = version {
-            existing.version = Some(version);
-        }
-        return;
-    }
-    workflow.dependencies.push(WorkflowDependencyRequirement {
-        workflow_id,
-        version,
-        install: None,
-    });
+    workflow.merge_dependency(workflow_id, version, None);
 }
 
 struct WorkflowMacroBody(Vec<WorkflowItem>);
