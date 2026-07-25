@@ -288,6 +288,66 @@ may run the workflow. Use `.builtin_runtime(id, capability, engine)` when the
 workflow requires a specific builtin engine, such as `builtin.preview.v1` or
 `builtin.llm.mock.v1`.
 
+### External command workflows
+
+Use the explicit command engine for plugin-owned local tools whose behavior
+should not be hard-coded into LightFlow:
+
+```rust
+pub fn define() -> WorkflowSpec {
+    workflow! {
+        input "request": "json" {
+            description: "Structured command request.",
+            required: true,
+            widget: "json",
+        }
+        output "result": "json" {
+            description: "Structured command result.",
+        }
+    }
+        .name("External Tool")
+        .description("Run a plugin-owned tool through the command protocol.")
+        .builtin_runtime(
+            "command",
+            "lightflow.command.run",
+            "process.command.v1",
+        )
+        .build()
+}
+```
+
+Set `LIGHTFLOW_COMMAND_RUNNER` to one executable file. The executor starts that
+path directly from the LightFlow project root without a shell. It writes:
+
+```json
+{
+  "protocol": "lightflow.command.v1",
+  "workflow": {"id": "lightflow.external_tool", "version": "0.1.0"},
+  "inputs": {"request": {"value": "example"}}
+}
+```
+
+The runner must write one JSON response to stdout:
+
+```json
+{
+  "outputs": {"result": {"status": "ok"}},
+  "artifacts": [],
+  "replay_fingerprint": {
+    "runner": "example-tool",
+    "version": "1.0.0"
+  }
+}
+```
+
+Every declared output must be present and unknown outputs are rejected.
+Artifacts use the normal `WorkflowArtifact` fields (`id`, `kind`, `path`,
+`mime_type`, and optional `metadata`) and must name existing files. Stdout is
+limited to 16 MiB, stderr to 256 KiB, and the default timeout is 30 minutes.
+`LIGHTFLOW_COMMAND_TIMEOUT_MS` may select `1..=86400000` milliseconds.
+Dispatching multiple workflows is the runner's responsibility; use the
+workflow id in the request rather than shell interpolation.
+
 ### Generic ComfyUI workflows
 
 Generate the API executor scaffold with:

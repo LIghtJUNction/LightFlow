@@ -1,5 +1,6 @@
 use super::{ApiError, ApiResult};
 use std::path::Path;
+#[cfg(feature = "gguf")]
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

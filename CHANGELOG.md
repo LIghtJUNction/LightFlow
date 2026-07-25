@@ -23,6 +23,27 @@
   `#[trace_node]`, `#[retry]`, `#[timeout]`) and `WorkflowInput` /
   `WorkflowOutput` derives are removed; use `run_node` / `Runnable` directly.
 
+### Runtime
+
+- Add the explicit `lightflow.command.run` / `process.command.v1` executor for
+  versioned JSON process integrations. The runner is invoked directly without
+  a shell, with bounded output, strict output/artifact validation, descendant
+  termination on timeout, and structured replay fingerprints.
+
+### Workflows
+
+- Make `projects/lightflow-auto-editing` executable end to end: deterministic
+  media planning, real FFmpeg rendering, audio preservation, silence removal,
+  visual scene detection, bounded segment pacing, atomic output, source-media
+  replay hashes, and colocated agent skills for planning, rendering, and
+  one-shot automatic edits.
+
+### Quality
+
+- Add code CI for source-shape, Rust formatting/tests/Clippy, Python Ruff and
+  unit tests, real FFmpeg integration tests, workflow crate checks, and all
+  automatic-edit node contracts.
+
 ## 0.1.4 - 2026-07-11
 
 ### CLI

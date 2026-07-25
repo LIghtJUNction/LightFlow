@@ -5,16 +5,17 @@ use std::collections::BTreeMap;
 
 mod types;
 pub(super) use types::{
-    COMFYUI_API_ENGINE, COMFYUI_WORKFLOW_CAPABILITY, CONTROL_IF_CAPABILITY,
-    CONTROL_MERGE_CAPABILITY, CONTROL_SPLIT_CAPABILITY, CONTROL_SWITCH_CAPABILITY, DataPolicy,
-    ExecutionAtom, ExecutionPlan, ExecutionPlanNode, ExecutionRecipe, FLUX_EXTERNAL_ENGINE,
-    FLUX_NATIVE_ENGINE, IMAGE_CROP_CAPABILITY, IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY,
-    IMAGE_INPAINT_CAPABILITY, IMAGE_INVERT_CAPABILITY, IMAGE_LOAD_CAPABILITY,
-    IMAGE_RESIZE_CAPABILITY, IMAGE_SAVE_CAPABILITY, IMAGE_UPSCALE_CAPABILITY, INVERT_ENGINE,
-    JSON_EXTRACT_CAPABILITY, LLM_CLASSIFY_CAPABILITY, LLM_GENERATE_CAPABILITY, LLM_MOCK_ENGINE,
-    LLM_STRUCTURED_OUTPUT_CAPABILITY, MASK_COMPOSE_CAPABILITY, MODEL_LOCK_CHECK_CAPABILITY,
-    MODEL_SELECT_CAPABILITY, PREVIEW_EDIT_ENGINE, PREVIEW_ENGINE, PREVIEW_INPAINT_ENGINE,
-    PlannedModel, TEXT_CONCAT_CAPABILITY, TEXT_REGEX_CAPABILITY, TEXT_TEMPLATE_CAPABILITY,
+    COMFYUI_API_ENGINE, COMFYUI_WORKFLOW_CAPABILITY, COMMAND_ENGINE, COMMAND_RUN_CAPABILITY,
+    CONTROL_IF_CAPABILITY, CONTROL_MERGE_CAPABILITY, CONTROL_SPLIT_CAPABILITY,
+    CONTROL_SWITCH_CAPABILITY, DataPolicy, ExecutionAtom, ExecutionPlan, ExecutionPlanNode,
+    ExecutionRecipe, FLUX_EXTERNAL_ENGINE, FLUX_NATIVE_ENGINE, IMAGE_CROP_CAPABILITY,
+    IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY, IMAGE_INPAINT_CAPABILITY,
+    IMAGE_INVERT_CAPABILITY, IMAGE_LOAD_CAPABILITY, IMAGE_RESIZE_CAPABILITY, IMAGE_SAVE_CAPABILITY,
+    IMAGE_UPSCALE_CAPABILITY, INVERT_ENGINE, JSON_EXTRACT_CAPABILITY, LLM_CLASSIFY_CAPABILITY,
+    LLM_GENERATE_CAPABILITY, LLM_MOCK_ENGINE, LLM_STRUCTURED_OUTPUT_CAPABILITY,
+    MASK_COMPOSE_CAPABILITY, MODEL_LOCK_CHECK_CAPABILITY, MODEL_SELECT_CAPABILITY,
+    PREVIEW_EDIT_ENGINE, PREVIEW_ENGINE, PREVIEW_INPAINT_ENGINE, PlannedModel,
+    TEXT_CONCAT_CAPABILITY, TEXT_REGEX_CAPABILITY, TEXT_TEMPLATE_CAPABILITY,
 };
 pub use types::{
     WorkflowPlan, WorkflowPlanAtom, WorkflowPlanNode, WorkflowPlannedModel, WorkflowRuntimePlan,
@@ -293,6 +294,7 @@ fn node_kind(kind: WorkflowNodeKind) -> &'static str {
 fn recipe_name(recipe: ExecutionRecipe) -> &'static str {
     match recipe {
         ExecutionRecipe::Passthrough => "passthrough",
+        ExecutionRecipe::ExternalCommand => "external_command",
         ExecutionRecipe::ComfyUiWorkflow => "comfyui_workflow",
         ExecutionRecipe::PreviewTextToImage => "preview_text_to_image",
         ExecutionRecipe::FluxTextToImage => "flux_text_to_image",
@@ -386,5 +388,19 @@ mod tests {
             assert_eq!(plan.node.data_policy, DataPolicy::ArtifactHandles);
             assert!(plan.node.models.is_empty());
         }
+    }
+
+    #[test]
+    fn explicit_command_engine_selects_external_command_recipe() {
+        let workflow = workflow_with_identity("lightflow.command_fixture", "0.1.0")
+            .builtin_runtime("command", COMMAND_RUN_CAPABILITY, COMMAND_ENGINE)
+            .build();
+
+        let plan = build_leaf_execution_plan(&workflow).expect("command plan builds");
+
+        assert_eq!(plan.node.executor_id, COMMAND_ENGINE);
+        assert_eq!(plan.node.recipe, ExecutionRecipe::ExternalCommand);
+        assert_eq!(plan.node.data_policy, DataPolicy::ArtifactHandles);
+        assert!(!plan.node.plans_models);
     }
 }

@@ -12,6 +12,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub(super) const FLUX_RUNNER_ENV: &str = "LIGHTFLOW_FLUX_RUNNER";
+pub(super) const COMMAND_RUNNER_ENV: &str = "LIGHTFLOW_COMMAND_RUNNER";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExecutorInfo {
@@ -84,6 +85,7 @@ enum ExecutorAvailability {
     EndpointCheckedAtRun,
     Unavailable,
     FluxRunner,
+    CommandRunner,
     Feature(bool),
 }
 
@@ -93,6 +95,7 @@ impl ExecutorAvailability {
             Self::Always | Self::EndpointCheckedAtRun => true,
             Self::Unavailable => false,
             Self::FluxRunner => validated_flux_runner_path().is_ok(),
+            Self::CommandRunner => validated_command_runner_path().is_ok(),
             Self::Feature(enabled) => enabled,
         }
     }
@@ -105,12 +108,10 @@ impl ExecutorAvailability {
                 "reserved executor contract; not runnable in this build".to_owned()
             }
             Self::FluxRunner => validated_flux_runner_path()
-                .map(|path| {
-                    format!(
-                        "{FLUX_RUNNER_ENV} points to executable file {}",
-                        path.display()
-                    )
-                })
+                .map(|path| runner_available_reason(FLUX_RUNNER_ENV, &path))
+                .unwrap_or_else(|reason| reason),
+            Self::CommandRunner => validated_command_runner_path()
+                .map(|path| runner_available_reason(COMMAND_RUNNER_ENV, &path))
                 .unwrap_or_else(|reason| reason),
             Self::Feature(true) => {
                 let feature = features.first().copied().unwrap_or("required");
@@ -125,27 +126,32 @@ impl ExecutorAvailability {
 }
 
 pub(super) fn validated_flux_runner_path() -> Result<PathBuf, String> {
-    validate_flux_runner_path(env::var_os(FLUX_RUNNER_ENV))
+    validate_executable_path(FLUX_RUNNER_ENV, env::var_os(FLUX_RUNNER_ENV))
 }
 
-fn validate_flux_runner_path(value: Option<OsString>) -> Result<PathBuf, String> {
+pub(super) fn validated_command_runner_path() -> Result<PathBuf, String> {
+    validate_executable_path(COMMAND_RUNNER_ENV, env::var_os(COMMAND_RUNNER_ENV))
+}
+
+fn runner_available_reason(environment: &str, path: &std::path::Path) -> String {
+    format!("{environment} points to executable file {}", path.display())
+}
+
+fn validate_executable_path(environment: &str, value: Option<OsString>) -> Result<PathBuf, String> {
     let Some(value) = value else {
-        return Err(format!("set {FLUX_RUNNER_ENV} to enable this executor"));
+        return Err(format!("set {environment} to enable this executor"));
     };
     if value.is_empty() {
-        return Err(format!("{FLUX_RUNNER_ENV} is empty"));
+        return Err(format!("{environment} is empty"));
     }
 
     let path = PathBuf::from(value);
-    let metadata = path.metadata().map_err(|_| {
-        format!(
-            "{FLUX_RUNNER_ENV} does not point to a file: {}",
-            path.display()
-        )
-    })?;
+    let metadata = path
+        .metadata()
+        .map_err(|_| format!("{environment} does not point to a file: {}", path.display()))?;
     if !metadata.is_file() {
         return Err(format!(
-            "{FLUX_RUNNER_ENV} does not point to a file: {}",
+            "{environment} does not point to a file: {}",
             path.display()
         ));
     }
@@ -154,12 +160,17 @@ fn validate_flux_runner_path(value: Option<OsString>) -> Result<PathBuf, String>
         use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o111 == 0 {
             return Err(format!(
-                "{FLUX_RUNNER_ENV} is not executable: {}",
+                "{environment} is not executable: {}",
                 path.display()
             ));
         }
     }
-    Ok(path)
+    path.canonicalize().map_err(|error| {
+        format!(
+            "failed to canonicalize executable from {environment}: {}: {error}",
+            path.display()
+        )
+    })
 }
 
 pub(super) const fn data_policy_name(data_policy: DataPolicy) -> &'static str {
@@ -188,4 +199,56 @@ pub(super) fn executor_by_id(id: &str) -> Option<&'static ExecutorDefinition> {
     executor_definitions()
         .into_iter()
         .find(|executor| executor.id == id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_executable_path;
+    use std::ffi::OsString;
+
+    #[test]
+    fn executable_path_reports_missing_and_non_file_values() {
+        assert_eq!(
+            validate_executable_path("LIGHTFLOW_TEST_RUNNER", None).unwrap_err(),
+            "set LIGHTFLOW_TEST_RUNNER to enable this executor"
+        );
+        assert_eq!(
+            validate_executable_path("LIGHTFLOW_TEST_RUNNER", Some(OsString::new())).unwrap_err(),
+            "LIGHTFLOW_TEST_RUNNER is empty"
+        );
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        assert!(
+            validate_executable_path(
+                "LIGHTFLOW_TEST_RUNNER",
+                Some(directory.path().as_os_str().to_owned())
+            )
+            .unwrap_err()
+            .contains("does not point to a file")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_path_requires_unix_execute_permission() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let runner = directory.path().join("runner");
+        fs::write(&runner, "#!/bin/sh\nexit 0\n").expect("write runner");
+
+        let error =
+            validate_executable_path("LIGHTFLOW_TEST_RUNNER", Some(runner.as_os_str().to_owned()))
+                .unwrap_err();
+        assert!(error.contains("is not executable"));
+
+        fs::set_permissions(&runner, fs::Permissions::from_mode(0o700))
+            .expect("make runner executable");
+        assert_eq!(
+            validate_executable_path("LIGHTFLOW_TEST_RUNNER", Some(runner.as_os_str().to_owned()))
+                .expect("executable runner"),
+            runner
+        );
+    }
 }

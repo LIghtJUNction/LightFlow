@@ -4,9 +4,11 @@
 [Workflow Development](docs/workflow-development.md) ·
 [Architecture](docs/architecture.md)
 
-LightFlow is a backend-first, source-controlled workflow environment for
-human-directed AI pipelines. The current backend deliberately keeps the domain
-model small:
+LightFlow's long-term direction is an open-source AI video content workflow
+platform that turns raw media into searchable, generative, distributable, and
+optimizable content assets. Today, it is a backend-first, source-controlled
+workflow environment for human-directed AI pipelines. The current backend
+deliberately keeps the domain model small:
 
 - Workflow: a reusable leaf unit or a directed graph that nests other workflows.
 
@@ -122,7 +124,8 @@ workflow projects, adding workflow dependencies, writing leaf and runtime-backed
 workflows, composing workflows with `.node()` / `.edge()`, and validating nodes
 with `lfw node test`.
 
-For the longer product and architecture direction, see
+For the staged product direction from AI video editing to content automation
+infrastructure, see
 [Long-Term Goals](docs/long-term-goals.md).
 For the near-term local authoring, run, inspect, replay, and publish loop, see
 [Local Workflow Loop](docs/local-workflow-loop.md).
@@ -278,6 +281,16 @@ backend can fall back to the executable named by `LIGHTFLOW_FLUX_RUNNER`;
 LightFlow passes the task, prompt, optional source image and mask paths,
 sampling settings, output path, and locked model paths to that runner.
 
+Workflows can also opt into the generic external command boundary with
+`lightflow.command.run` and the explicit `process.command.v1` engine. Set
+`LIGHTFLOW_COMMAND_RUNNER` to one regular executable file. LightFlow starts it
+directly without a shell, writes a versioned JSON request to stdin, and reads a
+bounded JSON response from stdout. The executor enforces an execution timeout,
+exact declared-output names, existing artifact files, and a structured replay
+fingerprint. `LIGHTFLOW_COMMAND_TIMEOUT_MS` overrides the 30-minute default up
+to a maximum of 24 hours. This boundary is intended for plugin-owned media,
+Python, and tool integrations whose domain logic does not belong in the core.
+
 Text-generation workflows can declare the `lightflow.llm.generate` runtime
 capability. Builds compiled with `--features rig` execute that runtime through
 `rig-core`, with the provider, model, prompt, system prompt, API key, base URL,
@@ -293,8 +306,8 @@ count, and the Executor Registry. `lfw arch` and `lfw architecture` are
 aliases. The registry is the single contract for current executors such as
 passthrough, preview image generation/edit/inpaint, FLUX, image transforms,
 builtin text/JSON/mask/control/model helpers, offline mock LLM generation, and
-RIG, plus reserved future capabilities such as command, Python node, ONNX, and
-Candle execution.
+RIG, plus the external command executor and reserved future capabilities such
+as Python node, ONNX, and Candle execution.
 
 Runtime executor status is labeled consistently across `lfw info`, node cards,
 `/executors`, and documentation. Each executor entry includes a status label,
@@ -305,8 +318,9 @@ lockfile requirements:
   demos, tests, and UI development; these do not prove production model quality.
 - `mock`: deterministic local LLM output for offline workflow composition and
   tests.
-- `external`: process handoff through an environment variable such as
-  `LIGHTFLOW_FLUX_RUNNER`; the external executable owns model sampling.
+- `external`: explicit process or service handoff, including
+  `LIGHTFLOW_FLUX_RUNNER`, `LIGHTFLOW_COMMAND_RUNNER`, and ComfyUI; the external
+  boundary owns its domain-specific execution.
 - `native`: in-process model-backed runtime enabled by build features such as
   `flux-native` or `rig`.
 - `reserved`: declared future executor contract that is visible to clients but

@@ -191,6 +191,17 @@ depth, slash-delimited node path, and parent context; replay fingerprints and
 artifact projection traverse the same tree and attribute duplicate propagated
 artifacts to the deepest producing leaf.
 
+`process.command.v1` is the generic local-process boundary. A workflow opts in
+explicitly with the `lightflow.command.run` capability and names the engine;
+LightFlow never infers a command from workflow input. The executable comes only
+from `LIGHTFLOW_COMMAND_RUNNER` and is invoked directly without a shell from the
+project root. The core sends a `lightflow.command.v1` JSON request over stdin,
+caps stdout and stderr, enforces a bounded timeout, requires returned output
+names to match the workflow contract exactly, verifies materialized artifacts,
+and records the runner-provided replay fingerprint. This executor allows
+plugin-owned Python, FFmpeg, and other tool integrations without adding their
+domain logic to the core.
+
 The native FLUX text-to-image backend is process-resident. It caches one loaded
 FLUX/Qwen/VAE session keyed by the locked model paths and reuses that session
 for later images in the same process. Multi-image text-to-image requests are
@@ -204,13 +215,13 @@ Leaf workflow execution is selected through the Executor Registry. The registry
 maps runtime capabilities such as `lightflow.image.generate`,
 `lightflow.image.edit`, `lightflow.image.inpaint`,
 `lightflow.mask.compose`, `lightflow.text.regex`, and
-`lightflow.llm.generate`, and reserved future capabilities including
-`lightflow.python.node`, `lightflow.command`, `lightflow.onnx`, and
-`lightflow.candle` to executor metadata and execution recipes. Builtin preview
-executors keep image generation/edit/inpaint runnable offline; model-backed
-FLUX and RIG executors can replace them when their feature flags or environment
-are available. `lfw info` reports the same registry, so the CLI, future editor,
-and planner see one executor contract.
+`lightflow.llm.generate`, plus the runnable `lightflow.command.run` boundary
+and reserved future capabilities including `lightflow.python.node`,
+`lightflow.onnx`, and `lightflow.candle` to executor metadata and execution
+recipes. Builtin preview executors keep image generation/edit/inpaint runnable
+offline; model-backed FLUX and RIG executors can replace them when their feature
+flags or environment are available. `lfw info` reports the same registry, so
+the CLI, future editor, and planner see one executor contract.
 
 `lfw plan <workflow_id>`, `GET /workflows/{workflow_id}/plan`, and the MCP
 `lightflow.workflow.plan` tool expose that executor contract before execution.

@@ -37,9 +37,9 @@ fn lfw_new_comfyui_runtime_generates_api_workflow_contract()
     assert!(source.contains(
         ".builtin_runtime(\"comfyui_runtime\", \"lightflow.comfyui.workflow\", \"comfyui.api.v1\")"
     ));
-    assert!(source.contains(".input(\"workflow\", \"json\")"));
-    assert!(source.contains(".input(\"uploads\", \"json\")"));
-    assert!(source.contains(".output(\"artifacts\", \"json\")"));
+    assert!(source.contains("input \"workflow\": \"json\" {"));
+    assert!(source.contains("input \"uploads\": \"json\" {"));
+    assert!(source.contains("output \"artifacts\": \"json\" {"));
 
     let skill =
         fs::read_to_string(workflow_root.join(".agent/skills/lightflow-comfy-run/SKILL.md"))?;

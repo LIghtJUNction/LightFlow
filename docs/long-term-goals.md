@@ -1,163 +1,315 @@
 # LightFlow Long-Term Goals
 
-This document describes the long-term direction for LightFlow after the v0.2
-backend foundation. It is intentionally strategic: release checklists and
-short-term task lists should stay in separate documents.
+This document describes the product direction beyond LightFlow's current
+workflow foundation. It is intentionally strategic: release checklists,
+near-term implementation plans, and claims about shipped capabilities belong
+in separate documents.
 
-For the tactical product loop that turns this direction into near-term
-verification gates, see [Local Workflow Loop](local-workflow-loop.md).
+For the tactical loop supported by the current backend, see
+[Local Workflow Loop](local-workflow-loop.md).
 
 ## North Star
 
-LightFlow should become a code-first, agent-editable workflow runtime for
-human-directed AI pipelines.
+LightFlow should become an open-source, AI-driven video content production and
+operations platform:
 
-The core promise is:
+> Let organizations manage video content as systematically as data, while AI
+> automates the path from raw media to content distribution and continuous
+> improvement.
 
-- humans keep ownership of workflow intent, review, and execution decisions;
-- agents can safely inspect, modify, test, and explain workflows because they
-  are normal source-controlled Rust crates;
-- CLI, HTTP, MCP, and future UI surfaces all project the same backend contract;
-- model-backed runtimes stay behind explicit executor boundaries instead of
-  leaking model files, tensors, or provider details into workflow graphs.
+The aim is not merely to build another automatic video editor. Editing is the
+entry point. The larger opportunity is to turn video from a collection of
+one-off files into content assets that are searchable, generative,
+distributable, and optimizable.
 
-## Product Shape
+In short:
 
-LightFlow should remain backend-first. The backend contract, workflow crate
-layout, runtime registry, model sync behavior, and run history model should
-lead the product shape. UI work should start as a client of those contracts,
-not as a separate workflow source of truth.
+- near term: an AI video editing platform;
+- medium term: a video content production platform;
+- long term: video content automation infrastructure.
 
-The long-term product should support three user modes:
+## Current Foundation
 
-- CLI-first development for engineers and agents.
-- API/MCP integration for other tools and automation.
-- A read/write editor for inspecting, running, tracing, and eventually
-  composing workflows without replacing the Rust workflow source model.
+This direction is a roadmap, not a description of features that have already
+shipped. LightFlow today is a backend-first, source-controlled workflow
+environment for human-directed AI pipelines. Its current foundation includes
+workflow crates, CLI/HTTP/MCP surfaces, explicit runtime and model contracts,
+artifact handling, run history, tracing, and replay.
 
-## Architecture Principles
+That foundation remains useful for the video-focused product:
 
-- Keep `workflow` as the primary domain concept until there is strong evidence
-  for another top-level concept.
-- Treat workflow crates as the durable package format.
-- Keep standard workflows small, neutral, and reusable.
-- Keep executor selection explicit through runtime capabilities and engine
-  metadata.
-- Keep large artifacts, model weights, and tensor payloads out of workflow JSON.
-- Keep run history immutable enough for debugging, replay, and editor timeline
-  views.
-- Prefer contract tests over duplicated documentation when API behavior matters.
+- Rust workflow crates provide durable, reviewable workflow definitions.
+- Backend contracts give CLI, API, MCP, and editor clients one source of truth.
+- Explicit executors isolate Python, local-model, provider, and remote-runtime
+  integrations from workflow graphs.
+- Model locks, artifact handles, traces, and replay support reproducible media
+  pipelines.
+- Colocated agent skills and plugin projects make workflows discoverable and
+  extensible.
 
-## Long-Term Tracks
+The roadmap below must be delivered incrementally and verified before any
+future capability is presented as available.
 
-### 1. Workflow Ecosystem
+## Why Video Content Needs A Workflow Platform
 
-Build a useful catalog of reusable workflow crates, each with:
+Video production commonly requires a long manual chain:
 
-- Node Schema metadata for inputs, outputs, models, and artifacts.
-- A colocated agent skill.
-- `lfw node test` coverage.
-- Clear examples for CLI and API use.
+```text
+capture
+  -> organize media
+  -> find useful moments
+  -> edit
+  -> add subtitles
+  -> translate
+  -> dub
+  -> create covers
+  -> publish
+  -> analyze results
+  -> optimize
+```
 
-The ecosystem should make common image, text, LLM, model-management, and
-control-flow tasks available without users writing custom Rust for every node.
+LightFlow's intended loop is:
 
-### 2. Runtime Backends
+```text
+raw media
+  -> AI understanding
+  -> automated content generation
+  -> multi-platform distribution
+  -> performance feedback
+  -> continuous optimization
+```
 
-Make runtime backends production-grade behind stable capability contracts:
+The goal is to move video production from repeated manual assembly toward an
+inspectable, human-directed intelligent pipeline.
 
-- native FLUX and image runtimes for local model execution;
-- RIG-backed LLM generation for provider-backed text execution;
-- external runner contracts for experiments and non-Rust backends;
-- reserved executor paths for command, Python, ONNX, and Candle only when their
-  contracts are clear enough to test.
+## Product Roadmap
 
-Runtime maturity should be visible through `lfw info`, `/nodes`, `/models`, and
-documentation.
+The time horizons below express sequence and product maturity, not release
+commitments.
 
-### 3. Model And Resource Management
+### Phase 1: AI Video Editing Platform (0-1 Year)
 
-LightFlow should make model requirements inspectable, syncable, and reproducible:
+The first phase should establish a strong open-source AI video editing product.
 
-- declared model requirements live with workflow definitions;
-- `lfw sync` writes locked choices and hashes;
-- runtime execution uses locked paths directly;
-- model approval, missing files, and incompatible formats fail with actionable
-  errors.
+#### Media Asset Management
 
-The long-term goal is reproducible workflow execution across machines without
-copying model weights into project directories.
+Answer the basic question: "Where is the video I need?"
 
-### 4. Observability And Replay
+Planned capabilities include:
 
-Run history should become the shared debugging surface for CLI, API, MCP, and
-editor clients:
+- a video asset library;
+- AI-generated tags;
+- semantic search;
+- person recognition;
+- scene recognition.
 
-- run manifests capture stable replay contracts;
-- execution files capture outputs, artifacts, node attempts, durations, and
-  selected runtimes;
-- event streams support timeline views;
-- failed runs are first-class records, not only terminal output.
+For example, a user should eventually be able to search for "all clips where a
+customer says the price is too high" and receive the relevant source segments,
+not merely matching filenames.
 
-Replay should stay deterministic where runtimes allow it and explicit about
-runtime/model changes where they do not.
+#### AI-Assisted Automatic Editing
 
-### 5. Editor Surface
+Turn hours of source media into multiple useful short videos through:
 
-The editor should grow in stages:
+- highlight and key-moment detection;
+- filler and low-value segment removal;
+- automatic pacing;
+- story construction from selected moments.
 
-1. Read-only node catalog, node detail, model catalog, and run history.
-2. Run forms generated from Node Schema metadata.
-3. Trace and artifact inspection.
-4. Patch authoring for temporary run modifications.
-5. Graph composition only after the backend graph contract is stable enough to
-   round-trip safely.
+Outputs must remain traceable to their source material so people can review and
+correct AI decisions.
 
-The editor must not become a separate hidden workflow format.
+#### Intelligent Subtitles
 
-### 6. Agent Collaboration
+Support the full subtitle production path:
 
-LightFlow should be comfortable for coding agents:
+- automatic transcription;
+- multilingual subtitles;
+- dynamic subtitle presentation;
+- translation;
+- reusable subtitle templates.
 
-- repository docs explain the domain model and file layout;
-- every workflow/plugin includes an agent skill;
-- generated projects include useful TODOs but also runnable tests;
-- patches, traces, and node contracts are serializable and reviewable;
-- agents can propose workflow changes as normal diffs.
+### Phase 2: Video Content Production Platform (1-3 Years)
 
-The goal is not an autonomous built-in planning loop. The goal is a codebase
-that agents can modify safely under human direction.
+The product should expand from "editing video" to "producing content" through
+reusable content templates.
 
-### 7. Release Discipline
+Templates describe the intended content structure and let AI find and assemble
+matching material. Example verticals include:
 
-Every meaningful release should have:
+- **Automotive:** find the customer problem, sales response, vehicle
+  demonstration, and purchase outcome to generate a customer-case video.
+- **Education:** extract knowledge points from course material and turn them
+  into focused short videos.
+- **E-commerce:** identify product selling points and source evidence to
+  generate advertisements.
 
-- a clear checklist;
-- format, clippy, default tests, and feature-specific runtime checks;
-- changelog entries for CLI, API, workflow, and runtime changes;
-- documented known limitations;
-- migration notes when data layout or API contracts change.
+Templates should be inspectable workflows rather than opaque prompts, and
+organizations should be able to adapt them without forking the platform.
 
-## Non-Goals
+### Phase 3: AI Content Workflow Platform (3-5 Years)
 
-LightFlow should avoid:
+LightFlow should let organizations define complete content operations
+workflows, combining the collaboration model of source control, the composable
+graphs of node-based AI tools, and the automation reach of integration
+platforms. In product terms, the intended combination is similar to
+GitHub + ComfyUI + Zapier for video content operations.
 
-- making a visual editor the workflow source of truth;
-- embedding a general-purpose agent loop into the runtime;
-- hiding provider/model behavior behind implicit routing;
-- copying large model weights into projects;
-- adding top-level concepts that duplicate `workflow` without solving a real
-  user problem.
+An automotive content team, for example, could define:
+
+```text
+upload sales media
+  -> identify customer pain points
+  -> generate 30 short videos
+  -> create Chinese and English versions
+  -> publish to 10 platforms
+  -> analyze performance
+```
+
+This phase requires user-defined workflows, multilingual generation,
+distribution integrations, scheduling, policy-aware human approval, and
+analytics feedback. Platform-specific behavior should live in plugins and
+workflow packages instead of becoming implicit core behavior.
+
+### Phase 4: Video Content Intelligence Infrastructure (5+ Years)
+
+The durable asset at this stage is not a single model. It is the accumulated,
+permission-aware knowledge of how content performs:
+
+- which source moments are effective;
+- which openings retain attention;
+- which subtitle treatments improve completion;
+- which titles improve click-through;
+- which content patterns contribute to conversion.
+
+With suitable consent, governance, provenance, and privacy controls, these
+signals can support content intelligence that recommends and optimizes future
+workflows. Analytics feedback must never silently rewrite production behavior;
+people should be able to inspect, approve, and roll back optimization choices.
+
+## Long-Term Product Shape
+
+The eventual platform should contain coherent, interoperable product areas:
+
+```text
+LightFlow
+├── Content Asset Management
+├── AI Video Understanding
+├── AI Editing Engine
+├── Workflow Automation
+├── Multi-language Generation
+├── Distribution Management
+├── Analytics
+└── Plugin Ecosystem
+```
+
+These are long-term product areas, not a declaration that each one is a
+separate top-level core domain type. The current `workflow` domain should remain
+small until implementation evidence requires additional concepts.
+
+## Product Differentiation
+
+LightFlow should compete on the scale and inspectability of the whole content
+pipeline:
+
+- **Jianying/CapCut** primarily helps users edit a video; LightFlow should help
+  teams produce and operate content at scale.
+- **Adobe Premiere Pro** centers professional manual editing; LightFlow should
+  center repeatable, AI-assisted production.
+- **Canva** centers accessible design; LightFlow should center automated video
+  content workflows.
+
+These products may overlap with individual LightFlow capabilities. The
+distinction is the open, source-controlled pipeline from content assets through
+generation, distribution, feedback, and optimization.
+
+## Technical Direction
+
+### Rust Core
+
+Rust should continue to own stable platform capabilities:
+
+- projects and durable data contracts;
+- timelines and media references;
+- workflows and execution plans;
+- plugin contracts;
+- artifacts, traces, replay, and policy boundaries.
+
+### Python AI Ecosystem
+
+Python integrations should make it possible to adopt changing AI capabilities
+without destabilizing the core:
+
+- video understanding and multimodal models;
+- automatic speech recognition;
+- text-to-speech and dubbing;
+- translation, ranking, and generation models.
+
+These integrations should use explicit executor contracts. Model files,
+tensors, provider details, and Python environment assumptions must not leak
+into the durable workflow format.
+
+### Plugin Ecosystem
+
+Community and organization-specific functionality should be distributable as
+normal plugin or workflow projects, for example:
+
+```text
+lightflow-plugin-youtube
+lightflow-plugin-car-sales
+lightflow-plugin-course
+lightflow-plugin-ecommerce
+```
+
+Every workflow or plugin project should include an agent skill, testable usage
+guidance, declared inputs and outputs, and clear runtime requirements.
+
+## Architecture Guardrails
+
+The video product direction extends the existing foundation rather than
+discarding it:
+
+- Keep the backend contract as the source of truth; UI clients must not own a
+  hidden workflow format.
+- Keep workflows source-controlled, agent-editable, and human-reviewed.
+- Keep standard workflow building blocks small, neutral, reusable, and covered
+  by contract tests.
+- Keep large media artifacts, model weights, and tensor payloads out of
+  workflow JSON.
+- Keep runtime selection and provider behavior explicit.
+- Keep run history and provenance strong enough to trace generated content back
+  to source media, workflow versions, models, and human approvals.
+- Add new top-level domain concepts only when a shipped product requirement
+  cannot be represented cleanly by workflows and their contracts.
+- Treat distribution credentials, biometric recognition, customer media, and
+  performance data as governed resources with explicit permissions.
+- Ship each roadmap slice with explicit verification, documented limitations,
+  and migration guidance when contracts or layouts change.
+
+LightFlow is not intended to become an autonomous built-in agent planner or a
+closed, editor-owned automation format. AI may propose and execute bounded
+workflow steps, but people retain ownership of intent, approval, and
+publication decisions.
 
 ## Success Signals
 
-The long-term direction is working when:
+The direction is working when each stage can be demonstrated with real,
+end-to-end evidence:
 
-- a new workflow can be created, tested, synced, run, traced, and documented
-  without leaving the LightFlow conventions;
-- editor clients can be built from the HTTP/OpenAPI contract without private
-  backend knowledge;
-- agents can update workflow crates and their skills in one reviewable change;
-- model-backed runs are reproducible enough to debug on another machine;
-- users can choose between preview/mock, external, and native runtime paths with
-  clear tradeoffs.
+- source media can be ingested, understood, searched, and traced;
+- long recordings can produce reviewable short-video candidates;
+- subtitle, translation, and dubbing outputs retain editable provenance;
+- content templates can be reused across projects and verticals;
+- one approved workflow can generate, localize, and distribute variants
+  without hidden platform state;
+- analytics can be attributed back to content, source material, and workflow
+  choices;
+- agents can modify workflows and their skills as ordinary reviewable diffs;
+- organizations can choose local, remote, preview, and provider-backed runtimes
+  with explicit tradeoffs.
+
+The final positioning is therefore:
+
+> LightFlow is an open-source AI video content workflow platform that turns
+> video from a one-off file into a searchable, generative, distributable, and
+> optimizable content asset.

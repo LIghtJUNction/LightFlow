@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: 1.97.0
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with workflow projects
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
+
+      - name: Select Rust toolchain
+        run: rustup default "$RUST_VERSION"
+
+      - name: Check source shape
+        run: scripts/check-source-shape.sh
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Test all targets
+        run: cargo test --all-targets
+
+      - name: Lint all targets
+        run: cargo clippy --all-targets -- -D warnings
+
+  auto-edit:
+    name: Automatic editing workflow
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/lightflow-auto-editing
+    steps:
+      - name: Checkout with workflow projects
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
+
+      - name: Select Rust toolchain
+        run: rustup default "$RUST_VERSION"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg and Ruff
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          python -m pip install --disable-pip-version-check ruff==0.15.15
+
+      - name: Lint Python
+        run: |
+          ruff check scripts tests
+          ruff format --check scripts tests
+
+      - name: Test Python and real FFmpeg rendering
+        run: python -m unittest discover -s tests -v
+
+      - name: Check workflow crate formatting
+        run: cargo fmt --check
+
+      - name: Test workflow crates
+        run: cargo test
+
+      - name: Lint workflow crates
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Validate automatic edit node
+        env:
+          LIGHTFLOW_COMMAND_RUNNER: ${{ github.workspace }}/projects/lightflow-auto-editing/scripts/lightflow_auto_edit_runner.py
+        run: cargo run --quiet --manifest-path ../../Cargo.toml --bin lfw -- node test lightflow.video_auto_edit
+
+      - name: Validate planning node
+        env:
+          LIGHTFLOW_COMMAND_RUNNER: ${{ github.workspace }}/projects/lightflow-auto-editing/scripts/lightflow_auto_edit_runner.py
+        run: cargo run --quiet --manifest-path ../../Cargo.toml --bin lfw -- node test lightflow.video_auto_edit_plan
+
+      - name: Validate rendering node
+        env:
+          LIGHTFLOW_COMMAND_RUNNER: ${{ github.workspace }}/projects/lightflow-auto-editing/scripts/lightflow_auto_edit_runner.py
+        run: cargo run --quiet --manifest-path ../../Cargo.toml --bin lfw -- node test lightflow.video_render_edit

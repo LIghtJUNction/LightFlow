@@ -63,6 +63,39 @@ not prove that `127.0.0.1:8188` or another configured endpoint is online, that
 an API graph is accepted by installed custom nodes, or that any real model
 meets image-quality, VRAM, or performance expectations.
 
+## External Command Executor
+
+The generic `process.command.v1` executor is covered through both unit and
+subprocess tests:
+
+```bash
+cargo test --lib command_runner
+cargo test --test command_runtime
+```
+
+Coverage includes executable-path validation, direct invocation without a
+shell, the `lightflow.command.v1` stdin/stdout exchange, bounded output,
+timeouts, exact output-port matching, artifact existence and uniqueness, replay
+fingerprints, and a real `lfw run` subprocess.
+
+The optional `projects/lightflow-auto-editing` workspace exercises the same
+executor with a real FFmpeg render:
+
+```bash
+cd projects/lightflow-auto-editing
+python3 -m unittest discover -s tests -v
+```
+
+Those integration tests generate video fixtures, plan and render multiple
+segments, verify duration plus audio in the final MP4, and confirm that a real
+silent interval is detected and removed before rendering. A separate real
+red-to-blue fixture verifies that silent B-roll is split at its visual scene
+change. They prove the
+deterministic media-and-metadata planner and FFmpeg contract, not semantic
+video understanding, speech recognition, or production editing quality.
+Runner tests also verify that replay evidence changes when source bytes change,
+and renderer tests reject output paths that would replace source media.
+
 ## RIG LLM Runtime
 
 Provider-backed LLM execution is gated by `--features rig`.

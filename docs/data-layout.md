@@ -519,6 +519,14 @@ availability, and recursively verifies every reachable leaf in composite and
 conditional branches without executing the workflow.
 External FLUX runner availability requires `LIGHTFLOW_FLUX_RUNNER` to name a
 regular executable file, not merely contain a value.
+Generic command workflows likewise require `LIGHTFLOW_COMMAND_RUNNER` to name a
+regular executable file with execute permission. LightFlow invokes that file
+directly from the project root and does not interpret its value as a shell
+command. `LIGHTFLOW_COMMAND_TIMEOUT_MS` accepts `1..=86400000` milliseconds and
+defaults to 30 minutes when unset; malformed or out-of-range values fail
+explicitly. Command requests and responses carry JSON
+values and artifact paths rather than media bytes; the selected runner identity
+is retained in the runtime replay fingerprint.
 
 The backend exposes workflow-backed nodes over HTTP for editor palettes:
 

@@ -5,7 +5,7 @@ use super::{image, text};
 use crate::api::model_manager::ModelManager;
 use crate::api::plan::{ExecutionPlan, ExecutionPlanNode, ExecutionRecipe};
 use crate::api::{ApiError, ApiResult};
-use crate::api::{comfyui, executors, flux, llm_rig};
+use crate::api::{comfyui, command_runner, executors, flux, llm_rig};
 use crate::workflow::{ExecutionRuntime, WorkflowSpec};
 use std::path::Path;
 
@@ -30,6 +30,15 @@ pub(super) fn execute_leaf_plan(
 
     let mut replay_fingerprint = None;
     let mut leaf = match plan.node.recipe {
+        ExecutionRecipe::ExternalCommand => {
+            let result = command_runner::execute(root, workflow, inputs)?;
+            replay_fingerprint = result.replay_fingerprint;
+            Ok(LeafExecution {
+                outputs: result.outputs,
+                runtime: None,
+                artifacts: result.artifacts,
+            })
+        }
         ExecutionRecipe::ComfyUiWorkflow => {
             let result = comfyui::execute(root, workflow, inputs)?;
             replay_fingerprint = Some(result.replay_fingerprint);
