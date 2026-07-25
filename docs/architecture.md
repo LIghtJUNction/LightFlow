@@ -61,11 +61,10 @@ creates the collection project, and `lfw new` creates one workflow crate inside
 the flat workflow collection. Category is optional workflow metadata and never
 changes the crate path.
 
-Core SDK support crates are different from workflow crates. `lightflow-macros`
-is a root Cargo workspace member because it provides procedural macros for the
-typed workflow APIs used by the core `lightflow` crate. It is backend/SDK
-infrastructure, so it remains beside the core crate and is not managed through
-the `projects/` sibling workflow workspace catalog.
+Workflow authoring macros live in the core `lightflow` crate (`src/macros.rs`)
+rather than a separate support crate, so workflow packages depend only on
+`lightflow`. Sibling workflow repositories under `projects/` remain separate
+Cargo workspaces and are not part of the core package graph.
 
 ## Standard Workflows
 

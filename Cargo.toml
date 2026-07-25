@@ -10,7 +10,7 @@ categories = ["web-programming", "development-tools"]
 
 [workspace]
 resolver = "3"
-members = [".", "lightflow-macros"]
+members = ["."]
 
 [dependencies]
 anyhow = "1.0.100"
@@ -21,7 +21,6 @@ candle-transformers = { version = "0.10.2", optional = true, default-features = 
 diffusion-rs = { version = "0.1.20", optional = true, default-features = false }
 diffusion-rs-sys = { version = "0.1.20", optional = true }
 libc = "0.2.186"
-lightflow-macros = { path = "lightflow-macros", version = "0.1.2" }
 petgraph = "0.8.3"
 png = "0.18.1"
 regex = "1.12.2"

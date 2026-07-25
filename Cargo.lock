@@ -2382,7 +2382,6 @@ dependencies = [
  "diffusion-rs",
  "diffusion-rs-sys",
  "libc",
- "lightflow-macros",
  "petgraph",
  "png",
  "regex",
@@ -2398,15 +2397,6 @@ dependencies = [
  "tower",
  "ureq",
  "url",
-]
-
-[[package]]
-name = "lightflow-macros"
-version = "0.1.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

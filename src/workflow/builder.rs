@@ -37,11 +37,7 @@ impl WorkflowBuilder {
         workflow_id: impl Into<String>,
         version: impl Into<String>,
     ) -> Self {
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.into()),
-            install: None,
-        });
+        self.register_dependency(workflow_id.into(), Some(version.into()), None);
         self
     }
 
@@ -53,16 +49,16 @@ impl WorkflowBuilder {
         crate_name: impl Into<String>,
     ) -> Self {
         let version = version.into();
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.clone()),
-            install: Some(CargoDependency {
+        self.register_dependency(
+            workflow_id.into(),
+            Some(version.clone()),
+            Some(CargoDependency {
                 crate_name: crate_name.into(),
                 version: Some(version),
                 source: None,
                 package: None,
             }),
-        });
+        );
         self
     }
 
@@ -75,16 +71,16 @@ impl WorkflowBuilder {
         path: impl Into<String>,
     ) -> Self {
         let version = version.into();
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.clone()),
-            install: Some(CargoDependency {
+        self.register_dependency(
+            workflow_id.into(),
+            Some(version.clone()),
+            Some(CargoDependency {
                 crate_name: crate_name.into(),
                 version: Some(version),
                 source: Some(CargoDependencySource::Path(path.into())),
                 package: None,
             }),
-        });
+        );
         self
     }
 
@@ -99,16 +95,16 @@ impl WorkflowBuilder {
     ) -> Self {
         let version = version.into();
         let package = package.into();
-        self.spec.dependencies.push(WorkflowDependencyRequirement {
-            workflow_id: workflow_id.into(),
-            version: Some(version.clone()),
-            install: Some(CargoDependency {
+        self.register_dependency(
+            workflow_id.into(),
+            Some(version.clone()),
+            Some(CargoDependency {
                 crate_name: crate_name.into(),
                 version: Some(version),
                 source: Some(CargoDependencySource::Git(git.into())),
                 package: Some(package).filter(|package| !package.is_empty()),
             }),
-        });
+        );
         self
     }
 
@@ -184,37 +180,39 @@ impl WorkflowBuilder {
         self
     }
 
+    /// Instantiates a nested workflow node and registers an unversioned dependency.
+    ///
+    /// Nested workflows are already discoverable from the project catalog; the
+    /// dependency version follows whatever Cargo/package version is installed.
+    /// Use [`Self::node_version`] when the composite workflow should pin a version.
     #[must_use]
     pub fn node(mut self, id: impl Into<String>, workflow_id: impl Into<String>) -> Self {
-        self.spec.nodes.push(WorkflowNode {
-            id: id.into(),
-            kind: WorkflowNodeKind::Workflow,
-            workflow_id: workflow_id.into(),
-            condition: None,
-            then_workflow_id: None,
-            else_workflow_id: None,
-            title: None,
-            disabled: false,
-            position: WorkflowPosition::default(),
-            config: serde_json::Value::Null,
-        });
+        let workflow_id = workflow_id.into();
+        self.push_workflow_node(id, workflow_id.clone(), false);
+        self.register_dependency(workflow_id, None, None);
+        self
+    }
+
+    /// Instantiates a nested workflow node and pins a dependency version.
+    #[must_use]
+    pub fn node_version(
+        mut self,
+        id: impl Into<String>,
+        workflow_id: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
+        let workflow_id = workflow_id.into();
+        let version = version.into();
+        self.push_workflow_node(id, workflow_id.clone(), false);
+        self.register_dependency(workflow_id, Some(version), None);
         self
     }
 
     #[must_use]
     pub fn disabled_node(mut self, id: impl Into<String>, workflow_id: impl Into<String>) -> Self {
-        self.spec.nodes.push(WorkflowNode {
-            id: id.into(),
-            kind: WorkflowNodeKind::Workflow,
-            workflow_id: workflow_id.into(),
-            condition: None,
-            then_workflow_id: None,
-            else_workflow_id: None,
-            title: None,
-            disabled: true,
-            position: WorkflowPosition::default(),
-            config: serde_json::Value::Null,
-        });
+        let workflow_id = workflow_id.into();
+        self.push_workflow_node(id, workflow_id.clone(), true);
+        self.register_dependency(workflow_id, None, None);
         self
     }
 
@@ -227,6 +225,8 @@ impl WorkflowBuilder {
         then_workflow_id: impl Into<String>,
         else_workflow_id: impl Into<String>,
     ) -> Self {
+        let then_workflow_id = then_workflow_id.into();
+        let else_workflow_id = else_workflow_id.into();
         self.spec.nodes.push(WorkflowNode {
             id: id.into(),
             kind: WorkflowNodeKind::If,
@@ -235,13 +235,15 @@ impl WorkflowBuilder {
                 input: input.into(),
                 value: serde_json::Value::Bool(expected),
             }),
-            then_workflow_id: Some(then_workflow_id.into()),
-            else_workflow_id: Some(else_workflow_id.into()),
+            then_workflow_id: Some(then_workflow_id.clone()),
+            else_workflow_id: Some(else_workflow_id.clone()),
             title: None,
             disabled: false,
             position: WorkflowPosition::default(),
             config: serde_json::Value::Null,
         });
+        self.register_dependency(then_workflow_id, None, None);
+        self.register_dependency(else_workflow_id, None, None);
         self
     }
 
@@ -266,9 +268,71 @@ impl WorkflowBuilder {
         self
     }
 
+    /// Connects `from_node.from_port` to `to_node.to_port` using dotted endpoints.
+    #[must_use]
+    pub fn wire(self, from: impl AsRef<str>, to: impl AsRef<str>) -> Self {
+        let (from_node, from_port) = split_endpoint(from.as_ref());
+        let (to_node, to_port) = split_endpoint(to.as_ref());
+        self.edge(from_node, from_port, to_node, to_port)
+    }
+
     #[must_use]
     pub fn build(self) -> WorkflowSpec {
         self.spec
+    }
+
+    fn push_workflow_node(
+        &mut self,
+        id: impl Into<String>,
+        workflow_id: impl Into<String>,
+        disabled: bool,
+    ) {
+        self.spec.nodes.push(WorkflowNode {
+            id: id.into(),
+            kind: WorkflowNodeKind::Workflow,
+            workflow_id: workflow_id.into(),
+            condition: None,
+            then_workflow_id: None,
+            else_workflow_id: None,
+            title: None,
+            disabled,
+            position: WorkflowPosition::default(),
+            config: serde_json::Value::Null,
+        });
+    }
+
+    fn register_dependency(
+        &mut self,
+        workflow_id: String,
+        version: Option<String>,
+        install: Option<CargoDependency>,
+    ) {
+        if let Some(existing) = self
+            .spec
+            .dependencies
+            .iter_mut()
+            .find(|dependency| dependency.workflow_id == workflow_id)
+        {
+            if let Some(version) = version {
+                existing.version = Some(version);
+            }
+            if install.is_some() {
+                existing.install = install;
+            }
+            return;
+        }
+        self.spec.dependencies.push(WorkflowDependencyRequirement {
+            workflow_id,
+            version,
+            install,
+        });
+    }
+}
+
+fn split_endpoint(value: &str) -> (String, String) {
+    match value.split_once('.') {
+        Some((node, port)) => (node.to_owned(), port.to_owned()),
+        None => (value.to_owned(), String::new()),
     }
 }
 
@@ -349,5 +413,77 @@ mod tests {
         );
         assert_eq!(workflow.inputs[4].default, Some(serde_json::json!(-1)));
         assert_eq!(workflow.inputs[4].min, Some(-10.0));
+    }
+
+    #[test]
+    fn workflow_macro_builds_graph_with_implicit_and_pinned_deps() {
+        let workflow = workflow! {
+            name: "Graph Macro",
+            description: "Composite graph declared in workflow!.",
+            input "value": "json" {
+                description: "Payload.",
+                required: true,
+            }
+            output "result": "text" {
+                description: "Result.",
+            }
+            node prompt: "lightflow.text_prompt",
+            node result: "lightflow.text_result" @ "0.1.0",
+            edge prompt.prompt -> result.text,
+        }
+        .build();
+
+        assert_eq!(workflow.name, "Graph Macro");
+        assert_eq!(
+            workflow.description.as_deref(),
+            Some("Composite graph declared in workflow!.")
+        );
+        assert_eq!(workflow.nodes.len(), 2);
+        assert_eq!(workflow.nodes[0].id, "prompt");
+        assert_eq!(workflow.nodes[0].workflow_id, "lightflow.text_prompt");
+        assert_eq!(workflow.nodes[1].id, "result");
+        assert_eq!(workflow.edges.len(), 1);
+        assert_eq!(workflow.edges[0].from.node, "prompt");
+        assert_eq!(workflow.edges[0].from.port, "prompt");
+        assert_eq!(workflow.edges[0].to.node, "result");
+        assert_eq!(workflow.edges[0].to.port, "text");
+        assert_eq!(
+            workflow
+                .dependencies
+                .iter()
+                .map(|dependency| (
+                    dependency.workflow_id.as_str(),
+                    dependency.version.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("lightflow.text_prompt", None),
+                ("lightflow.text_result", Some("0.1.0")),
+            ]
+        );
+    }
+
+    #[test]
+    fn node_merges_with_explicit_depends_on_version() {
+        let workflow = workflow_with_identity("lightflow.example", "0.1.0")
+            .node("child", "lightflow.child")
+            .depends_on("lightflow.child", "0.2.0")
+            .build();
+
+        assert_eq!(workflow.dependencies.len(), 1);
+        assert_eq!(workflow.dependencies[0].workflow_id, "lightflow.child");
+        assert_eq!(workflow.dependencies[0].version.as_deref(), Some("0.2.0"));
+    }
+
+    #[test]
+    fn wire_parses_dotted_endpoints() {
+        let workflow = workflow_with_identity("lightflow.example", "0.1.0")
+            .node("a", "lightflow.a")
+            .node("b", "lightflow.b")
+            .wire("a.out", "b.in")
+            .build();
+
+        assert_eq!(workflow.edges[0].from.port, "out");
+        assert_eq!(workflow.edges[0].to.port, "in");
     }
 }

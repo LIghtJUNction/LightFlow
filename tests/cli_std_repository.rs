@@ -80,6 +80,7 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
     let service = ApiService::new(root);
 
     let workflow = service.get_workflow("lightflow.text_plan")?;
+    assert_eq!(workflow.name, "Text Plan");
     assert_eq!(
         workflow
             .dependencies
@@ -90,8 +91,8 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
             ))
             .collect::<Vec<_>>(),
         vec![
-            ("lightflow.text_prompt", Some("0.1.0")),
-            ("lightflow.text_result", Some("0.1.0")),
+            ("lightflow.text_prompt", None),
+            ("lightflow.text_result", None),
         ]
     );
     assert!(
@@ -100,6 +101,11 @@ fn repository_text_plan_dogfoods_std_workflow() -> Result<(), Box<dyn std::error
             .iter()
             .any(|node| node.id == "prompt" && node.workflow_id == "lightflow.text_prompt")
     );
+    assert_eq!(workflow.edges.len(), 1);
+    assert_eq!(workflow.edges[0].from.node, "prompt");
+    assert_eq!(workflow.edges[0].from.port, "prompt");
+    assert_eq!(workflow.edges[0].to.node, "result");
+    assert_eq!(workflow.edges[0].to.port, "text");
 
     let detail = lfw(root, ["ls", "--detail"])?;
     let text_plan = detail["workflows"]

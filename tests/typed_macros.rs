@@ -14,23 +14,50 @@ struct FinalAnswer {
     answer: String,
 }
 
-#[node("classify")]
 async fn classify(input: UserInput) -> lightflow::anyhow::Result<Intent> {
     Ok(Intent {
         message: input.message,
     })
 }
 
-#[typed_workflow("qa")]
-async fn qa(input: UserInput) -> lightflow::anyhow::Result<FinalAnswer> {
-    let intent = classify(input).await?;
-    Ok(FinalAnswer {
-        answer: format!("回答：{}", intent.message),
-    })
+async fn classify_with_hooks(
+    input: UserInput,
+    hooks: &HookRegistry<UserInput, Intent>,
+) -> lightflow::anyhow::Result<Intent> {
+    run_node("classify", input, classify, hooks).await
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Qa;
+
+#[async_trait::async_trait]
+impl Runnable<UserInput, FinalAnswer> for Qa {
+    async fn run(&self, input: UserInput) -> lightflow::anyhow::Result<FinalAnswer> {
+        let intent = classify(input).await?;
+        Ok(FinalAnswer {
+            answer: format!("回答：{}", intent.message),
+        })
+    }
+}
+
+impl Qa {
+    fn name(&self) -> &'static str {
+        "qa"
+    }
+
+    fn schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": "qa",
+            "kind": "workflow",
+            "input": "UserInput",
+            "output": "FinalAnswer"
+        })
+    }
 }
 
 #[tokio::test]
-async fn workflow_macro_generates_runnable_entrypoint() {
+async fn typed_runnable_entrypoint_runs_without_proc_macros() {
+    let qa = Qa;
     let output = qa
         .run(UserInput {
             message: "hello".to_owned(),
@@ -44,7 +71,7 @@ async fn workflow_macro_generates_runnable_entrypoint() {
 }
 
 #[tokio::test]
-async fn node_macro_generates_hooked_entrypoint() {
+async fn hooked_node_entrypoint_runs_without_proc_macros() {
     let hooks = HookRegistry::new().replace("classify", |_input: UserInput| async {
         Ok(Intent {
             message: "patched".to_owned(),

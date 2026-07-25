@@ -75,6 +75,7 @@ use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
     workflow! {
+        name: "Text Plan",
         input "value": "json" {
             description: "Structured request payload.",
             required: true,
@@ -83,19 +84,20 @@ pub fn define() -> WorkflowSpec {
         output "result": "text" {
             description: "Generated text result.",
         }
+        node prompt: "lightflow.text_prompt",
+        node result: "lightflow.text_result",
+        edge prompt.prompt -> result.text,
     }
-        .name("Text Plan")
-        .depends_on("lightflow.text_prompt", "0.1.0")
-        .depends_on("lightflow.text_result", "0.1.0")
-        .node("prompt", "lightflow.text_prompt")
-        .node("result", "lightflow.text_result")
-        .edge("prompt", "prompt", "result", "text")
-        .build()
+    .build()
 }
 ```
 
-The macro block keeps each port's Node Schema metadata with the declaration.
-Legacy `.input(...)` and port metadata builder calls remain supported.
+The macro block keeps ports, graph nodes, and edges together. Nested `node`
+entries register dependencies automatically; omit `@ "x.y.z"` so the nested
+workflow version follows the installed package catalog. Add
+`node result: "lightflow.text_result" @ "0.1.0"` only when the composite should
+pin a version. Legacy `.input(...)`, `.node(...)`, and port metadata builder
+calls remain supported.
 
 `workflow!()` reads `CARGO_PKG_NAME` and `CARGO_PKG_VERSION` in the workflow
 crate. A package named `lightflow-text-plan` therefore owns workflow id
@@ -709,13 +711,19 @@ let result = run_node("search", query, |query| async move {
 Use `run_node_borrowed` for large inputs when cloning would be wasteful; this
 keeps model paths and artifacts on the zero-copy path.
 
-The `#[node]` macro uses the same boundary for single-input typed nodes. It
-keeps the original function name and also generates `<node>_with_hooks`:
+Typed nodes use the same `run_node` boundary without a separate proc-macro
+crate. Keep the original function and wrap it when hooks are needed:
 
 ```rust
-#[node("classify")]
 async fn classify(input: UserInput) -> lightflow::anyhow::Result<Intent> {
     Ok(Intent::from(input))
+}
+
+async fn classify_with_hooks(
+    input: UserInput,
+    hooks: &HookRegistry<UserInput, Intent>,
+) -> lightflow::anyhow::Result<Intent> {
+    run_node("classify", input, classify, hooks).await
 }
 
 let patched = HookRegistry::new().replace("classify", |input| async move {

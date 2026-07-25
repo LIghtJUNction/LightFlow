@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Workflow DSL
+
+- Expand `workflow!` so composite graphs can declare `name`, `description`,
+  `category`, nested `node id: "workflow_id"`, optional version pins with
+  `@ "x.y.z"`, and `edge from.port -> to.port` in one block.
+- Register nested workflow dependencies automatically from `node` / `if_node`
+  declarations; omit an explicit version so the nested package version follows
+  the installed catalog. Use `@ "x.y.z"` or `.node_version(...)` only when
+  pinning is required.
+- Add `.wire("from.port", "to.port")` for dotted endpoint edges on the builder
+  chain. Legacy `.depends_on(...)` / `.node(...)` / `.edge(...)` remain
+  supported and merge dependency entries by workflow id.
+
+### Breaking
+
+- Remove the separate `lightflow-macros` crate. Declarative `workflow!` helpers
+  now live in `src/macros.rs` inside the main `lightflow` package. The typed
+  attribute macros (`#[node]`, `#[typed_workflow]`, `#[subworkflow]`,
+  `#[trace_node]`, `#[retry]`, `#[timeout]`) and `WorkflowInput` /
+  `WorkflowOutput` derives are removed; use `run_node` / `Runnable` directly.
+
 ## 0.1.4 - 2026-07-11
 
 ### CLI
