@@ -64,24 +64,77 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
     let mut source = String::from("use lightflow::preload::*;\n\n");
     source.push_str("pub fn define() -> WorkflowSpec {\n");
     source.push_str("    workflow! {\n");
+    if !workflow.name.is_empty() {
+        source.push_str(&format!("        name: {},\n", rust_string(&workflow.name)));
+    }
+    if let Some(category) = &workflow.category {
+        source.push_str(&format!("        category: {},\n", rust_string(category)));
+    }
+    if let Some(description) = &workflow.description {
+        source.push_str(&format!(
+            "        description: {},\n",
+            rust_string(description)
+        ));
+    }
     for input in &workflow.inputs {
         push_input_port(&mut source, input);
     }
     for output in &workflow.outputs {
         push_output_port(&mut source, output);
     }
+
+    let mut covered_dependencies = std::collections::BTreeSet::new();
+    let mut chain_nodes = Vec::new();
+    for node in &workflow.nodes {
+        match node.kind {
+            WorkflowNodeKind::Workflow if !node.disabled && is_rust_ident(&node.id) => {
+                let version = workflow
+                    .dependencies
+                    .iter()
+                    .find(|dependency| dependency.workflow_id == node.workflow_id)
+                    .and_then(|dependency| dependency.version.as_deref());
+                match version {
+                    Some(version) => source.push_str(&format!(
+                        "        node {}: {} @ {},\n",
+                        node.id,
+                        rust_string(&node.workflow_id),
+                        rust_string(version)
+                    )),
+                    None => source.push_str(&format!(
+                        "        node {}: {},\n",
+                        node.id,
+                        rust_string(&node.workflow_id)
+                    )),
+                }
+                covered_dependencies.insert(node.workflow_id.as_str());
+            }
+            _ => chain_nodes.push(node),
+        }
+    }
+
+    let mut chain_edges = Vec::new();
+    for edge in &workflow.edges {
+        if is_rust_ident(&edge.from.node)
+            && is_rust_ident(&edge.from.port)
+            && is_rust_ident(&edge.to.node)
+            && is_rust_ident(&edge.to.port)
+        {
+            source.push_str(&format!(
+                "        edge {}.{} -> {}.{},\n",
+                edge.from.node, edge.from.port, edge.to.node, edge.to.port
+            ));
+        } else {
+            chain_edges.push(edge);
+        }
+    }
     source.push_str("    }\n");
-    source.push_str(&format!("        .name({})\n", rust_string(&workflow.name)));
-    if let Some(category) = &workflow.category {
-        source.push_str(&format!("        .category({})\n", rust_string(category)));
-    }
-    if let Some(description) = &workflow.description {
-        source.push_str(&format!(
-            "        .description({})\n",
-            rust_string(description)
-        ));
-    }
+
     for dependency in &workflow.dependencies {
+        if covered_dependencies.contains(dependency.workflow_id.as_str())
+            && dependency.install.is_none()
+        {
+            continue;
+        }
         if let Some(install) = &dependency.install {
             match &install.source {
                 Some(CargoDependencySource::Path(path)) => {
@@ -112,7 +165,7 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
                     ));
                 }
             }
-        } else {
+        } else if !covered_dependencies.contains(dependency.workflow_id.as_str()) {
             source.push_str(&format!(
                 "        .depends_on({}, {})\n",
                 rust_string(&dependency.workflow_id),
@@ -160,7 +213,7 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
             }
         }
     }
-    for node in &workflow.nodes {
+    for node in chain_nodes {
         match node.kind {
             WorkflowNodeKind::Workflow => {
                 let method = if node.disabled {
@@ -190,7 +243,7 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
             }
         }
     }
-    for edge in &workflow.edges {
+    for edge in chain_edges {
         source.push_str(&format!(
             "        .edge({}, {}, {}, {})\n",
             rust_string(&edge.from.node),
@@ -206,6 +259,16 @@ pub(super) fn workflow_source(workflow: &WorkflowSpec) -> String {
 
 fn rust_string(value: &str) -> String {
     format!("{value:?}")
+}
+
+fn is_rust_ident(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) if first == '_' || first.is_ascii_alphabetic() => {
+            chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+        }
+        _ => false,
+    }
 }
 
 fn push_input_port(source: &mut String, port: &PortSpec) {

@@ -17,16 +17,14 @@ Legacy two-level collections are not discovered implicitly. Run `lfw migrate`
 at their repository root to move `<category>/<crate>` entries to `<crate>` and
 update known Cargo workspace member globs after a full conflict preflight.
 
-The core repository Cargo workspace contains only the backend crate and core
-support crates that ship with it:
+The core repository Cargo workspace contains only the backend crate:
 
 ```toml
-members = [".", "lightflow-macros"]
+members = ["."]
 ```
 
-`lightflow-macros` is part of the core SDK surface because it provides
-procedural macros used by typed workflow APIs. It is not a workflow project and
-does not belong under `projects/`. The `projects/` directory is reserved for
+Declarative workflow macros (`workflow!` and helpers) live in `src/macros.rs`
+inside the main `lightflow` crate. The `projects/` directory is reserved for
 independent workflow/plugin repositories such as `lightflow-std`,
 `lightflow-flux`, and `lightflow-rig`.
 
@@ -333,18 +331,19 @@ widget hints, artifact kinds, and model requirement bindings. The block form
 `workflow! { input ... output ... }` keeps metadata with each port, and
 legacy `.input(...)` / `.output(...)` calls remain source-compatible.
 
-Composite workflows nest other workflows with `.node()` and connect node ports
-with `.edge()`:
+Composite workflows nest other workflows with `node` declarations and connect
+node ports with `edge from.port -> to.port` (or the legacy `.node()` /
+`.edge()` builder methods):
 
 ```rust
 use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
-    workflow!()
-        .name("Parent")
-        .depends_on("lightflow.child", "0.1.0")
-        .node("child", "lightflow.child")
-        .build()
+    workflow! {
+        name: "Parent",
+        node child: "lightflow.child",
+    }
+    .build()
 }
 ```
 
@@ -474,10 +473,10 @@ let hooks = HookRegistry::new()
 
 `run_node` applies `before` once, retries the around/base/replacement/fallback
 execution according to policy, applies timeout per attempt, then calls `after`
-once on success or `on_error` once after final failure. `#[node]` generates a
-`<node>_with_hooks(input, &HookRegistry<_, _>)` entrypoint for single-input
-typed nodes, so macro-authored nodes and hand-written nodes share the same
-runtime boundary.
+once on success or `on_error` once after final failure. Hand-written typed
+nodes should call `run_node` (or a small wrapper such as
+`<node>_with_hooks(input, &HookRegistry<_, _>)`) so they share the same
+runtime boundary as graph-executed workflows.
 
 CLI graph patches use the same boundary idea but remain workflow-id based and
 serializable. They cannot directly name Rust function pointers or closures;

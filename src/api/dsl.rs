@@ -216,7 +216,7 @@ mod tests {
             (
                 "unknown-port",
                 r#"stream "value": "json""#,
-                "must start with input or output",
+                "workflow! item must be name, category, description, input, output, node, or edge",
             ),
             (
                 "non-string-name",

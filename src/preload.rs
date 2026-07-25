@@ -12,7 +12,8 @@ pub use crate::workflow::{
     WorkflowNodeKind, WorkflowNodePatch, WorkflowPatch, WorkflowPosition, WorkflowSpec,
     WorkflowState, WorkflowSummary, WorkflowValidation,
 };
-pub use crate::{
-    WorkflowInput, WorkflowOutput, node, retry, subworkflow, timeout, trace_node, typed_workflow,
-    workflow,
-};
+// Re-export the crate-root `workflow` path so `use lightflow::preload::*` brings
+// both the `workflow` module items (via the explicit imports above) and the
+// `workflow!` declarative macro into scope.
+#[doc(hidden)]
+pub use crate::workflow;

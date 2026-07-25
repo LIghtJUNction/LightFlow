@@ -86,8 +86,8 @@ lfw loop projects --project lightflow-example
 lfw dev check --project lightflow-example
 ```
 
-Keep core SDK crates such as `lightflow-macros` in the root Cargo workspace,
-not in `projects/`.
+Keep the core `lightflow` SDK crate in the root Cargo workspace, not in
+`projects/`.
 
 Inspect the current linked workspace set with:
 

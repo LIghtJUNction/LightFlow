@@ -53,18 +53,8 @@ fn project_set_config_matches_git_submodules() -> Result<(), Box<dyn std::error:
         default_sources.is_subset(&expected),
         "default workflow sources should also be required workspaces"
     );
-    assert!(
-        !expected.contains("lightflow-macros")
-            && !optional.contains("lightflow-macros")
-            && !default_sources.contains("lightflow-macros"),
-        "lightflow-macros is a core workspace crate, not a projects/ workflow workspace"
-    );
-
     let root_members = toml_string_array(&root_manifest, &["workspace", "members"]);
-    assert_eq!(
-        root_members,
-        BTreeSet::from([".".to_owned(), "lightflow-macros".to_owned()])
-    );
+    assert_eq!(root_members, BTreeSet::from([".".to_owned()]));
 
     let catalog = ApiService::new(root).project_workspaces()?;
     assert!(catalog.project_config_present);
@@ -244,7 +234,7 @@ fn project_set_config_matches_git_submodules() -> Result<(), Box<dyn std::error:
         "git submodule add https://github.com/lightjunction/lightflow-example.git projects/lightflow-example",
         "lfw loop projects --project lightflow-example",
         "lfw dev check --project lightflow-example",
-        "lightflow-macros",
+        "core `lightflow` SDK crate",
     ] {
         assert!(
             projects_readme.contains(expected_text),

@@ -410,6 +410,8 @@ use lightflow::preload::*;
 
 pub fn define() -> WorkflowSpec {
     workflow! {
+        name: "Prompted Image",
+        description: "Render a prompt template, then generate an image.",
         input "topic": "text" {
             description: "Subject to render.",
             required: true,
@@ -423,23 +425,25 @@ pub fn define() -> WorkflowSpec {
             description: "Generated PNG path.",
             artifact: "image",
         }
+        node template: "lightflow.text_template",
+        node generate: "lightflow.text_to_image",
+        edge template.text -> generate.prompt,
     }
-        .name("Prompted Image")
-        .description("Render a prompt template, then generate an image.")
-        .depends_on("lightflow.text_template", "0.1.0")
-        .depends_on("lightflow.text_to_image", "0.1.0")
-        .node("template", "lightflow.text_template")
-        .node("generate", "lightflow.text_to_image")
-        .edge("template", "text", "generate", "prompt")
-        .build()
+    .build()
 }
 ```
 
 Workflow inputs are automatically visible to child nodes when the child has an
-input with the same name. Use `.edge(from_node, from_port, to_node, to_port)`
-when a child output should feed another child input.
+input with the same name. Use `edge from_node.from_port -> to_node.to_port`
+when a child output should feed another child input. Nested `node` declarations
+register dependencies automatically; the nested workflow version follows the
+installed package catalog unless you pin with
+`node generate: "lightflow.text_to_image" @ "0.1.0"`.
 
-Declare dependencies with exact versions so `lfw deps` can verify the graph:
+Legacy builder methods remain available:
+`.node(...)`, `.edge(...)`, `.wire("a.out", "b.in")`, and `.depends_on(...)`.
+
+Inspect the resolved dependency graph with:
 
 ```bash
 lfw deps lightflow.prompted_image

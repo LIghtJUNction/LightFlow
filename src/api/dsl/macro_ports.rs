@@ -1,5 +1,8 @@
 use crate::api::{ApiError, ApiResult};
-use crate::workflow::{PortSpec, WorkflowSpec};
+use crate::workflow::{
+    PortSpec, WorkflowEdge, WorkflowEndpoint, WorkflowNode, WorkflowNodeKind, WorkflowPosition,
+    WorkflowSpec,
+};
 use std::path::Path;
 use syn::parse::{Parse, ParseStream};
 use syn::{Expr, Ident, LitBool, LitStr, Token, braced, bracketed, token};
@@ -9,70 +12,184 @@ pub(super) fn apply_workflow_macro_ports(
     call: &syn::ExprMacro,
     path: &Path,
 ) -> ApiResult<()> {
-    let ports = syn::parse2::<WorkflowPorts>(call.mac.tokens.clone()).map_err(|error| {
-        ApiError::InvalidRequest(format!(
-            "invalid workflow! port block in {:?}: {error}",
-            path
-        ))
+    let body = syn::parse2::<WorkflowMacroBody>(call.mac.tokens.clone()).map_err(|error| {
+        ApiError::InvalidRequest(format!("invalid workflow! block in {:?}: {error}", path))
     })?;
-    for parsed in ports.0 {
-        let mut port = PortSpec::new(parsed.name, parsed.ty);
-        port.description = parsed.metadata.description;
-        port.required = parsed.metadata.required;
-        port.default = parsed.metadata.default;
-        if let Some([min, max, step]) = parsed.metadata.range {
-            port.min = Some(min);
-            port.max = Some(max);
-            port.step = Some(step);
-        }
-        port.enum_values = parsed.metadata.choices.unwrap_or_default();
-        port.widget = parsed.metadata.widget;
-        port.artifact_kind = parsed.metadata.artifact;
-        port.model_requirement = parsed.metadata.model;
-        match parsed.kind {
-            PortKind::Input => workflow.inputs.push(port),
-            PortKind::Output => workflow.outputs.push(port),
+    for item in body.0 {
+        match item {
+            WorkflowItem::Name(value) => workflow.name = value,
+            WorkflowItem::Category(value) => workflow.category = Some(value),
+            WorkflowItem::Description(value) => workflow.description = Some(value),
+            WorkflowItem::Port(parsed) => {
+                let mut port = PortSpec::new(parsed.name, parsed.ty);
+                port.description = parsed.metadata.description;
+                port.required = parsed.metadata.required;
+                port.default = parsed.metadata.default;
+                if let Some([min, max, step]) = parsed.metadata.range {
+                    port.min = Some(min);
+                    port.max = Some(max);
+                    port.step = Some(step);
+                }
+                port.enum_values = parsed.metadata.choices.unwrap_or_default();
+                port.widget = parsed.metadata.widget;
+                port.artifact_kind = parsed.metadata.artifact;
+                port.model_requirement = parsed.metadata.model;
+                match parsed.kind {
+                    PortKind::Input => workflow.inputs.push(port),
+                    PortKind::Output => workflow.outputs.push(port),
+                }
+            }
+            WorkflowItem::Node {
+                id,
+                workflow_id,
+                version,
+            } => {
+                workflow.nodes.push(WorkflowNode {
+                    id,
+                    kind: WorkflowNodeKind::Workflow,
+                    workflow_id: workflow_id.clone(),
+                    condition: None,
+                    then_workflow_id: None,
+                    else_workflow_id: None,
+                    title: None,
+                    disabled: false,
+                    position: WorkflowPosition::default(),
+                    config: serde_json::Value::Null,
+                });
+                register_dependency(workflow, workflow_id, version);
+            }
+            WorkflowItem::Edge {
+                from_node,
+                from_port,
+                to_node,
+                to_port,
+            } => {
+                workflow.edges.push(WorkflowEdge {
+                    from: WorkflowEndpoint {
+                        node: from_node,
+                        port: from_port,
+                    },
+                    to: WorkflowEndpoint {
+                        node: to_node,
+                        port: to_port,
+                    },
+                });
+            }
         }
     }
     Ok(())
 }
 
-struct WorkflowPorts(Vec<ParsedPort>);
+fn register_dependency(workflow: &mut WorkflowSpec, workflow_id: String, version: Option<String>) {
+    workflow.merge_dependency(workflow_id, version, None);
+}
 
-impl Parse for WorkflowPorts {
+struct WorkflowMacroBody(Vec<WorkflowItem>);
+
+enum WorkflowItem {
+    Name(String),
+    Category(String),
+    Description(String),
+    Port(ParsedPort),
+    Node {
+        id: String,
+        workflow_id: String,
+        version: Option<String>,
+    },
+    Edge {
+        from_node: String,
+        from_port: String,
+        to_node: String,
+        to_port: String,
+    },
+}
+
+impl Parse for WorkflowMacroBody {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let mut ports = Vec::new();
+        let mut items = Vec::new();
         while !input.is_empty() {
-            let kind_ident: Ident = input.parse()?;
-            let kind = match kind_ident.to_string().as_str() {
-                "input" => PortKind::Input,
-                "output" => PortKind::Output,
+            while input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
+            if input.is_empty() {
+                break;
+            }
+            let keyword: Ident = input.parse()?;
+            match keyword.to_string().as_str() {
+                "name" => {
+                    input.parse::<Token![:]>()?;
+                    items.push(WorkflowItem::Name(input.parse::<LitStr>()?.value()));
+                }
+                "category" => {
+                    input.parse::<Token![:]>()?;
+                    items.push(WorkflowItem::Category(input.parse::<LitStr>()?.value()));
+                }
+                "description" => {
+                    input.parse::<Token![:]>()?;
+                    items.push(WorkflowItem::Description(input.parse::<LitStr>()?.value()));
+                }
+                "input" => items.push(WorkflowItem::Port(parse_port(input, PortKind::Input)?)),
+                "output" => items.push(WorkflowItem::Port(parse_port(input, PortKind::Output)?)),
+                "node" => {
+                    let id: Ident = input.parse()?;
+                    input.parse::<Token![:]>()?;
+                    let workflow_id = input.parse::<LitStr>()?.value();
+                    let version = if input.peek(Token![@]) {
+                        input.parse::<Token![@]>()?;
+                        Some(input.parse::<LitStr>()?.value())
+                    } else {
+                        None
+                    };
+                    items.push(WorkflowItem::Node {
+                        id: id.to_string(),
+                        workflow_id,
+                        version,
+                    });
+                }
+                "edge" => {
+                    let from_node: Ident = input.parse()?;
+                    input.parse::<Token![.]>()?;
+                    let from_port: Ident = input.parse()?;
+                    input.parse::<Token![->]>()?;
+                    let to_node: Ident = input.parse()?;
+                    input.parse::<Token![.]>()?;
+                    let to_port: Ident = input.parse()?;
+                    items.push(WorkflowItem::Edge {
+                        from_node: from_node.to_string(),
+                        from_port: from_port.to_string(),
+                        to_node: to_node.to_string(),
+                        to_port: to_port.to_string(),
+                    });
+                }
                 _ => {
                     return Err(syn::Error::new_spanned(
-                        kind_ident,
-                        "workflow! port declaration must start with input or output",
+                        keyword,
+                        "workflow! item must be name, category, description, input, output, node, or edge",
                     ));
                 }
-            };
-            let name: LitStr = input.parse()?;
-            input.parse::<Token![:]>()?;
-            let ty: LitStr = input.parse()?;
-            let metadata = if input.peek(token::Brace) {
-                let content;
-                braced!(content in input);
-                parse_metadata(&content, kind)?
-            } else {
-                PortMetadata::default()
-            };
-            ports.push(ParsedPort {
-                kind,
-                name: name.value(),
-                ty: ty.value(),
-                metadata,
-            });
+            }
         }
-        Ok(Self(ports))
+        Ok(Self(items))
     }
+}
+
+fn parse_port(input: ParseStream<'_>, kind: PortKind) -> syn::Result<ParsedPort> {
+    let name: LitStr = input.parse()?;
+    input.parse::<Token![:]>()?;
+    let ty: LitStr = input.parse()?;
+    let metadata = if input.peek(token::Brace) {
+        let content;
+        braced!(content in input);
+        parse_metadata(&content, kind)?
+    } else {
+        PortMetadata::default()
+    };
+    Ok(ParsedPort {
+        kind,
+        name: name.value(),
+        ty: ty.value(),
+        metadata,
+    })
 }
 
 #[derive(Clone, Copy)]

@@ -1,3 +1,160 @@
+//! Declarative macros for authoring `WorkflowSpec` definitions.
+//!
+//! These live in the main `lightflow` crate (not a separate proc-macro
+//! package) so workflow crates only depend on `lightflow`.
+
+/// Starts a workflow definition using the calling Cargo package name and version.
+///
+/// Port metadata is declared with the port. Composite graphs can declare
+/// `name` / `description` / `category`, nested `node` entries, and `edge`
+/// connections inside the same block:
+///
+/// ```rust,ignore
+/// workflow! {
+///     name: "Text Plan",
+///     description: "Example composite workflow.",
+///     input "value": "json" { required: true, widget: "json" }
+///     output "result": "text" { description: "Result." }
+///     node prompt: "lightflow.text_prompt",
+///     node result: "lightflow.text_result" @ "0.1.0",
+///     edge prompt.prompt -> result.text,
+/// }
+/// ```
+///
+/// `node id: "workflow_id"` registers an unversioned dependency so the nested
+/// workflow version follows the installed package catalog. Add
+/// `@ "x.y.z"` only when the composite should pin a version.
+///
+/// Output-only metadata is deliberately restricted to descriptions, artifact
+/// kinds, and model bindings.
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+///
+/// let _ = workflow! {
+///     output "value": "json" { required: true }
+/// };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { required: bool::default() } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! {
+///     input "value": "json" { description: "first", description: "second" }
+/// };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// fn minimum() -> f64 { 0.0 }
+/// let _ = workflow! { input "value": "number" { range: [minimum(), 1.0, 0.1] } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! {
+///     input "value": "json" { default: {"items": [bool::default()]} }
+/// };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// fn make_value() -> i32 { 1 }
+/// let _ = workflow! { input "value": "json" { choices: [1, make_value()] } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { default: {enabled: true} } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { default: 1 + 2 } };
+/// ```
+///
+/// ```compile_fail
+/// use lightflow::preload::*;
+/// let _ = workflow! { input "value": "json" { default: 1u32 } };
+/// ```
+#[macro_export]
+macro_rules! workflow {
+    () => {
+        $crate::workflow::workflow_from_package(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+    };
+
+    (@body $builder:ident;) => {
+        $builder
+    };
+    (@body $builder:ident; , $($rest:tt)*) => {
+        $crate::workflow!(@body $builder; $($rest)*)
+    };
+
+    (@body $builder:ident; name : $value:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.name($value);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+    (@body $builder:ident; category : $value:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.category($value);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+    (@body $builder:ident; description : $value:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.description($value);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+
+    (@body $builder:ident; input $name:literal : $ty:literal { $($metadata:tt)* } $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.input($name, $ty);
+        let __lightflow_builder = $crate::__lightflow_input_metadata!(
+            __lightflow_builder, $name; [no no no no no no no no]; $($metadata)* ,);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+    (@body $builder:ident; input $name:literal : $ty:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.input($name, $ty);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+    (@body $builder:ident; output $name:literal : $ty:literal { $($metadata:tt)* } $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.output($name, $ty);
+        let __lightflow_builder = $crate::__lightflow_output_metadata!(
+            __lightflow_builder, $name; [no no no]; $($metadata)* ,);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+    (@body $builder:ident; output $name:literal : $ty:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.output($name, $ty);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+
+    (@body $builder:ident; node $id:ident : $workflow_id:literal @ $version:literal $($rest:tt)*) => {{
+        let __lightflow_builder =
+            $builder.node_version(stringify!($id), $workflow_id, $version);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+    (@body $builder:ident; node $id:ident : $workflow_id:literal $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.node(stringify!($id), $workflow_id);
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+
+    (@body $builder:ident; edge $from_node:ident . $from_port:ident -> $to_node:ident . $to_port:ident $($rest:tt)*) => {{
+        let __lightflow_builder = $builder.edge(
+            stringify!($from_node),
+            stringify!($from_port),
+            stringify!($to_node),
+            stringify!($to_port),
+        );
+        $crate::workflow!(@body __lightflow_builder; $($rest)*)
+    }};
+
+    ($($body:tt)+) => {{
+        let __lightflow_builder =
+            $crate::workflow::workflow_from_package(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        $crate::workflow!(@body __lightflow_builder; $($body)+)
+    }};
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __lightflow_input_metadata {

@@ -3,8 +3,8 @@ use crate::api::workflow_package_identity_from_source;
 use crate::api::{ApiError, ApiResult};
 use crate::workflow::{
     CargoDependency, CargoDependencySource, ModelProvider, ModelRequirement, ModelVariant,
-    RuntimeRequirement, WorkflowCondition, WorkflowDependencyRequirement, WorkflowEdge,
-    WorkflowEndpoint, WorkflowNode, WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
+    RuntimeRequirement, WorkflowCondition, WorkflowEdge, WorkflowEndpoint, WorkflowNode,
+    WorkflowNodeKind, WorkflowPosition, WorkflowSpec,
 };
 use std::path::Path;
 
@@ -70,27 +70,29 @@ fn parse_workflow_builder_with_package(
                     expect_arg_len(&call.args, 1, &method, path)?;
                 }
                 "depends_on" => {
-                    workflow.dependencies.push(WorkflowDependencyRequirement {
-                        workflow_id: string_arg(&call.args, 0, &method, path)?,
-                        version: Some(string_arg(&call.args, 1, &method, path)?),
-                        install: None,
-                    });
+                    register_dependency(
+                        &mut workflow,
+                        string_arg(&call.args, 0, &method, path)?,
+                        Some(string_arg(&call.args, 1, &method, path)?),
+                        None,
+                    );
                     expect_arg_len(&call.args, 2, &method, path)?;
                 }
                 "depends_on_crate" => {
                     let workflow_id = string_arg(&call.args, 0, &method, path)?;
                     let version = string_arg(&call.args, 1, &method, path)?;
                     let crate_name = string_arg(&call.args, 2, &method, path)?;
-                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                    register_dependency(
+                        &mut workflow,
                         workflow_id,
-                        version: Some(version.clone()),
-                        install: Some(CargoDependency {
+                        Some(version.clone()),
+                        Some(CargoDependency {
                             crate_name,
                             version: Some(version),
                             source: None,
                             package: None,
                         }),
-                    });
+                    );
                     expect_arg_len(&call.args, 3, &method, path)?;
                 }
                 "depends_on_path" => {
@@ -98,16 +100,17 @@ fn parse_workflow_builder_with_package(
                     let version = string_arg(&call.args, 1, &method, path)?;
                     let crate_name = string_arg(&call.args, 2, &method, path)?;
                     let dependency_path = string_arg(&call.args, 3, &method, path)?;
-                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                    register_dependency(
+                        &mut workflow,
                         workflow_id,
-                        version: Some(version.clone()),
-                        install: Some(CargoDependency {
+                        Some(version.clone()),
+                        Some(CargoDependency {
                             crate_name,
                             version: Some(version),
                             source: Some(CargoDependencySource::Path(dependency_path)),
                             package: None,
                         }),
-                    });
+                    );
                     expect_arg_len(&call.args, 4, &method, path)?;
                 }
                 "depends_on_git" => {
@@ -116,16 +119,17 @@ fn parse_workflow_builder_with_package(
                     let crate_name = string_arg(&call.args, 2, &method, path)?;
                     let git = string_arg(&call.args, 3, &method, path)?;
                     let package = string_arg(&call.args, 4, &method, path)?;
-                    workflow.dependencies.push(WorkflowDependencyRequirement {
+                    register_dependency(
+                        &mut workflow,
                         workflow_id,
-                        version: Some(version.clone()),
-                        install: Some(CargoDependency {
+                        Some(version.clone()),
+                        Some(CargoDependency {
                             crate_name,
                             version: Some(version),
                             source: Some(CargoDependencySource::Git(git)),
                             package: Some(package).filter(|package| !package.is_empty()),
                         }),
-                    });
+                    );
                     expect_arg_len(&call.args, 5, &method, path)?;
                 }
                 "model" => {
@@ -165,10 +169,11 @@ fn parse_workflow_builder_with_package(
                     expect_arg_len(&call.args, 3, &method, path)?;
                 }
                 "node" => {
+                    let workflow_id = string_arg(&call.args, 1, &method, path)?;
                     workflow.nodes.push(WorkflowNode {
                         id: string_arg(&call.args, 0, &method, path)?,
                         kind: WorkflowNodeKind::Workflow,
-                        workflow_id: string_arg(&call.args, 1, &method, path)?,
+                        workflow_id: workflow_id.clone(),
                         condition: None,
                         then_workflow_id: None,
                         else_workflow_id: None,
@@ -177,13 +182,33 @@ fn parse_workflow_builder_with_package(
                         position: WorkflowPosition::default(),
                         config: serde_json::Value::Null,
                     });
+                    register_dependency(&mut workflow, workflow_id, None, None);
                     expect_arg_len(&call.args, 2, &method, path)?;
                 }
-                "disabled_node" => {
+                "node_version" => {
+                    let workflow_id = string_arg(&call.args, 1, &method, path)?;
+                    let version = string_arg(&call.args, 2, &method, path)?;
                     workflow.nodes.push(WorkflowNode {
                         id: string_arg(&call.args, 0, &method, path)?,
                         kind: WorkflowNodeKind::Workflow,
-                        workflow_id: string_arg(&call.args, 1, &method, path)?,
+                        workflow_id: workflow_id.clone(),
+                        condition: None,
+                        then_workflow_id: None,
+                        else_workflow_id: None,
+                        title: None,
+                        disabled: false,
+                        position: WorkflowPosition::default(),
+                        config: serde_json::Value::Null,
+                    });
+                    register_dependency(&mut workflow, workflow_id, Some(version), None);
+                    expect_arg_len(&call.args, 3, &method, path)?;
+                }
+                "disabled_node" => {
+                    let workflow_id = string_arg(&call.args, 1, &method, path)?;
+                    workflow.nodes.push(WorkflowNode {
+                        id: string_arg(&call.args, 0, &method, path)?,
+                        kind: WorkflowNodeKind::Workflow,
+                        workflow_id: workflow_id.clone(),
                         condition: None,
                         then_workflow_id: None,
                         else_workflow_id: None,
@@ -192,9 +217,12 @@ fn parse_workflow_builder_with_package(
                         position: WorkflowPosition::default(),
                         config: serde_json::Value::Null,
                     });
+                    register_dependency(&mut workflow, workflow_id, None, None);
                     expect_arg_len(&call.args, 2, &method, path)?;
                 }
                 "if_node" => {
+                    let then_workflow_id = string_arg(&call.args, 3, &method, path)?;
+                    let else_workflow_id = string_arg(&call.args, 4, &method, path)?;
                     workflow.nodes.push(WorkflowNode {
                         id: string_arg(&call.args, 0, &method, path)?,
                         kind: WorkflowNodeKind::If,
@@ -203,13 +231,15 @@ fn parse_workflow_builder_with_package(
                             input: string_arg(&call.args, 1, &method, path)?,
                             value: serde_json::Value::Bool(bool_arg(&call.args, 2, &method, path)?),
                         }),
-                        then_workflow_id: Some(string_arg(&call.args, 3, &method, path)?),
-                        else_workflow_id: Some(string_arg(&call.args, 4, &method, path)?),
+                        then_workflow_id: Some(then_workflow_id.clone()),
+                        else_workflow_id: Some(else_workflow_id.clone()),
                         title: None,
                         disabled: false,
                         position: WorkflowPosition::default(),
                         config: serde_json::Value::Null,
                     });
+                    register_dependency(&mut workflow, then_workflow_id, None, None);
+                    register_dependency(&mut workflow, else_workflow_id, None, None);
                     expect_arg_len(&call.args, 5, &method, path)?;
                 }
                 "edge" => {
@@ -224,6 +254,23 @@ fn parse_workflow_builder_with_package(
                         },
                     });
                     expect_arg_len(&call.args, 4, &method, path)?;
+                }
+                "wire" => {
+                    let from = string_arg(&call.args, 0, &method, path)?;
+                    let to = string_arg(&call.args, 1, &method, path)?;
+                    let (from_node, from_port) = split_endpoint(&from);
+                    let (to_node, to_port) = split_endpoint(&to);
+                    workflow.edges.push(WorkflowEdge {
+                        from: WorkflowEndpoint {
+                            node: from_node,
+                            port: from_port,
+                        },
+                        to: WorkflowEndpoint {
+                            node: to_node,
+                            port: to_port,
+                        },
+                    });
+                    expect_arg_len(&call.args, 2, &method, path)?;
                 }
                 _ => {
                     return Err(ApiError::InvalidRequest(format!(
@@ -268,6 +315,26 @@ fn is_workflow_macro(path: &syn::Path) -> bool {
     path.segments
         .last()
         .is_some_and(|segment| segment.ident == "workflow")
+}
+
+fn register_dependency(
+    workflow: &mut WorkflowSpec,
+    workflow_id: String,
+    version: Option<String>,
+    install: Option<CargoDependency>,
+) {
+    workflow.merge_dependency(workflow_id, version, install);
+}
+
+fn split_endpoint(value: &str) -> (String, String) {
+    let (node, port) = value
+        .split_once('.')
+        .unwrap_or_else(|| panic!("invalid endpoint {value:?}: expected `<node>.<port>`"));
+    assert!(
+        !node.is_empty() && !port.is_empty(),
+        "invalid endpoint {value:?}: node and port must both be non-empty"
+    );
+    (node.to_owned(), port.to_owned())
 }
 
 fn push_hf_model_variant(

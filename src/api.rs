@@ -488,7 +488,7 @@ lightflow = {{ path = {:?} }}
                 .join(".lightflow/workflows/saved_flow/src/lib.rs"),
         )
         .expect("workflow source");
-        assert!(source.contains(".category(\"tests\")"));
+        assert!(source.contains("category: \"tests\","));
         assert!(source.contains("input \"condition\": \"boolean\" {"));
         assert!(source.contains("default: false,"));
         assert!(source.contains("choices: [0.25,0.5,0.75,1.0],"));
