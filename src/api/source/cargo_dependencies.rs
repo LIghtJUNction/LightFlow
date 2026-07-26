@@ -2,7 +2,6 @@ use super::normalize_existing_path;
 use super::path_dependencies::dependency_category;
 use crate::api::dsl::read_optional_workflow_source_from_manifest;
 use crate::api::{ApiError, ApiResult};
-use crate::workflow::WorkflowSpec;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -10,7 +9,7 @@ use std::process::Command;
 
 pub(super) fn read_cargo_dependency_workflows(
     root_manifest: &Path,
-    workflows: &mut Vec<WorkflowSpec>,
+    workflows: &mut Vec<super::DiscoveredWorkflow>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
 ) -> ApiResult<()> {
@@ -20,7 +19,7 @@ pub(super) fn read_cargo_dependency_workflows(
 
 fn discover_metadata_workflows(
     metadata: &CargoMetadata,
-    workflows: &mut Vec<WorkflowSpec>,
+    workflows: &mut Vec<super::DiscoveredWorkflow>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
 ) -> ApiResult<()> {
@@ -70,7 +69,12 @@ fn discover_metadata_workflows(
                 .unwrap_or_else(|| "extensions".to_owned())
         });
         if visited_libs.insert(lib) {
-            workflows.push(workflow);
+            let origin = super::read_workflow_origin(&package.manifest_path)?;
+            super::apply_runner_runtime(&mut workflow, &origin);
+            workflows.push(super::DiscoveredWorkflow {
+                spec: workflow,
+                origin,
+            });
         }
         manifests.insert(normalize_existing_path(&package.manifest_path)?);
         enqueue_normal_dependencies(&package.id, &nodes, &mut queue);
@@ -386,7 +390,7 @@ pub fn define() -> WorkflowSpec {
             .expect("metadata discovery");
             let mut ids = workflows
                 .into_iter()
-                .map(|workflow| workflow.id)
+                .map(|workflow| workflow.spec.id)
                 .collect::<Vec<_>>();
             ids.sort();
             ids

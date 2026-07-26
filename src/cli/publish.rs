@@ -40,6 +40,12 @@ pub(super) fn publish_crate(root: &Path, options: &PublishOptions) -> CliResult<
     let workspace_root = workspace_root_for_manifest(root, &manifest_path)?;
     let workspace_document = workspace_document(&workspace_root)?;
     let mut issues = publish_issues(&document, workspace_document.as_ref());
+    issues.extend(crate::api::path_dependency_release_issues(
+        &manifest_path,
+        &document,
+        workspace_document.as_ref(),
+        &workspace_root,
+    ));
     if matches!(options.target, PublishTarget::Workflow(_)) {
         issues.extend(workflow_publish_metadata_issues(&manifest_path));
     }
@@ -87,4 +93,61 @@ pub(super) fn publish_crate(root: &Path, options: &PublishOptions) -> CliResult<
         return Err(CliError::Usage(output.to_string()));
     }
     Ok(output)
+}
+
+pub(super) fn publish_release_root(
+    root: &Path,
+    apply: bool,
+    allow_dirty: bool,
+) -> CliResult<serde_json::Value> {
+    publish_crate(
+        root,
+        &PublishOptions {
+            target: PublishTarget::Root,
+            apply,
+            allow_dirty,
+            require_publishable: true,
+            project: None,
+        },
+    )
+}
+
+pub(super) fn publish_release_project(
+    root: &Path,
+    project: &str,
+    apply: bool,
+    allow_dirty: bool,
+) -> CliResult<serde_json::Value> {
+    publish_crate(
+        root,
+        &PublishOptions {
+            target: PublishTarget::Workflows,
+            apply,
+            allow_dirty,
+            require_publishable: true,
+            project: Some(project.to_owned()),
+        },
+    )
+}
+
+pub(super) fn run_publish_command(command: &[String]) -> CliResult<()> {
+    run_cargo_command(command)
+}
+
+pub(super) fn run_publish_preflight_with_retries(
+    command: &[String],
+    attempts: usize,
+) -> CliResult<usize> {
+    let attempts = attempts.max(1);
+    let mut last_error = None;
+    for attempt in 1..=attempts {
+        match run_cargo_command(command) {
+            Ok(()) => return Ok(attempt),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt < attempts {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    }
+    Err(last_error.expect("at least one publish preflight attempt"))
 }

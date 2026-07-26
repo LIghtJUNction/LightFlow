@@ -63,6 +63,12 @@ pub(super) fn workflow_publish_check_from_manifest_document(
     workspace_document: Option<&DocumentMut>,
 ) -> ApiResult<WorkflowPublishCheck> {
     let mut issues = publish_issues(document, workspace_document);
+    issues.extend(crate::api::path_dependency_release_issues(
+        &manifest,
+        document,
+        workspace_document,
+        root,
+    ));
     issues.extend(workflow_publish_metadata_issues(&manifest));
     let package = package_field(document, "name")?;
     let version = package_field(document, "version")?;

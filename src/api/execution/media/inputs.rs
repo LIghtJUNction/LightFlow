@@ -23,11 +23,12 @@ pub(in crate::api::execution) fn input_string(
     inputs: &serde_json::Map<String, serde_json::Value>,
     name: &str,
 ) -> Option<String> {
-    inputs.get(name).and_then(|value| match value {
-        serde_json::Value::String(value) => Some(value.clone()),
-        value if !value.is_null() => Some(value.to_string()),
-        _ => None,
-    })
+    // Only accept JSON strings. Coercing numbers/objects via Display would
+    // silently change port semantics (e.g. bool true -> "true", object -> "{...}").
+    inputs
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
 }
 
 pub(in crate::api::execution) fn input_u32(
@@ -45,19 +46,4 @@ pub(in crate::api::execution) fn input_u64(
     name: &str,
 ) -> Option<u64> {
     inputs.get(name).and_then(serde_json::Value::as_u64)
-}
-
-pub(in crate::api::execution) fn input_bool(
-    inputs: &serde_json::Map<String, serde_json::Value>,
-    name: &str,
-) -> Option<bool> {
-    inputs.get(name).and_then(|value| match value {
-        serde_json::Value::Bool(value) => Some(*value),
-        serde_json::Value::String(value) => match value.as_str() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        },
-        _ => None,
-    })
 }

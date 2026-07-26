@@ -3,9 +3,6 @@ use std::fs;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
-mod invert;
-pub(super) use invert::write_inverted_png;
-
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PngImage {
     pub(super) width: u32,
@@ -123,40 +120,6 @@ pub(super) fn resize_png_image(image: &PngImage, width: u32, height: u32) -> Png
     }
 }
 
-pub(super) fn crop_png_image(
-    image: &PngImage,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-) -> ApiResult<PngImage> {
-    if width == 0 || height == 0 || x >= image.width || y >= image.height {
-        return Err(ApiError::InvalidRequest(
-            "crop rectangle must intersect the source image".to_owned(),
-        ));
-    }
-
-    let width = width.min(image.width - x);
-    let height = height.min(image.height - y);
-    let mut data = vec![0; width as usize * height as usize * image.channels];
-
-    for row in 0..height {
-        let src = pixel_offset(x, y + row, image.width, image.channels);
-        let dst = pixel_offset(0, row, width, image.channels);
-        let len = width as usize * image.channels;
-        data[dst..dst + len].copy_from_slice(&image.data[src..src + len]);
-    }
-
-    Ok(PngImage {
-        width,
-        height,
-        color_type: image.color_type,
-        bit_depth: image.bit_depth,
-        channels: image.channels,
-        data,
-    })
-}
-
 pub(super) fn preview_edit_image(
     image: &PngImage,
     seed: u64,
@@ -189,44 +152,6 @@ pub(super) fn preview_edit_image(
     }
 
     edited
-}
-
-pub(super) fn compose_masks(
-    mask_a: &PngImage,
-    mask_b: &PngImage,
-    mode: &str,
-) -> ApiResult<PngImage> {
-    let mut data = vec![0; mask_a.width as usize * mask_a.height as usize];
-
-    for y in 0..mask_a.height {
-        for x in 0..mask_a.width {
-            let a = luminance_at(mask_a, x, y);
-            let b = luminance_at(mask_b, x, y);
-            let value = match mode {
-                "add" => a.saturating_add(b),
-                "multiply" | "intersect" => ((u16::from(a) * u16::from(b)) / 255) as u8,
-                "min" => a.min(b),
-                "subtract" => a.saturating_sub(b),
-                "max" | "union" => a.max(b),
-                other => {
-                    return Err(ApiError::InvalidRequest(format!(
-                        "unsupported mask compose mode: {other}"
-                    )));
-                }
-            };
-
-            data[(y as usize * mask_a.width as usize) + x as usize] = value;
-        }
-    }
-
-    Ok(PngImage {
-        width: mask_a.width,
-        height: mask_a.height,
-        color_type: png::ColorType::Grayscale,
-        bit_depth: png::BitDepth::Eight,
-        channels: 1,
-        data,
-    })
 }
 
 pub(super) fn luminance_at(image: &PngImage, x: u32, y: u32) -> u8 {

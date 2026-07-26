@@ -128,10 +128,20 @@ pub fn define() -> WorkflowSpec {
 }
 
 fn abstract_source(workflow_id: &str) -> String {
-    preview_source(workflow_id).replace(
-        ".builtin_runtime(\"image_runtime\", \"lightflow.image.generate\", \"builtin.preview.v1\")",
-        ".runtime(\"image_runtime\", \"lightflow.image.generate\")",
-    )
+    preview_source(workflow_id)
+        .replace(".output(\"image\",", ".output(\"nested_image\",")
+        .replace(
+            ".output_description(\"image\",",
+            ".output_description(\"nested_image\",",
+        )
+        .replace(
+            ".output_artifact_kind(\"image\",",
+            ".output_artifact_kind(\"nested_image\",",
+        )
+        .replace(
+            ".builtin_runtime(\"image_runtime\", \"lightflow.image.generate\", \"builtin.preview.v1\")",
+            ".runtime(\"image_runtime\", \"lightflow.image.generate\")",
+        )
 }
 
 fn nested_source(_workflow_id: &str, child_id: &str) -> String {
@@ -144,9 +154,9 @@ pub fn define() -> WorkflowSpec {{
         .description("Contains another composite runtime candidate.")
         .input("flag", "boolean")
         .input_description("flag", "Nested input flag.")
-        .output("image", "artifact")
-        .output_description("image", "Nested image metadata.")
-        .output_artifact_kind("image", "image")
+        .output("nested_image", "artifact")
+        .output_description("nested_image", "Nested image metadata.")
+        .output_artifact_kind("nested_image", "image")
         .node("child", "{child_id}")
         .build()
 }}

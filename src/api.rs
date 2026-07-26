@@ -7,13 +7,7 @@ mod dsl;
 mod error;
 mod execution;
 mod executors;
-mod flux;
-#[cfg(feature = "flux-native")]
-mod flux_native;
-#[cfg(feature = "flux-native")]
-mod flux_native_session;
 mod history;
-mod llm_rig;
 mod loop_check;
 pub mod media_paths;
 mod model_backend;
@@ -22,12 +16,14 @@ mod nodes;
 mod patch_service;
 mod patches;
 mod plan;
+mod port_values;
 mod project_config;
 mod project_filter;
 mod publish_checks;
 mod release;
 mod replay_fingerprints;
 mod run_history_service;
+mod runner_process;
 mod service;
 mod source;
 mod util;
@@ -47,14 +43,15 @@ use execution::execute_workflow_spec as execute_workflow_spec_impl;
 pub(crate) use project_filter::project_filter_matches;
 pub(crate) use publish_checks::{
     CargoManifestReadError, cargo_manifest_api_error, cargo_publish_command,
-    internal_path_dependency_packages, package_field_value, publish_issues, read_cargo_manifest,
-    read_workspace_cargo_manifest,
+    internal_path_dependency_packages, package_field_value, path_dependency_release_issues,
+    publish_issues, read_cargo_manifest, read_workspace_cargo_manifest,
+    resolve_workspace_member_manifests,
 };
-use source::{ensure_workflow_save_workspace, read_workflow_sources};
+use source::{WorkflowCatalog, ensure_workflow_save_workspace, read_workflow_catalog};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use util::{validate_id_segment, workflow_crate_dir_name};
-use validation::{validate_workflow_shape, validate_workflow_spec};
+use validation::validate_workflow_spec;
 pub(crate) use workflow_identity::{
     workflow_package_identity, workflow_package_identity_from_source,
 };
@@ -220,13 +217,35 @@ impl ApiService {
         workflow_id: &str,
         options: WorkflowExecutionOptions,
     ) -> ApiResult<WorkflowExecution> {
-        let workflows = self.workflow_specs()?;
+        let catalog = self.workflow_catalog()?;
+        let workflows = &catalog.specs;
         let workflow = workflows
             .get(workflow_id)
             .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))?;
-        validate_workflow_dependencies(workflow_id, &workflows)?;
-        validate_execution_options(workflow, &workflows, &options)?;
-        execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, options)
+        validate_workflow_dependencies(workflow_id, workflows)?;
+        validate_execution_options(workflow, workflows, &options)?;
+        execute_workflow_spec_impl(
+            &self.repo_root,
+            workflow,
+            workflows,
+            &catalog.origins,
+            options,
+        )
+    }
+
+    /// Validate execution options without starting an executor.
+    pub fn validate_workflow_execution_options(
+        &self,
+        workflow_id: &str,
+        options: &WorkflowExecutionOptions,
+    ) -> ApiResult<()> {
+        let catalog = self.workflow_catalog()?;
+        let workflow = catalog
+            .specs
+            .get(workflow_id)
+            .ok_or_else(|| ApiError::NotFound(format!("workflow {workflow_id}")))?;
+        validate_workflow_dependencies(workflow_id, &catalog.specs)?;
+        validate_execution_options(workflow, &catalog.specs, options)
     }
 
     /// Execute an explicit workflow spec while resolving referenced workflows
@@ -236,19 +255,22 @@ impl ApiService {
         workflow: &WorkflowSpec,
         options: WorkflowExecutionOptions,
     ) -> ApiResult<WorkflowExecution> {
-        let mut workflows = self.workflow_specs()?;
+        let catalog = self.workflow_catalog()?;
+        let mut workflows = catalog.specs;
+        let mut origins = catalog.origins;
         workflows.insert(workflow.id.clone(), workflow.clone());
+        origins.remove(&workflow.id);
         validate_workflow_dependencies(&workflow.id, &workflows)?;
-        execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, options)
+        validate_execution_options(workflow, &workflows, &options)?;
+        execute_workflow_spec_impl(&self.repo_root, workflow, &workflows, &origins, options)
     }
 
     fn workflow_specs(&self) -> ApiResult<BTreeMap<String, WorkflowSpec>> {
-        let mut workflows = BTreeMap::new();
-        for workflow in read_workflow_sources(&self.repo_root, &self.workflow_paths)? {
-            validate_workflow_shape(&workflow)?;
-            workflows.entry(workflow.id.clone()).or_insert(workflow);
-        }
-        Ok(workflows)
+        Ok(self.workflow_catalog()?.specs)
+    }
+
+    fn workflow_catalog(&self) -> ApiResult<WorkflowCatalog> {
+        read_workflow_catalog(&self.repo_root, &self.workflow_paths)
     }
 }
 
@@ -263,6 +285,24 @@ fn validate_execution_options(
         .map(|node| node.id.as_str())
         .collect::<BTreeSet<_>>();
     let mut issues = Vec::new();
+    issues.extend(port_values::validate_port_map(
+        &workflow.inputs,
+        &options.inputs,
+        "input",
+    ));
+    // ComfyUI reserves `workflow_path`; keep the contract's guidance instead
+    // of the generic unknown-input message.
+    if workflow
+        .runtimes
+        .iter()
+        .any(|runtime| runtime.capability == plan::COMFYUI_WORKFLOW_CAPABILITY)
+        && let Some(issue) = issues
+            .iter_mut()
+            .find(|issue| issue.as_str() == "unknown input `workflow_path`")
+    {
+        *issue = "workflow_path is not supported; provide an inline ComfyUI API Format workflow"
+            .to_owned();
+    }
 
     for node_id in &options.disabled_nodes {
         if !node_ids.contains(node_id.as_str()) {
@@ -341,159 +381,9 @@ fn dependency_issues(dependencies: &WorkflowDependencyReport) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod save_workflow_tests {
-    use super::*;
-    use crate::workflow::workflow_with_identity;
-    use std::fs;
-    use std::process::Command;
+#[path = "api/save_workflow_tests.rs"]
+mod save_workflow_tests;
 
-    #[test]
-    fn save_rejects_uninitialized_repository_without_creating_workflow_files() {
-        let root = tempfile::tempdir().expect("tempdir");
-        let service = ApiService::new(root.path());
-        let mut workflow = workflow_with_identity("lightflow.saved_flow", "2.3.4")
-            .name("Saved Flow")
-            .build();
-        workflow.category = Some("tests".to_owned());
-
-        let error = service.save_workflow(workflow).expect_err("save error");
-
-        assert!(error.message().contains("run `lfw init`"));
-        assert!(!root.path().join(".lightflow/workflows").exists());
-    }
-
-    #[test]
-    fn save_rejects_non_official_workspace_without_creating_workflow_files() {
-        let root = tempfile::tempdir().expect("tempdir");
-        fs::create_dir_all(root.path().join("src")).expect("source dir");
-        fs::write(
-            root.path().join("Cargo.toml"),
-            "[package]\nname = \"ordinary\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
-        )
-        .expect("manifest");
-        fs::write(root.path().join("src/lib.rs"), "pub fn library() {}\n").expect("source");
-        assert!(!root.path().join("Cargo.lock").exists());
-        let service = ApiService::new(root.path());
-        let mut workflow = workflow_with_identity("lightflow.saved_flow", "2.3.4")
-            .name("Saved Flow")
-            .build();
-        workflow.category = Some("tests".to_owned());
-
-        let error = service.save_workflow(workflow).expect_err("save error");
-
-        assert!(error.message().contains("run `lfw init`"));
-        assert!(!root.path().join("Cargo.lock").exists());
-        assert!(!root.path().join(".lightflow/workflows").exists());
-    }
-
-    #[test]
-    fn save_and_reload_preserve_manifest_identity_and_version() {
-        let root = tempfile::tempdir().expect("tempdir");
-        fs::create_dir_all(root.path().join(".lightflow")).expect("host dir");
-        fs::write(
-            root.path().join("Cargo.toml"),
-            format!(
-                r#"[package]
-name = "save-test-lightflow-host"
-version = "0.0.0"
-edition = "2024"
-publish = false
-
-[lib]
-path = ".lightflow/workspace.rs"
-
-[dependencies]
-
-[workspace]
-resolver = "3"
-members = [".lightflow/workflows/*"]
-
-[workspace.dependencies]
-lightflow = {{ path = {:?} }}
-"#,
-                env!("CARGO_MANIFEST_DIR")
-            ),
-        )
-        .expect("host manifest");
-        fs::write(
-            root.path().join(".lightflow/workspace.rs"),
-            "//! Test workflow host.\n",
-        )
-        .expect("host source");
-        let service = ApiService::new(root.path());
-        let mut workflow = workflow_with_identity("lightflow.saved_flow", "2.3.4")
-            .name("Saved Flow")
-            .input("condition", "boolean")
-            .input_description("condition", "Whether to render.")
-            .input_required("condition", true)
-            .input_default_json("condition", "false")
-            .input_widget("condition", "checkbox")
-            .input("strength", "number")
-            .input_range("strength", 0.0, 1.0, 0.05)
-            .input_enum_json("strength", "[0.25,0.5,0.75,1.0]")
-            .input("source", "artifact")
-            .input_artifact_kind("source", "image")
-            .input_model_requirement("source", "image_model")
-            .output("image", "artifact")
-            .output_description("image", "Generated image.")
-            .output_artifact_kind("image", "image")
-            .output_model_requirement("image", "image_model")
-            .model("image_model", "image-generation")
-            .runtime("test_runtime", "lightflow.test")
-            .build();
-        workflow.category = Some("tests".to_owned());
-        let expected = workflow.clone();
-
-        service.save_workflow(workflow).expect("save workflow");
-        let reloaded = service
-            .get_workflow("lightflow.saved_flow")
-            .expect("reload workflow");
-        let workflow_manifest = root
-            .path()
-            .join(".lightflow/workflows/saved_flow/Cargo.toml");
-        let manifest = fs::read_to_string(&workflow_manifest).expect("manifest");
-        let metadata = Command::new("cargo")
-            .args(["metadata", "--format-version", "1", "--no-deps"])
-            .current_dir(root.path())
-            .output()
-            .expect("cargo metadata");
-        assert!(
-            metadata.status.success(),
-            "cargo metadata failed: {}",
-            String::from_utf8_lossy(&metadata.stderr)
-        );
-        let metadata: serde_json::Value =
-            serde_json::from_slice(&metadata.stdout).expect("metadata JSON");
-        assert!(
-            metadata["workspace_members"]
-                .as_array()
-                .is_some_and(|members| {
-                    members.iter().any(|member| {
-                        member
-                            .as_str()
-                            .is_some_and(|member| member.contains("lightflow-saved-flow"))
-                    })
-                })
-        );
-
-        assert_eq!(reloaded.id, "lightflow.saved_flow");
-        assert_eq!(reloaded.version, "2.3.4");
-        assert_eq!(reloaded.category.as_deref(), Some("tests"));
-        assert_eq!(reloaded, expected);
-        assert!(manifest.contains("name = \"lightflow-saved-flow\""));
-        assert!(manifest.contains("version = \"2.3.4\""));
-        assert!(manifest.contains("lightflow = { workspace = true }"));
-        let source = fs::read_to_string(
-            root.path()
-                .join(".lightflow/workflows/saved_flow/src/lib.rs"),
-        )
-        .expect("workflow source");
-        assert!(source.contains("category: \"tests\","));
-        assert!(source.contains("input \"condition\": \"boolean\" {"));
-        assert!(source.contains("default: false,"));
-        assert!(source.contains("choices: [0.25,0.5,0.75,1.0],"));
-        assert!(source.contains("output \"image\": \"artifact\" {"));
-        assert!(!source.contains(".input_description("));
-        assert!(!source.contains(".output_artifact_kind("));
-    }
-}
+#[cfg(test)]
+#[path = "api/execution_contract_tests.rs"]
+mod execution_contract_tests;

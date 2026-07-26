@@ -1,35 +1,57 @@
 use super::artifacts::image_artifact;
+use super::image;
 use super::media;
 use super::types::LeafExecution;
-use super::{image, text};
 use crate::api::model_manager::ModelManager;
 use crate::api::plan::{ExecutionPlan, ExecutionPlanNode, ExecutionRecipe};
+use crate::api::source::WorkflowOrigin;
 use crate::api::{ApiError, ApiResult};
-use crate::api::{comfyui, command_runner, executors, flux, llm_rig};
+use crate::api::{comfyui, command_runner, executors, runner_process};
 use crate::workflow::{ExecutionRuntime, WorkflowSpec};
 use std::path::Path;
 
 pub(super) fn execute_leaf_workflow(
     root: &Path,
     workflow: &WorkflowSpec,
+    origin: Option<&WorkflowOrigin>,
     inputs: &serde_json::Map<String, serde_json::Value>,
-    model_manager: &mut ModelManager,
+    _model_manager: &mut ModelManager,
 ) -> ApiResult<LeafExecution> {
     let plan = crate::api::plan::build_leaf_execution_plan(workflow)?;
-    execute_leaf_plan(root, workflow, inputs, model_manager, &plan)
+    execute_leaf_plan(root, workflow, origin, inputs, _model_manager, &plan)
 }
 
 pub(super) fn execute_leaf_plan(
     root: &Path,
     workflow: &WorkflowSpec,
+    origin: Option<&WorkflowOrigin>,
     inputs: &serde_json::Map<String, serde_json::Value>,
-    model_manager: &mut ModelManager,
+    _model_manager: &mut ModelManager,
     plan: &ExecutionPlan,
 ) -> ApiResult<LeafExecution> {
     let runtime = execution_runtime(workflow, &plan.node);
 
     let mut replay_fingerprint = None;
     let mut leaf = match plan.node.recipe {
+        ExecutionRecipe::Unavailable => Err(ApiError::InvalidRequest(format!(
+            "workflow {} selected reserved engine {}, which is not runnable in this build",
+            workflow.id, plan.node.executor_id
+        ))),
+        ExecutionRecipe::Runner => {
+            let origin = origin.ok_or_else(|| {
+                ApiError::InvalidRequest(format!(
+                    "workflow {} selected runner without a discovered runner origin",
+                    workflow.id
+                ))
+            })?;
+            let result = runner_process::execute(root, workflow, inputs, origin)?;
+            replay_fingerprint = result.replay_fingerprint;
+            Ok(LeafExecution {
+                outputs: result.outputs,
+                runtime: None,
+                artifacts: result.artifacts,
+            })
+        }
         ExecutionRecipe::ExternalCommand => {
             let result = command_runner::execute(root, workflow, inputs)?;
             replay_fingerprint = result.replay_fingerprint;
@@ -51,64 +73,10 @@ pub(super) fn execute_leaf_plan(
         ExecutionRecipe::PreviewTextToImage => {
             execute_preview_text_to_image(root, workflow, inputs)
         }
-        ExecutionRecipe::FluxTextToImage => {
-            let result = flux::execute_flux_text_to_image(root, workflow, inputs, model_manager)?;
-            Ok(LeafExecution {
-                outputs: result.outputs,
-                runtime: None,
-                artifacts: result.artifacts,
-            })
-        }
-        ExecutionRecipe::FluxImageEdit => {
-            let result = flux::execute_flux_image_edit(root, workflow, inputs, model_manager)?;
-            Ok(LeafExecution {
-                outputs: result.outputs,
-                runtime: None,
-                artifacts: result.artifacts,
-            })
-        }
-        ExecutionRecipe::FluxInpaint => {
-            let result = flux::execute_flux_inpaint(root, workflow, inputs, model_manager)?;
-            Ok(LeafExecution {
-                outputs: result.outputs,
-                runtime: None,
-                artifacts: result.artifacts,
-            })
-        }
-        ExecutionRecipe::ImageInvert => image::execute_image_invert(root, workflow, inputs),
-        ExecutionRecipe::ImageLoad => image::execute_image_load(workflow, inputs),
-        ExecutionRecipe::ImageSave => image::execute_image_save(root, workflow, inputs),
-        ExecutionRecipe::ImageResize => image::execute_image_resize(root, workflow, inputs),
-        ExecutionRecipe::ImageCrop => image::execute_image_crop(root, workflow, inputs),
         ExecutionRecipe::PreviewImageEdit => {
             image::execute_preview_image_edit(root, workflow, inputs)
         }
         ExecutionRecipe::PreviewInpaint => image::execute_preview_inpaint(root, workflow, inputs),
-        ExecutionRecipe::ImageUpscale => image::execute_image_upscale(root, workflow, inputs),
-        ExecutionRecipe::MaskCompose => image::execute_mask_compose(root, workflow, inputs),
-        ExecutionRecipe::RigLlmGenerate => {
-            let outputs = llm_rig::execute_rig_llm(workflow, inputs)?;
-            Ok(LeafExecution {
-                outputs,
-                runtime: None,
-                artifacts: Vec::new(),
-            })
-        }
-        ExecutionRecipe::BuiltinLlmGenerate => text::execute_builtin_llm_generate(workflow, inputs),
-        ExecutionRecipe::TextConcat => text::execute_text_concat(workflow, inputs),
-        ExecutionRecipe::TextTemplate => text::execute_text_template(workflow, inputs),
-        ExecutionRecipe::TextRegex => text::execute_text_regex(workflow, inputs),
-        ExecutionRecipe::JsonExtract => text::execute_json_extract(workflow, inputs),
-        ExecutionRecipe::ControlIf => text::execute_control_if(workflow, inputs),
-        ExecutionRecipe::ControlSwitch => text::execute_control_switch(workflow, inputs),
-        ExecutionRecipe::ControlMerge => text::execute_control_merge(workflow, inputs),
-        ExecutionRecipe::ControlSplit => text::execute_control_split(workflow, inputs),
-        ExecutionRecipe::ModelSelect => text::execute_model_select(workflow, inputs),
-        ExecutionRecipe::ModelLockCheck => text::execute_model_lock_check(root, workflow, inputs),
-        ExecutionRecipe::LlmClassify => text::execute_llm_classify(workflow, inputs),
-        ExecutionRecipe::LlmStructuredOutput => {
-            text::execute_llm_structured_output(workflow, inputs)
-        }
         ExecutionRecipe::Passthrough => Ok(LeafExecution {
             outputs: media::execute_passthrough_ports(&workflow.outputs, inputs),
             runtime: None,
@@ -181,4 +149,31 @@ fn execute_preview_text_to_image(
         runtime: None,
         artifacts: vec![artifact],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::workflow_with_identity;
+
+    #[test]
+    fn reserved_legacy_engine_fails_clearly_at_execution() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let workflow = workflow_with_identity("lightflow.legacy_concat", "0.1.0")
+            .builtin_runtime("legacy", "lightflow.text.concat", "builtin.text.concat.v1")
+            .build();
+        let mut models = ModelManager::new(root.path());
+
+        let error = execute_leaf_workflow(
+            root.path(),
+            &workflow,
+            None,
+            &serde_json::Map::new(),
+            &mut models,
+        )
+        .expect_err("reserved engine cannot execute");
+
+        assert!(error.message().contains("reserved engine"));
+        assert!(error.message().contains("builtin.text.concat.v1"));
+    }
 }

@@ -11,11 +11,20 @@ LightFlow project workflow files are ordinary source-controlled files under
       Cargo.toml
       src/
         lib.rs
+        bin/
+          <runner>.rs  # optional package-owned executor
 ```
 
 Legacy two-level collections are not discovered implicitly. Run `lfw migrate`
 at their repository root to move `<category>/<crate>` entries to `<crate>` and
 update known Cargo workspace member globs after a full conflict preflight.
+
+A self-contained leaf names its runner in the same Cargo manifest with
+`[package.metadata.lightflow] runner = "..."`. The manifest path, Cargo package
+name, and bin target remain private discovery-origin data. They are resolved
+only for an explicit run and are never stored inside `WorkflowSpec` or API
+payloads as machine-absolute paths. Catalog operations parse source and
+metadata without compiling or executing the runner.
 
 The core repository Cargo workspace contains only the backend crate:
 
@@ -330,6 +339,10 @@ tooling: descriptions, required/default values, numeric ranges, enum choices,
 widget hints, artifact kinds, and model requirement bindings. The block form
 `workflow! { input ... output ... }` keeps metadata with each port, and
 legacy `.input(...)` / `.output(...)` calls remain source-compatible.
+At execution time the graph runner rejects missing required or unknown ports,
+standard type mismatches, out-of-range numeric values, invalid empty/NUL
+`path` and `path[]` values, and invalid enum values on public inputs, child
+inputs, and declared outputs. Custom type names remain permissive.
 
 Composite workflows nest other workflows with `node` declarations and connect
 node ports with `edge from.port -> to.port` (or the legacy `.node()` /
@@ -611,7 +624,9 @@ and `lightflow.control_split`; model helpers include `lightflow.model_select`
 and `lightflow.model_lock_check`; LLM helpers include
 `lightflow.llm_generate`, `lightflow.llm_classify`, and
 `lightflow.llm_structured_output`. Each has a matching
-`.agent/skills/<skill-name>/SKILL.md` file and a builtin runtime capability.
+`.agent/skills/<skill-name>/SKILL.md` file. Executable leaves declare a
+package-owned runner using `runner.v1`; declarative composites have no
+runner.
 
 `lfw sync --apply` discovers skills from workflow/plugin projects,
 asks whether to symlink each skill into the current project's `.agents/skills`
@@ -770,6 +785,40 @@ path runs Cargo's publish dry-run command before the real upload command.
 changes through Cargo.
 `--require-publishable` is a non-network gate that exits non-zero when the
 computed publish plan has blockers.
+
+The multi-project version path is:
+
+```bash
+lfw release projects 0.2.0
+lfw release projects 0.2.0 --apply
+lfw release projects 0.2.0 --publish
+lfw release projects 0.2.0 --apply --publish --allow-dirty
+```
+
+The first and third forms are read-only plans. `--apply` updates the root
+package, each configured expected workspace and present optional workspace,
+every publishable workspace support package, and every discovered workflow
+package to the exact SemVer. It also updates
+normal, dev, build, target-specific, and workspace dependency constraints for
+packages in that same release train while preserving third-party versions.
+Missing expected workspaces fail; absent optional workspaces are reported under
+`skipped_projects`. `--publish` performs registry uploads only when combined
+with `--apply`. The root is published first, followed by each project's
+support packages and workflow crates in dependency order. No Git commit, tag,
+or push is implicit,
+and successful registry uploads cannot be rolled back. External commands are
+planned and executed as `root dry-run → root publish → child dry-run → child
+publish`, continuing in dependency order. A non-root dry-run is attempted at
+most three times with two seconds between attempts so registry index
+propagation does not immediately fail the release train; the last Cargo error
+is returned after the bounded retries.
+
+The plan's pre-upload gate is structural: internal path dependencies must carry
+a crates.io version, name a publishable package, and belong to the configured
+workspace catalog. Cargo resolution is deferred until the ordered publish
+phase because a newly proposed root or support-package version cannot resolve
+from crates.io before its preceding upload.
+
 `GET /publish`, `lightflow.workflow.publish_list`, and `lightflow://publish`
 expose the same dependency-ordered workflow publish plan for HTTP, editor, and
 MCP clients, including present linked workflow project workspaces under
@@ -904,12 +953,16 @@ Batch execution state is local runtime data and is not meant to be committed:
 ```text
 .lightflow/
   runs/
-    <run_id>/
+    run-*/
       manifest.json   # scheduler policy and defaults
       input.jsonl     # original submitted queue
       jobs.jsonl      # durable job status, outputs, artifacts, errors
       events.jsonl    # append-only progress stream
 ```
+
+Batch queues use the same `.lightflow/runs/` namespace and `run-*` default id
+form as workflow history. Their queue-specific files remain `input.jsonl`,
+`jobs.jsonl`, and `events.jsonl`.
 
 Each input JSONL line is one job. A job can include its own `workflow_id`, or
 the CLI can provide a default with `--workflow`:

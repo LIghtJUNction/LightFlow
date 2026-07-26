@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::plan::RUNNER_ENGINE;
 use crate::workflow::{PortSpec, WorkflowArtifact, workflow_with_identity};
 use std::fs;
 
@@ -14,6 +15,20 @@ fn response(outputs: Map<String, Value>) -> CommandResponse {
         artifacts: Vec::new(),
         replay_fingerprint: json!({"runner": "test", "version": 1}),
     }
+}
+
+fn validate_legacy_response(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    response: CommandResponse,
+) -> ApiResult<CommandExecution> {
+    validate_response(
+        root,
+        workflow,
+        response,
+        COMMAND_ENGINE,
+        ResponsePolicy::LegacyCommand,
+    )
 }
 
 #[test]
@@ -46,13 +61,15 @@ fn timeout_parser_uses_bounded_positive_milliseconds() {
 #[test]
 fn response_outputs_must_match_declared_ports() {
     let root = tempfile::tempdir().expect("tempdir");
-    let missing = validate_response(root.path(), &workflow(), response(Map::new())).unwrap_err();
+    let missing =
+        validate_legacy_response(root.path(), &workflow(), response(Map::new())).unwrap_err();
     assert!(missing.to_string().contains("missing [result]"));
 
     let mut outputs = Map::new();
     outputs.insert("result".to_owned(), "ok".into());
     outputs.insert("extra".to_owned(), true.into());
-    let unknown = validate_response(root.path(), &workflow(), response(outputs)).unwrap_err();
+    let unknown =
+        validate_legacy_response(root.path(), &workflow(), response(outputs)).unwrap_err();
     assert!(unknown.to_string().contains("unknown [extra]"));
 }
 
@@ -66,7 +83,12 @@ fn response_rejects_missing_and_duplicate_artifacts() {
         mime_type: "video/mp4".to_owned(),
         metadata: Map::new(),
     };
-    let error = validate_artifacts(root.path(), std::slice::from_ref(&artifact)).unwrap_err();
+    let error = validate_artifacts(
+        root.path(),
+        std::slice::from_ref(&artifact),
+        ResponsePolicy::LegacyCommand,
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("does not name an existing file"));
 
     fs::write(root.path().join("video.mp4"), b"video").expect("artifact");
@@ -74,7 +96,12 @@ fn response_rejects_missing_and_duplicate_artifacts() {
         path: "video.mp4".to_owned(),
         ..artifact
     };
-    let error = validate_artifacts(root.path(), &[existing.clone(), existing]).unwrap_err();
+    let error = validate_artifacts(
+        root.path(),
+        &[existing.clone(), existing],
+        ResponsePolicy::LegacyCommand,
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("duplicate artifact id video"));
 }
 
@@ -83,7 +110,7 @@ fn response_outputs_must_match_declared_types() {
     let root = tempfile::tempdir().expect("tempdir");
     let mut outputs = Map::new();
     outputs.insert("result".to_owned(), true.into());
-    let error = validate_response(root.path(), &workflow(), response(outputs)).unwrap_err();
+    let error = validate_legacy_response(root.path(), &workflow(), response(outputs)).unwrap_err();
     assert!(
         error
             .to_string()
@@ -101,12 +128,93 @@ fn response_requires_object_replay_fingerprint() {
         artifacts: Vec::new(),
         replay_fingerprint: Value::Null,
     };
-    let error = validate_response(root.path(), &workflow(), response).unwrap_err();
+    let error = validate_legacy_response(root.path(), &workflow(), response).unwrap_err();
     assert!(
         error
             .to_string()
             .contains("replay_fingerprint must be a JSON object")
     );
+}
+
+#[test]
+fn package_response_requires_non_empty_implementation_identity() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let mut outputs = Map::new();
+    outputs.insert("result".to_owned(), "ok".into());
+    for fingerprint in [json!({}), json!({"implementation": "  "})] {
+        let response = CommandResponse {
+            outputs: outputs.clone(),
+            artifacts: Vec::new(),
+            replay_fingerprint: fingerprint,
+        };
+        let error = validate_response(
+            root.path(),
+            &workflow(),
+            response,
+            RUNNER_ENGINE,
+            ResponsePolicy::Runner,
+        )
+        .expect_err("missing implementation identity");
+        assert!(
+            error
+                .to_string()
+                .contains("non-empty implementation identity")
+        );
+    }
+}
+
+#[test]
+fn package_artifacts_reject_absolute_and_parent_paths() {
+    let root = tempfile::tempdir().expect("tempdir");
+    fs::write(root.path().join("artifact.txt"), b"artifact").expect("artifact");
+    let artifact = WorkflowArtifact {
+        id: "artifact".to_owned(),
+        kind: "text".to_owned(),
+        path: root.path().join("artifact.txt").display().to_string(),
+        mime_type: "text/plain".to_owned(),
+        metadata: Map::new(),
+    };
+    let error = validate_artifacts(
+        root.path(),
+        std::slice::from_ref(&artifact),
+        ResponsePolicy::Runner,
+    )
+    .expect_err("absolute path");
+    assert!(error.to_string().contains("must be relative"));
+
+    let artifact = WorkflowArtifact {
+        path: "../artifact.txt".to_owned(),
+        ..artifact
+    };
+    let error = validate_artifacts(root.path(), &[artifact], ResponsePolicy::Runner)
+        .expect_err("parent path");
+    assert!(error.to_string().contains("cannot contain `..`"));
+}
+
+#[cfg(unix)]
+#[test]
+fn package_artifacts_reject_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().expect("root");
+    let outside = tempfile::tempdir().expect("outside");
+    fs::write(outside.path().join("artifact.txt"), b"artifact").expect("artifact");
+    symlink(
+        outside.path().join("artifact.txt"),
+        root.path().join("artifact.txt"),
+    )
+    .expect("symlink");
+    let artifact = WorkflowArtifact {
+        id: "artifact".to_owned(),
+        kind: "text".to_owned(),
+        path: "artifact.txt".to_owned(),
+        mime_type: "text/plain".to_owned(),
+        metadata: Map::new(),
+    };
+
+    let error = validate_artifacts(root.path(), &[artifact], ResponsePolicy::Runner)
+        .expect_err("symlink escape");
+    assert!(error.to_string().contains("escapes project root"));
 }
 
 #[test]

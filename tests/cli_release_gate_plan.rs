@@ -16,8 +16,6 @@ fn lfw_release_check_reports_release_gates_without_running_them()
 -> Result<(), Box<dyn std::error::Error>> {
     let report = lfw(Path::new(env!("CARGO_MANIFEST_DIR")), ["release", "check"])?;
     assert_eq!(report["dry_run"], true);
-    assert_eq!(report["valid"], true);
-    assert_eq!(report["issues"], serde_json::json!([]));
     assert_eq!(report["workflow_id"], "lightflow.text_plan");
     assert_eq!(
         report["project_root"],
@@ -50,6 +48,10 @@ fn lfw_release_check_reports_release_gates_without_running_them()
     assert_eq!(report["failed"], failed);
     assert_eq!(report["planned"], planned);
     assert_eq!(report["skipped"], skipped);
+    assert_eq!(report["valid"], true);
+    assert_eq!(failed, 0);
+    assert_eq!(report["failed"], 0);
+    assert_eq!(report["issues"], serde_json::json!([]));
     assert!(
         checks
             .iter()
@@ -87,12 +89,12 @@ fn lfw_release_check_reports_release_gates_without_running_them()
     assert!(checks.iter().any(|check| {
         check["id"] == "release.review.workflow_change_skills"
             && check["kind"] == "review"
-            && (check["status"] == "passed" || check["status"] == "warning")
+            && matches!(check["status"].as_str(), Some("passed" | "warning"))
     }));
     assert!(checks.iter().any(|check| {
         check["id"] == "release.review.local_workflow_loop"
             && check["kind"] == "review"
-            && (check["status"] == "passed" || check["status"] == "warning")
+            && matches!(check["status"].as_str(), Some("passed" | "warning"))
             && check["count"].as_u64().is_some()
     }));
     assert!(checks.iter().any(|check| {

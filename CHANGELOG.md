@@ -38,11 +38,32 @@
   replay hashes, and colocated agent skills for planning, rendering, and
   one-shot automatic edits.
 
+### Fixed
+
+- Forward only a selected branch's declared inputs to `if_node` child
+  workflows. The condition port and the other branch's ports are no longer
+  passed through, so strict child input validation accepts conditional runs.
+- Pin `LC_ALL=C` on machine-parsed git invocations in the local workflow loop
+  so project workspace checks behave the same under non-English locales.
+- Keep the ComfyUI contract's `workflow_path` guidance when strict input
+  validation rejects the reserved input before execution.
+- Run package runners without a synced `lfw.lock`: unsynced model
+  requirements stay unbound and the runner decides whether it can execute,
+  so preview workflows work on fresh checkouts while model-backed runners
+  still fail closed. Synced lock entries remain strictly verified.
+- Accept `null` for declared runner outputs in the `runner.v1` response
+  contract; required outputs are still enforced by workflow-level port
+  validation. `lightflow.model_lock_check` now reports an unlocked
+  requirement's `path` as null instead of an invalid empty path string.
+- Chain only the declared inputs of the next stage in `lfw run a | b`
+  pipelines so strict input validation accepts piped stages; explicit
+  `--input` values still pass through unchanged.
+
 ### Quality
 
-- Add code CI for source-shape, Rust formatting/tests/Clippy, Python Ruff and
-  unit tests, real FFmpeg integration tests, workflow crate checks, and all
-  automatic-edit node contracts.
+- Add code CI for source-shape, Rust formatting/tests/Clippy, real FFmpeg
+  integration tests, workflow crate checks across the rig and flux projects,
+  and all automatic-edit node contracts.
 
 ## 0.1.4 - 2026-07-11
 

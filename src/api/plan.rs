@@ -6,16 +6,10 @@ use std::collections::BTreeMap;
 mod types;
 pub(super) use types::{
     COMFYUI_API_ENGINE, COMFYUI_WORKFLOW_CAPABILITY, COMMAND_ENGINE, COMMAND_RUN_CAPABILITY,
-    CONTROL_IF_CAPABILITY, CONTROL_MERGE_CAPABILITY, CONTROL_SPLIT_CAPABILITY,
-    CONTROL_SWITCH_CAPABILITY, DataPolicy, ExecutionAtom, ExecutionPlan, ExecutionPlanNode,
-    ExecutionRecipe, FLUX_EXTERNAL_ENGINE, FLUX_NATIVE_ENGINE, IMAGE_CROP_CAPABILITY,
-    IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY, IMAGE_INPAINT_CAPABILITY,
-    IMAGE_INVERT_CAPABILITY, IMAGE_LOAD_CAPABILITY, IMAGE_RESIZE_CAPABILITY, IMAGE_SAVE_CAPABILITY,
-    IMAGE_UPSCALE_CAPABILITY, INVERT_ENGINE, JSON_EXTRACT_CAPABILITY, LLM_CLASSIFY_CAPABILITY,
-    LLM_GENERATE_CAPABILITY, LLM_MOCK_ENGINE, LLM_STRUCTURED_OUTPUT_CAPABILITY,
-    MASK_COMPOSE_CAPABILITY, MODEL_LOCK_CHECK_CAPABILITY, MODEL_SELECT_CAPABILITY,
-    PREVIEW_EDIT_ENGINE, PREVIEW_ENGINE, PREVIEW_INPAINT_ENGINE, PlannedModel,
-    TEXT_CONCAT_CAPABILITY, TEXT_REGEX_CAPABILITY, TEXT_TEMPLATE_CAPABILITY,
+    DataPolicy, ExecutionAtom, ExecutionPlan, ExecutionPlanNode, ExecutionRecipe,
+    FLUX_EXTERNAL_ENGINE, FLUX_NATIVE_ENGINE, IMAGE_EDIT_CAPABILITY, IMAGE_GENERATE_CAPABILITY,
+    IMAGE_INPAINT_CAPABILITY, LLM_GENERATE_CAPABILITY, PREVIEW_EDIT_ENGINE, PREVIEW_ENGINE,
+    PREVIEW_INPAINT_ENGINE, PlannedModel, RUNNER_CAPABILITY, RUNNER_ENGINE,
 };
 pub use types::{
     WorkflowPlan, WorkflowPlanAtom, WorkflowPlanNode, WorkflowPlannedModel, WorkflowRuntimePlan,
@@ -148,7 +142,23 @@ fn runtime_plan(workflow: &WorkflowSpec, node: &ExecutionPlanNode) -> WorkflowRu
 
 pub(super) fn build_leaf_execution_plan(workflow: &WorkflowSpec) -> ApiResult<ExecutionPlan> {
     validate_explicit_runtime_engines(workflow)?;
-    let Some(executor) = select_leaf_executor(workflow) else {
+    let explicit_runner = workflow
+        .runtimes
+        .iter()
+        .any(|runtime| runtime.engine.as_deref() == Some(RUNNER_ENGINE))
+        .then(|| super::executors::executor_by_id(RUNNER_ENGINE))
+        .flatten();
+    let explicit_unavailable = workflow.runtimes.iter().find_map(|runtime| {
+        runtime
+            .engine
+            .as_deref()
+            .and_then(super::executors::executor_by_id)
+            .filter(|executor| executor.recipe == ExecutionRecipe::Unavailable)
+    });
+    let Some(executor) = explicit_runner
+        .or(explicit_unavailable)
+        .or_else(|| select_leaf_executor(workflow))
+    else {
         let Some(runtime) = workflow.runtimes.first() else {
             unreachable!("passthrough executor matches workflows with no runtimes");
         };
@@ -157,16 +167,8 @@ pub(super) fn build_leaf_execution_plan(workflow: &WorkflowSpec) -> ApiResult<Ex
             workflow.id, runtime.capability
         )));
     };
-    let (recipe_executor, public_executor) = match flux_capability(executor.recipe) {
-        Some(capability) => {
-            let physical = resolve_flux_executor(workflow, capability)?;
-            (executor, physical)
-        }
-        None => {
-            let selected = explicit_executor_for(workflow, executor).unwrap_or(executor);
-            (selected, selected)
-        }
-    };
+    let selected = explicit_executor_for(workflow, executor).unwrap_or(executor);
+    let (recipe_executor, public_executor) = (selected, selected);
     let info = public_executor.info();
 
     let node = ExecutionPlanNode {
@@ -209,7 +211,8 @@ fn validate_explicit_runtime_engines(workflow: &WorkflowSpec) -> ApiResult<()> {
                 workflow.id, runtime.id
             ))
         })?;
-        if !executor.capabilities.contains(&runtime.capability.as_str()) {
+        if engine != RUNNER_ENGINE && !executor.capabilities.contains(&runtime.capability.as_str())
+        {
             return Err(ApiError::InvalidRequest(format!(
                 "workflow {} runtime {} engine {engine} does not support capability {}",
                 workflow.id, runtime.id, runtime.capability
@@ -225,33 +228,9 @@ fn explicit_executor_for(
 ) -> Option<&'static super::executors::ExecutorDefinition> {
     workflow.runtimes.iter().find_map(|runtime| {
         let engine = runtime.engine.as_deref()?;
-        matched
-            .capabilities
-            .contains(&runtime.capability.as_str())
+        (engine == RUNNER_ENGINE || matched.capabilities.contains(&runtime.capability.as_str()))
             .then(|| super::executors::executor_by_id(engine))?
     })
-}
-
-fn resolve_flux_executor(
-    workflow: &WorkflowSpec,
-    capability: &str,
-) -> ApiResult<&'static super::executors::ExecutorDefinition> {
-    let engine = super::flux::selected_flux_executor_engine(workflow, capability)?;
-    super::executors::executor_by_id(engine).ok_or_else(|| {
-        ApiError::InvalidRequest(format!(
-            "workflow {} selected unknown FLUX executor {engine}",
-            workflow.id
-        ))
-    })
-}
-
-fn flux_capability(recipe: ExecutionRecipe) -> Option<&'static str> {
-    match recipe {
-        ExecutionRecipe::FluxTextToImage => Some(IMAGE_GENERATE_CAPABILITY),
-        ExecutionRecipe::FluxImageEdit => Some(IMAGE_EDIT_CAPABILITY),
-        ExecutionRecipe::FluxInpaint => Some(IMAGE_INPAINT_CAPABILITY),
-        _ => None,
-    }
 }
 
 fn atoms(items: &[(&str, &str)]) -> Vec<ExecutionAtom> {
@@ -294,35 +273,13 @@ fn node_kind(kind: WorkflowNodeKind) -> &'static str {
 fn recipe_name(recipe: ExecutionRecipe) -> &'static str {
     match recipe {
         ExecutionRecipe::Passthrough => "passthrough",
+        ExecutionRecipe::Unavailable => "unavailable",
+        ExecutionRecipe::Runner => "runner",
         ExecutionRecipe::ExternalCommand => "external_command",
         ExecutionRecipe::ComfyUiWorkflow => "comfyui_workflow",
         ExecutionRecipe::PreviewTextToImage => "preview_text_to_image",
-        ExecutionRecipe::FluxTextToImage => "flux_text_to_image",
-        ExecutionRecipe::FluxImageEdit => "flux_image_edit",
-        ExecutionRecipe::FluxInpaint => "flux_inpaint",
-        ExecutionRecipe::ImageInvert => "image_invert",
-        ExecutionRecipe::ImageLoad => "image_load",
-        ExecutionRecipe::ImageSave => "image_save",
-        ExecutionRecipe::ImageResize => "image_resize",
-        ExecutionRecipe::ImageCrop => "image_crop",
         ExecutionRecipe::PreviewImageEdit => "preview_image_edit",
         ExecutionRecipe::PreviewInpaint => "preview_inpaint",
-        ExecutionRecipe::RigLlmGenerate => "rig_llm_generate",
-        ExecutionRecipe::TextConcat => "text_concat",
-        ExecutionRecipe::TextTemplate => "text_template",
-        ExecutionRecipe::TextRegex => "text_regex",
-        ExecutionRecipe::JsonExtract => "json_extract",
-        ExecutionRecipe::ControlIf => "control_if",
-        ExecutionRecipe::ControlSwitch => "control_switch",
-        ExecutionRecipe::ControlMerge => "control_merge",
-        ExecutionRecipe::ControlSplit => "control_split",
-        ExecutionRecipe::ModelSelect => "model_select",
-        ExecutionRecipe::ModelLockCheck => "model_lock_check",
-        ExecutionRecipe::ImageUpscale => "image_upscale",
-        ExecutionRecipe::MaskCompose => "mask_compose",
-        ExecutionRecipe::BuiltinLlmGenerate => "builtin_llm_generate",
-        ExecutionRecipe::LlmClassify => "llm_classify",
-        ExecutionRecipe::LlmStructuredOutput => "llm_structured_output",
     }
 }
 
@@ -330,45 +287,6 @@ fn recipe_name(recipe: ExecutionRecipe) -> &'static str {
 mod tests {
     use super::*;
     use crate::workflow::workflow_with_identity;
-
-    #[test]
-    fn flux_workflow_builds_single_device_resident_plan_node() {
-        let workflow = workflow_with_identity("lightflow.flux_text_to_image", "0.1.0")
-            .runtime("image_runtime", IMAGE_GENERATE_CAPABILITY)
-            .hf_model(
-                "flux_model",
-                "flux2-klein-q3",
-                "image-generation",
-                "gguf",
-                "owner/repo",
-                "model.gguf",
-            )
-            .hf_model(
-                "llm_model",
-                "qwen-q4",
-                "text-encoder",
-                "gguf",
-                "owner/llm",
-                "llm.gguf",
-            )
-            .hf_model(
-                "vae_model",
-                "flux-ae",
-                "vae",
-                "safetensors",
-                "owner/vae",
-                "ae.safetensors",
-            )
-            .build();
-
-        let plan = build_leaf_execution_plan(&workflow).expect("plan builds");
-
-        assert_eq!(plan.workflow_id, workflow.id);
-        assert_eq!(plan.node.recipe, ExecutionRecipe::FluxTextToImage);
-        assert_eq!(plan.node.data_policy, DataPolicy::DeviceResidentPreferred);
-        assert_eq!(plan.node.models.len(), 3);
-        assert_eq!(plan.node.atoms[0].id, "lightflow.atom.load_flux_model");
-    }
 
     #[test]
     fn explicit_comfyui_engine_selects_generic_image_capabilities() {
@@ -402,5 +320,30 @@ mod tests {
         assert_eq!(plan.node.recipe, ExecutionRecipe::ExternalCommand);
         assert_eq!(plan.node.data_policy, DataPolicy::ArtifactHandles);
         assert!(!plan.node.plans_models);
+    }
+
+    #[test]
+    fn legacy_builtin_engine_is_known_but_unavailable() {
+        let workflow = workflow_with_identity("lightflow.legacy_concat", "0.1.0")
+            .builtin_runtime("legacy", "lightflow.text.concat", "builtin.text.concat.v1")
+            .build();
+
+        let plan = build_leaf_execution_plan(&workflow).expect("legacy engine remains known");
+
+        assert_eq!(plan.node.executor_id, "builtin.text.concat.v1");
+        assert_eq!(plan.node.recipe, ExecutionRecipe::Unavailable);
+        assert!(!plan.node.executor_available);
+    }
+
+    #[test]
+    fn reserved_legacy_matchers_do_not_steal_runner_specs() {
+        let workflow = workflow_with_identity("lightflow.runner_concat", "0.1.0")
+            .builtin_runtime("runner", "lightflow.text.concat", RUNNER_ENGINE)
+            .build();
+
+        let plan = build_leaf_execution_plan(&workflow).expect("runner plan");
+
+        assert_eq!(plan.node.executor_id, RUNNER_ENGINE);
+        assert_eq!(plan.node.recipe, ExecutionRecipe::Runner);
     }
 }

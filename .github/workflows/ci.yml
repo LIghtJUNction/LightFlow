@@ -61,24 +61,10 @@ jobs:
       - name: Select Rust toolchain
         run: rustup default "$RUST_VERSION"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install FFmpeg and Ruff
+      - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
-          python -m pip install --disable-pip-version-check ruff==0.15.15
-
-      - name: Lint Python
-        run: |
-          ruff check scripts tests
-          ruff format --check scripts tests
-
-      - name: Test Python and real FFmpeg rendering
-        run: python -m unittest discover -s tests -v
 
       - name: Check workflow crate formatting
         run: cargo fmt --check
@@ -90,16 +76,54 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Validate automatic edit node
-        env:
-          LIGHTFLOW_COMMAND_RUNNER: ${{ github.workspace }}/projects/lightflow-auto-editing/scripts/lightflow_auto_edit_runner.py
         run: cargo run --quiet --manifest-path ../../Cargo.toml --bin lfw -- node test lightflow.video_auto_edit
 
       - name: Validate planning node
-        env:
-          LIGHTFLOW_COMMAND_RUNNER: ${{ github.workspace }}/projects/lightflow-auto-editing/scripts/lightflow_auto_edit_runner.py
         run: cargo run --quiet --manifest-path ../../Cargo.toml --bin lfw -- node test lightflow.video_auto_edit_plan
 
       - name: Validate rendering node
-        env:
-          LIGHTFLOW_COMMAND_RUNNER: ${{ github.workspace }}/projects/lightflow-auto-editing/scripts/lightflow_auto_edit_runner.py
         run: cargo run --quiet --manifest-path ../../Cargo.toml --bin lfw -- node test lightflow.video_render_edit
+
+  rig:
+    name: Rig workflow project
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/lightflow-rig
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
+      - run: rustup default "$RUST_VERSION"
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  flux:
+    name: Flux workflow project
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/lightflow-flux
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
+      - run: rustup default "$RUST_VERSION"
+      - run: sudo apt-get update && sudo apt-get install --yes clang cmake libclang-dev
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo check -p lightflow-flux-runtime --features native
+      - name: Test native runner seam and optional real-model smoke
+        run: cargo test -p lightflow-flux-text-to-image --features native-test-seam --test native_acceptance
+      - name: Verify publish package manifests
+        run: cargo package --workspace --list --allow-dirty
+      - name: Enforce native sys crate size
+        run: |
+          cargo package -p lightflow-flux-native-sys --allow-dirty --no-verify
+          crate=target/package/lightflow-flux-native-sys-0.1.0.crate
+          bytes=$(stat -c%s "$crate")
+          test "$bytes" -le $((10 * 1024 * 1024))

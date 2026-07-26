@@ -125,3 +125,41 @@ fn repository_standard_text_nodes_pass_node_conformance() -> Result<(), Box<dyn 
     }
     Ok(())
 }
+
+#[test]
+fn text_regex_cli_rejects_invalid_inputs_before_runner_process() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (args, expected) in [
+        (
+            [
+                "run",
+                "lightflow.text_regex",
+                "-i",
+                "text=42",
+                "-i",
+                "pattern=x",
+                "-i",
+                "replacement=value",
+            ],
+            "input `text` must have type `text`",
+        ),
+        (
+            [
+                "run",
+                "lightflow.text_regex",
+                "-i",
+                "text=value",
+                "-i",
+                "pattern=x",
+                "-i",
+                "flags={}",
+            ],
+            "unknown input `flags`",
+        ),
+    ] {
+        let output = lfw_command(root).args(args).output().expect("lfw run");
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(expected), "unexpected stderr: {stderr}");
+    }
+}

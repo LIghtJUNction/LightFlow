@@ -51,6 +51,7 @@ pub(crate) fn usage() -> String {
         "  lfw dev skill-template <workflow_id> [--write] [--force]",
         "  lfw dev project-config-template [--write] [--force]",
         "  lfw release check [--apply] [--workflow <workflow_id>] [--project <name>]",
+        "  lfw release projects <version> [--apply] [--publish] [--allow-dirty]",
         "  lfw loop check [workflow_id]",
         "  lfw loop changes",
         "  lfw loop projects [--dirty] [--project <name>]",

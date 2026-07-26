@@ -5,123 +5,6 @@ use std::path::Path;
 use std::process::Output;
 use support::*;
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
-const EXTERNAL_ENGINE: &str = "flux2-klein.gguf.runner.v1";
-const NATIVE_ENGINE: &str = "diffusion-rs.native.v1";
-
-#[cfg(not(feature = "flux-native"))]
-#[test]
-fn flux_node_test_reports_default_external_backend_unavailable()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_root();
-    fs::create_dir_all(&root)?;
-    write_workflow_crate(
-        &root,
-        "lightflow.flux_default",
-        &flux_source("lightflow.flux_default", None),
-    )?;
-    write_skill(&root, "lightflow.flux_default")?;
-
-    let output = lfw_command(&root)
-        .args(["node", "test", "lightflow.flux_default"])
-        .env_remove("LIGHTFLOW_FLUX_BACKEND")
-        .env_remove("LIGHTFLOW_FLUX_RUNNER")
-        .output()?;
-    assert!(!output.status.success());
-    let check = runtime_check(&output)?;
-    assert_eq!(check["status"], "failed");
-    let message = check["message"].as_str().expect("runtime message");
-    assert!(message.contains(EXTERNAL_ENGINE), "message: {message}");
-    assert!(
-        message.contains("set LIGHTFLOW_FLUX_RUNNER"),
-        "message: {message}"
-    );
-
-    let _ = fs::remove_dir_all(root);
-    Ok(())
-}
-
-#[test]
-fn explicit_external_flux_backend_is_available_when_runner_is_set()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_root();
-    fs::create_dir_all(&root)?;
-    write_workflow_crate(
-        &root,
-        "lightflow.flux_external",
-        &flux_source("lightflow.flux_external", Some(EXTERNAL_ENGINE)),
-    )?;
-    write_skill(&root, "lightflow.flux_external")?;
-
-    let output = lfw_command(&root)
-        .args(["node", "test", "lightflow.flux_external"])
-        .env_remove("LIGHTFLOW_FLUX_BACKEND")
-        .env("LIGHTFLOW_FLUX_RUNNER", "/bin/true")
-        .output()?;
-    assert!(
-        output.status.success(),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(runtime_check(&output)?["status"], "passed");
-
-    let plan_output = lfw_command(&root)
-        .args(["plan", "lightflow.flux_external"])
-        .env_remove("LIGHTFLOW_FLUX_BACKEND")
-        .env("LIGHTFLOW_FLUX_RUNNER", "/bin/true")
-        .output()?;
-    assert!(plan_output.status.success());
-    let plan: serde_json::Value = serde_json::from_slice(&plan_output.stdout)?;
-    assert_eq!(plan["runtime"]["executor_id"], EXTERNAL_ENGINE);
-    assert_eq!(plan["runtime"]["executor_available"], true);
-
-    let _ = fs::remove_dir_all(root);
-    Ok(())
-}
-
-#[cfg(unix)]
-#[test]
-fn external_flux_runner_requires_an_executable_regular_file()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_root();
-    fs::create_dir_all(&root)?;
-    write_workflow_crate(
-        &root,
-        "lightflow.flux_runner_validation",
-        &flux_source("lightflow.flux_runner_validation", Some(EXTERNAL_ENGINE)),
-    )?;
-    write_skill(&root, "lightflow.flux_runner_validation")?;
-
-    let missing = root.join("missing-runner");
-    let directory = root.join("runner-directory");
-    let non_executable = root.join("runner-file");
-    fs::create_dir_all(&directory)?;
-    fs::write(&non_executable, "#!/bin/sh\nexit 0\n")?;
-    fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o644))?;
-
-    assert_runner_unavailable(&root, "", "LIGHTFLOW_FLUX_RUNNER is empty")?;
-    assert_runner_unavailable(
-        &root,
-        missing.to_str().expect("missing path"),
-        "does not point to a file",
-    )?;
-    assert_runner_unavailable(
-        &root,
-        directory.to_str().expect("directory path"),
-        "does not point to a file",
-    )?;
-    assert_runner_unavailable(
-        &root,
-        non_executable.to_str().expect("runner path"),
-        "is not executable",
-    )?;
-
-    let _ = fs::remove_dir_all(root);
-    Ok(())
-}
-
 #[test]
 fn unsupported_explicit_flux_engine_is_a_plan_error() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
@@ -146,7 +29,7 @@ fn unsupported_explicit_flux_engine_is_a_plan_error() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn explicit_non_flux_engine_must_exist_and_match_capability()
+fn explicit_non_flux_engine_must_exist_match_capability_and_report_availability()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
@@ -179,47 +62,32 @@ fn explicit_non_flux_engine_must_exist_and_match_capability()
     assert!(!rejected.status.success());
     assert_eq!(runtime_check(&rejected)?["status"], "failed");
 
-    let accepted = lfw_command(&root)
+    let known = lfw(&root, ["plan", "lightflow.load_builtin"])?;
+    assert_eq!(known["runtime"]["executor_id"], "builtin.image.load.v1");
+    assert_eq!(known["runtime"]["executor_available"], false);
+    assert_eq!(known["runtime"]["recipe"], "unavailable");
+
+    let unavailable = lfw_command(&root)
         .args(["node", "test", "lightflow.load_builtin"])
         .output()?;
     assert!(
-        accepted.status.success(),
+        !unavailable.status.success(),
         "stderr: {}",
-        String::from_utf8_lossy(&accepted.stderr)
+        String::from_utf8_lossy(&unavailable.stderr)
     );
-    assert_eq!(runtime_check(&accepted)?["status"], "passed");
+    assert_eq!(runtime_check(&unavailable)?["status"], "failed");
+    assert!(String::from_utf8_lossy(&unavailable.stderr).contains("reserved executor contract"));
 
-    let _ = fs::remove_dir_all(root);
-    Ok(())
-}
-
-#[cfg(not(feature = "flux-native"))]
-#[test]
-fn explicit_native_flux_backend_is_unavailable_without_native_feature()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_root();
-    fs::create_dir_all(&root)?;
-    write_workflow_crate(
-        &root,
-        "lightflow.flux_native",
-        &flux_source("lightflow.flux_native", Some(NATIVE_ENGINE)),
-    )?;
-    write_skill(&root, "lightflow.flux_native")?;
-
-    let output = lfw_command(&root)
-        .args(["node", "test", "lightflow.flux_native"])
-        .env_remove("LIGHTFLOW_FLUX_BACKEND")
-        .env_remove("LIGHTFLOW_FLUX_RUNNER")
+    let run = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.load_builtin",
+            "--input",
+            "image_path=\"missing.png\"",
+        ])
         .output()?;
-    assert!(!output.status.success());
-    let check = runtime_check(&output)?;
-    assert_eq!(check["status"], "failed");
-    let message = check["message"].as_str().expect("runtime message");
-    assert!(message.contains(NATIVE_ENGINE), "message: {message}");
-    assert!(
-        message.contains("build with --features flux-native"),
-        "message: {message}"
-    );
+    assert!(!run.status.success());
+    assert!(String::from_utf8_lossy(&run.stderr).contains("reserved engine"));
 
     let _ = fs::remove_dir_all(root);
     Ok(())
@@ -301,42 +169,6 @@ fn conditional_node_test_checks_every_candidate_runtime() -> Result<(), Box<dyn 
     );
 
     let _ = fs::remove_dir_all(root);
-    Ok(())
-}
-
-fn assert_runner_unavailable(
-    root: &Path,
-    runner: &str,
-    expected_reason: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let plan_output = lfw_command(root)
-        .args(["plan", "lightflow.flux_runner_validation"])
-        .env_remove("LIGHTFLOW_FLUX_BACKEND")
-        .env("LIGHTFLOW_FLUX_RUNNER", runner)
-        .output()?;
-    assert!(plan_output.status.success());
-    let plan: serde_json::Value = serde_json::from_slice(&plan_output.stdout)?;
-    assert_eq!(plan["runtime"]["executor_available"], false);
-    assert!(
-        plan["runtime"]["executor_status_reason"]
-            .as_str()
-            .expect("status reason")
-            .contains(expected_reason),
-        "plan: {plan}"
-    );
-
-    let node_test = lfw_command(root)
-        .args(["node", "test", "lightflow.flux_runner_validation"])
-        .env_remove("LIGHTFLOW_FLUX_BACKEND")
-        .env("LIGHTFLOW_FLUX_RUNNER", runner)
-        .output()?;
-    assert!(!node_test.status.success());
-    assert!(
-        runtime_check(&node_test)?["message"]
-            .as_str()
-            .expect("runtime message")
-            .contains(expected_reason)
-    );
     Ok(())
 }
 

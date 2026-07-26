@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: LightFlow API
-  version: 0.1.0
+  version: 0.1.4
   description: Backend API contract for Rust-defined LightFlow workflows.
 paths:
   /health:
@@ -135,6 +135,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkflowSpec"
+  /workflows/validate:
+    post:
+      summary: Validate a workflow
+      description: Static action path (not a workflow id). Prefer this over treating `validate` as `{workflow_id}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowSpec"
+      responses:
+        "200":
+          description: Validation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowValidation"
   /nodes:
     get:
       summary: List workflow-backed nodes
@@ -530,22 +547,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RecordedWorkflowExecution"
-  /workflows/validate:
-    post:
-      summary: Validate a workflow
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/WorkflowSpec"
-      responses:
-        "200":
-          description: Validation result.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkflowValidation"
   /mcp:
     get:
       summary: MCP endpoint info

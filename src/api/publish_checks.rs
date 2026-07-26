@@ -3,7 +3,10 @@ use std::path::Path;
 use toml_edit::{DocumentMut, Item};
 
 mod dependencies;
-pub(crate) use dependencies::{internal_path_dependency_packages, publish_issues};
+pub(crate) use dependencies::{
+    internal_path_dependency_packages, path_dependency_release_issues, publish_issues,
+    resolve_workspace_member_manifests,
+};
 
 pub(crate) fn cargo_publish_command(
     manifest_path: &Path,

@@ -77,6 +77,11 @@ fn router(service: ApiService) -> Router {
                 .post(workflow::save_workflow)
                 .options(response::cors_options),
         )
+        // Static action path before `{workflow_id}` so it is never captured as an id.
+        .route(
+            "/workflows/validate",
+            post(workflow::validate_workflow).options(response::cors_options),
+        )
         .route("/workflows/{workflow_id}", get(workflow::get_workflow))
         .route(
             "/workflows/{workflow_id}/dependencies",
@@ -97,10 +102,6 @@ fn router(service: ApiService) -> Router {
         .route(
             "/workflows/{workflow_id}/run",
             post(workflow::run_workflow).options(response::cors_options),
-        )
-        .route(
-            "/workflows/validate",
-            post(workflow::validate_workflow).options(response::cors_options),
         )
         .route(
             "/mcp",

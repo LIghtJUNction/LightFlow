@@ -189,6 +189,8 @@ pub(crate) fn init_git_repo(root: &Path) -> Result<(), Box<dyn std::error::Error
                 "user.email=lightflow@example.invalid",
                 "-c",
                 "user.name=LightFlow Test",
+                "-c",
+                "commit.gpgsign=false",
                 "commit",
                 "-m",
                 "initial workflow",

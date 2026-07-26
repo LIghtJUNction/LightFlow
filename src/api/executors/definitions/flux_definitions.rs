@@ -18,8 +18,8 @@ pub(super) static FLUX_EXECUTORS: [ExecutorDefinition; 5] = [
         env: None,
         command_env: None,
         visible: false,
-        availability: ExecutorAvailability::Feature(cfg!(feature = "flux")),
-        recipe: ExecutionRecipe::FluxTextToImage,
+        availability: ExecutorAvailability::Unavailable,
+        recipe: ExecutionRecipe::Unavailable,
         data_policy: DataPolicy::DeviceResidentPreferred,
         atoms: &[
             ("lightflow.atom.load_flux_model", "lightflow.model.load"),
@@ -31,7 +31,7 @@ pub(super) static FLUX_EXECUTORS: [ExecutorDefinition; 5] = [
             ("lightflow.atom.save_image", "lightflow.artifact.image"),
         ],
         plans_models: true,
-        matcher: matches_flux_text_to_image,
+        matcher: matches_never,
     },
     ExecutorDefinition {
         id: "flux.runner.logical.v1",
@@ -41,8 +41,8 @@ pub(super) static FLUX_EXECUTORS: [ExecutorDefinition; 5] = [
         env: None,
         command_env: None,
         visible: false,
-        availability: ExecutorAvailability::Feature(cfg!(feature = "flux")),
-        recipe: ExecutionRecipe::FluxImageEdit,
+        availability: ExecutorAvailability::Unavailable,
+        recipe: ExecutionRecipe::Unavailable,
         data_policy: DataPolicy::DeviceResidentPreferred,
         atoms: &[
             ("lightflow.atom.load_image", "lightflow.artifact.image"),
@@ -55,7 +55,7 @@ pub(super) static FLUX_EXECUTORS: [ExecutorDefinition; 5] = [
             ("lightflow.atom.save_image", "lightflow.artifact.image"),
         ],
         plans_models: true,
-        matcher: matches_flux_image_edit,
+        matcher: matches_never,
     },
     ExecutorDefinition {
         id: "flux.runner.logical.v1",
@@ -65,8 +65,8 @@ pub(super) static FLUX_EXECUTORS: [ExecutorDefinition; 5] = [
         env: None,
         command_env: None,
         visible: false,
-        availability: ExecutorAvailability::Feature(cfg!(feature = "flux")),
-        recipe: ExecutionRecipe::FluxInpaint,
+        availability: ExecutorAvailability::Unavailable,
+        recipe: ExecutionRecipe::Unavailable,
         data_policy: DataPolicy::DeviceResidentPreferred,
         atoms: &[
             ("lightflow.atom.load_image", "lightflow.artifact.image"),
@@ -80,7 +80,7 @@ pub(super) static FLUX_EXECUTORS: [ExecutorDefinition; 5] = [
             ("lightflow.atom.save_image", "lightflow.artifact.image"),
         ],
         plans_models: true,
-        matcher: matches_flux_inpaint,
+        matcher: matches_never,
     },
     ExecutorDefinition {
         id: "lightflow.command.executor.v1",
