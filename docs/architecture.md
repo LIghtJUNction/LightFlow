@@ -28,8 +28,9 @@ what would otherwise become a component.
 ## Workflow Crates
 
 Workflows are source-controlled Rust library crates under
-`workflows/<crate>/`. Reusable workflows define
-`src/lib.rs` and do not define `src/main.rs`.
+`workflows/<crate>/`. Reusable workflows define `src/lib.rs`. A leaf package
+may also declare a package-owned runner `[[bin]]`; it does not use
+`src/main.rs` as a second workflow definition.
 Metadata and graph structure live in the library entrypoint:
 
 ```rust
@@ -54,7 +55,11 @@ version. Static discovery applies the same mapping from the adjacent
 `Cargo.toml`, so compiled and source-parsed identities cannot drift.
 
 The backend statically parses the supported builder DSL from the Rust AST. It
-does not compile or execute workflow files.
+does not compile or execute workflow files during discovery, help, or planning.
+A self-contained leaf explicitly names its runner under
+`[package.metadata.lightflow] runner = "..."`. The private catalog retains its
+manifest, package name, and bin target without serializing machine paths into
+`WorkflowSpec`.
 
 Workflow crates are reusable libraries by default. `lfw init --workflow`
 creates the collection project, and `lfw new` creates one workflow crate inside
@@ -84,12 +89,14 @@ graph composition. `lightflow.text_concat`, `lightflow.text_template`,
 `lightflow.control_split`, `lightflow.model_select`,
 `lightflow.model_lock_check`, `lightflow.llm_generate`,
 `lightflow.llm_classify`, and `lightflow.llm_structured_output` are ordinary
-workflow crates with agent skills and Node Schema v1 metadata, but execute
-through builtin runtime capabilities. They cover common ComfyUI-style prompt
-preparation, PNG artifact handling, mask composition, preview image
-edit/inpaint, model selection checks, graph value routing, offline LLM
-composition, and simple upscale workflows without forcing users to write a
-custom Rust workflow for every adapter.
+workflow crates with agent skills and Node Schema v1 metadata.
+Every executable standard leaf owns a public `execute()` entry and a declared
+package runner that exposes its implementation through `runner.v1`.
+Shared validation and PNG algorithms are factored only inside the
+`lightflow-std` workspace; the core backend no longer contains fallback
+implementations for standard text, JSON, image-transform, control, model, or
+offline LLM helpers. Composite workflows such as `lightflow.text_plan` remain
+declarative and do not receive runners.
 
 The repository dogfoods this model: `lightflow.text_plan` declares exact
 dependencies on `lightflow.text_prompt` and `lightflow.text_result` and composes
@@ -156,6 +163,15 @@ inputs and synced model paths, then runs the native Rust `flux-native` backend
 when compiled in. Builds without that feature can call `LIGHTFLOW_FLUX_RUNNER`
 with the same stable task contract. The selected backend owns sampling and
 writes the PNG artifact.
+
+`runner.v1` is the package-owned process boundary for self-contained
+leaf workflows. Only an explicit run starts the Cargo bin target, using an
+argument vector without a shell. The public `lightflow::runner` SDK
+owns the versioned request/response and stdin/stdout helpers; workflow crates
+do not call private graph execution code. The host reuses its bounded timeout,
+stdout, and stderr handling and validates declared outputs, artifact files, and
+object replay fingerprints. Missing manifests, metadata, or bin targets fail
+closed.
 
 `comfyui.api.v1` is the generic remote graph boundary. Its contract layer
 validates an inline ComfyUI API Format graph, applies arbitrary node input
@@ -368,6 +384,35 @@ passes `--allow-dirty`.
 This keeps workflow importing and workflow publishing on the same primitive:
 ordinary Rust crates.
 
+The CLI adds a repository release-train coordinator on top of that primitive:
+`lfw release projects <version>`. It uses the project workspace catalog from
+`projects/lightflow-projects.toml` and the existing per-project workflow
+publish discovery and dependency ordering. The plan includes the root crate,
+all expected project workspaces, present optional workspaces, and their
+publishable workspace support packages plus workflow package manifests.
+Manifest rewriting is restricted to package
+versions and dependency constraints whose resolved package belongs to the
+release train; unrelated Cargo dependencies are not changed.
+
+The coordinator is read-only unless `--apply` is present. `--publish` alone
+adds publish phases and commands to the dry-run report. With both flags, all
+project configuration, manifest, and publishability checks complete before the
+root crate is uploaded. Networked Cargo operations are then interleaved in
+dependency order: root dry-run, root upload, then one dry-run and upload pair
+per support or workflow crate. The initial plan uses structural manifest and
+catalog checks instead of Cargo resolution because proposed dependency
+versions do not exist in the registry yet. Cargo dry-runs occur only after
+their release-train dependencies have been uploaded. Non-root dry-runs use a
+fixed maximum of three attempts
+with two seconds between attempts because a newly uploaded dependency may not
+be immediately visible through the registry index; the final Cargo failure is
+preserved. The current Cargo runner streams stderr instead of classifying it,
+so this retry is deliberately fixed and bounded rather than error-selective; it
+does not convert a final failure into success. The commands reuse the ordinary
+Cargo publish helpers and existing project publish ordering. Cargo registry
+uploads are an explicit non-rollback boundary; release coordination does not
+commit, tag, or push.
+
 ## Release Check Model
 
 Release checks turn release discipline into a backend contract exposed through
@@ -436,7 +481,11 @@ requirements, graph structure, and runnable input examples. `lfw workflows help
 <workflow_id>` is the namespaced form. Node Schema v1 extends port metadata
 with optional descriptions, required/default constraints, numeric ranges, enum
 values, widget hints, artifact kinds, and model requirement bindings. The same
-metadata feeds CLI help, OpenAPI, and future editor node panels.
+metadata feeds CLI help, OpenAPI, and editor node panels. The execution
+boundary enforces required and unknown ports, standard JSON-backed scalar and
+array types, numeric ranges, path/path[] validity, and enums for workflow
+inputs, child-node inputs, and declared outputs; custom type names remain
+permissive for compatibility.
 
 The HTTP node directory is the editor-facing projection of the same workflow
 model. `GET /nodes` returns node cards for visible workflows, including Node

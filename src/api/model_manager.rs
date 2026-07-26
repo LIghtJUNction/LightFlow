@@ -1,7 +1,10 @@
 use super::model_backend::{ModelBackend, ModelResidency};
 use super::{ApiError, ApiResult};
+use crate::runner::ModelBinding;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -11,6 +14,113 @@ const LFW_LOCK: &str = "lfw.lock";
 pub(super) struct ModelManager {
     root: PathBuf,
     resident: BTreeMap<ModelKey, Arc<ModelHandle>>,
+}
+
+pub(super) fn resolve_runner_models(
+    root: &Path,
+    workflow: &crate::workflow::WorkflowSpec,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+) -> ApiResult<BTreeMap<String, ModelBinding>> {
+    if workflow.models.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    // A missing lock means the project never synced models. The runner decides
+    // whether it can execute without bindings: preview runners ignore models,
+    // while model-backed runners fail closed on the absent binding.
+    let lock_path = root.join(LFW_LOCK);
+    let source = match std::fs::read_to_string(&lock_path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(BTreeMap::new());
+        }
+        Err(error) => return Err(ApiError::Io(error)),
+    };
+    let lock: LfwLock = serde_json::from_str(&source).map_err(|error| {
+        ApiError::InvalidRequest(format!("invalid {}: {error}", lock_path.display()))
+    })?;
+    let mut bindings = BTreeMap::new();
+    for requirement in &workflow.models {
+        let key = format!("{}::{}", workflow.id, requirement.id);
+        // An unsynced requirement stays unbound; synced entries are enforced.
+        let Some(entry) = lock.models.get(&key) else {
+            continue;
+        };
+        let path = entry.local_paths.first().ok_or_else(|| {
+            ApiError::InvalidRequest(format!("model lock entry {key} has no local path"))
+        })?;
+        if !path.is_file() {
+            return Err(ApiError::InvalidRequest(format!(
+                "model file for {key} is missing: {}",
+                path.display()
+            )));
+        }
+        let actual_size = std::fs::metadata(path)?.len();
+        if let Some(expected_size) = entry.size_bytes
+            && expected_size != actual_size
+        {
+            return Err(ApiError::InvalidRequest(format!(
+                "model file size mismatch for {key}: expected {expected_size}, got {actual_size}"
+            )));
+        }
+        let actual_sha256 = sha256_file(path)?;
+        if let Some(expected_sha256) = entry.sha256.as_deref()
+            && !expected_sha256.eq_ignore_ascii_case(&actual_sha256)
+        {
+            return Err(ApiError::InvalidRequest(format!(
+                "model file SHA-256 mismatch for {key}"
+            )));
+        }
+        let variant_id = entry.variant_id.clone().ok_or_else(|| {
+            ApiError::InvalidRequest(format!("model lock entry {key} has no variant_id"))
+        })?;
+        for port in workflow
+            .inputs
+            .iter()
+            .filter(|port| port.model_requirement.as_deref() == Some(&requirement.id))
+        {
+            if let Some(selected) = inputs.get(&port.name) {
+                let selected = selected.as_str().ok_or_else(|| {
+                    ApiError::InvalidRequest(format!(
+                        "model selector input `{}` must be a string",
+                        port.name
+                    ))
+                })?;
+                if selected != variant_id {
+                    return Err(ApiError::InvalidRequest(format!(
+                        "model selector input `{}` requested {selected}, but lfw.lock resolved {}",
+                        port.name, variant_id
+                    )));
+                }
+            }
+        }
+        bindings.insert(
+            requirement.id.clone(),
+            ModelBinding {
+                requirement_id: requirement.id.clone(),
+                variant_id,
+                path: path.clone(),
+                sha256: Some(actual_sha256),
+                size_bytes: Some(actual_size),
+                snapshot_revision: entry.snapshot_revision.clone(),
+            },
+        );
+    }
+    Ok(bindings)
+}
+
+fn sha256_file(path: &Path) -> ApiResult<String> {
+    let file = std::fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 impl ModelManager {
@@ -54,6 +164,7 @@ impl ModelManager {
         read_locked_model_path(&self.root, workflow_id, requirement_id, None)
     }
 
+    #[cfg(test)]
     pub(super) fn locked_path_with_format(
         &self,
         workflow_id: &str,
@@ -221,6 +332,14 @@ struct LockedModel {
     format: Option<String>,
     #[serde(default)]
     file: Option<String>,
+    #[serde(default)]
+    variant_id: Option<String>,
+    #[serde(default)]
+    sha256: Option<String>,
+    #[serde(default)]
+    size_bytes: Option<u64>,
+    #[serde(default)]
+    snapshot_revision: Option<String>,
 }
 
 #[cfg(test)]
@@ -296,6 +415,57 @@ mod tests {
         assert!(message.contains("lfw sync lightflow.test --model flux_model=<variant> --apply"));
 
         let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn runner_models_resolve_verified_lock_and_reject_selector_mismatch()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let model_path = root.path().join("model.gguf");
+        fs::write(&model_path, b"locked model")?;
+        let sha256 = sha256_file(&model_path)?;
+        fs::write(
+            root.path().join(LFW_LOCK),
+            serde_json::json!({
+                "models": {
+                    "lightflow.test::image_model": {
+                        "variant_id": "tiny-q4",
+                        "local_paths": [model_path],
+                        "sha256": sha256,
+                        "size_bytes": 12
+                    }
+                }
+            })
+            .to_string(),
+        )?;
+        let workflow = crate::workflow::workflow_with_identity("lightflow.test", "0.1.0")
+            .input("model", "text")
+            .input_model_requirement("model", "image_model")
+            .model("image_model", "image-generation")
+            .build();
+        let inputs =
+            serde_json::Map::from_iter([("model".to_owned(), serde_json::json!("tiny-q4"))]);
+        let models = resolve_runner_models(root.path(), &workflow, &inputs)?;
+        assert_eq!(models["image_model"].variant_id, "tiny-q4");
+        assert_eq!(
+            models["image_model"].sha256.as_deref(),
+            Some(sha256.as_str())
+        );
+
+        let mismatch =
+            serde_json::Map::from_iter([("model".to_owned(), serde_json::json!("another"))]);
+        let error = resolve_runner_models(root.path(), &workflow, &mismatch)
+            .expect_err("selector mismatch");
+        assert!(error.to_string().contains("but lfw.lock resolved tiny-q4"));
+
+        fs::write(&model_path, b"tampered")?;
+        let error =
+            resolve_runner_models(root.path(), &workflow, &inputs).expect_err("tampered model");
+        assert!(
+            error.to_string().contains("size mismatch")
+                || error.to_string().contains("SHA-256 mismatch")
+        );
         Ok(())
     }
 }

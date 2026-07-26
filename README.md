@@ -113,10 +113,24 @@ metadata does not affect the crate path: every crate still lives directly under
 The backend parses this DSL statically from Rust ASTs; it does not execute or
 compile workflow source files.
 
+Leaf workflow packages may own their execution logic. Such a package keeps
+`define()` and `execute()` in `src/lib.rs`, exposes a small runner `[[bin]]`,
+and names it under `[package.metadata.lightflow] runner = "..."`. Discovery
+retains the Cargo origin only in the private catalog; machine paths are not
+added to `WorkflowSpec` or API responses. `lfw list`, `help`, and `plan` remain
+static. An explicit `run` starts the bin without a shell and exchanges
+`lightflow.runner.v1` JSON through the public
+`lightflow::runner` SDK. The host applies its process limits and
+validates outputs, artifacts, and replay identity.
+
 Ports can include Node Schema v1 metadata such as descriptions,
 required/default constraints, numeric ranges, enum values, widget hints,
 artifact kinds, and model requirement bindings. That metadata is used by
-`lfw help`, OpenAPI, and future editor node panels.
+`lfw help`, OpenAPI, and editor node panels. Execution also enforces required
+and unknown ports, the standard text/string, boolean, integer, number,
+path/path[], artifact/artifact[], JSON types, numeric ranges, and enum values
+at workflow inputs, child-node inputs, and declared outputs. Unknown custom
+type names remain permissive for compatibility.
 
 For the full workflow authoring path, see
 [Workflow Development Guide](docs/workflow-development.md). It covers creating
@@ -304,10 +318,12 @@ package version, enabled build features, project workflow search paths,
 workflow counts by category, declared runtime capabilities, model requirement
 count, and the Executor Registry. `lfw arch` and `lfw architecture` are
 aliases. The registry is the single contract for current executors such as
-passthrough, preview image generation/edit/inpaint, FLUX, image transforms,
-builtin text/JSON/mask/control/model helpers, offline mock LLM generation, and
-RIG, plus the external command executor and reserved future capabilities such
-as Python node, ONNX, and Candle execution.
+package-owned workflows, passthrough, generic preview image
+generation/edit/inpaint, FLUX, RIG, ComfyUI, and explicit external commands,
+plus reserved future capabilities such as Python node, ONNX, and Candle
+execution. Standard text, JSON, image-transform, control, model, and offline
+LLM helpers execute through their own package runners rather than core
+fallbacks.
 
 Runtime executor status is labeled consistently across `lfw info`, node cards,
 `/executors`, and documentation. Each executor entry includes a status label,
@@ -394,6 +410,9 @@ prompt graphs: `lightflow.text_concat`, `lightflow.text_template`,
 `lightflow.model_lock_check`; and LLM helpers `lightflow.llm_generate`,
 `lightflow.llm_classify`, and `lightflow.llm_structured_output`, alongside
 identity, prompt/result, image generation, and image invert workflows.
+Every executable standard leaf declares a package runner and owns its
+`execute()` entry; `lightflow.text_plan` is a declarative composite and invokes
+its package-owned child workflows.
 
 Every `lfw run` and `lfx` execution is recorded under
 `.lightflow/runs/<run_id>/`:
@@ -415,9 +434,17 @@ lfw artifacts
 lfw artifacts --run last --kind image --limit 20
 lfw runs replay last
 lfw runs rm run-1781797000000
+lfw runs prune --keep 50
+lfw runs prune --keep 50 --status failed --apply
 lfw replay
 lfw replay run-1781797000000
 ```
+
+`lfw runs prune` keeps the newest runs (default `--keep 20`, optionally
+filtered by `--workflow` or `--status`) and reports the run ids and bytes it
+would remove; nothing is deleted without `--apply`. The same operation is
+available over HTTP as `POST /runs/prune` and through the MCP tool
+`lightflow.run.prune`.
 
 Replay responses include `replay.runtime_changed` and
 `replay.model_lock_changed` flags with original/replayed runtime and model-lock
@@ -786,7 +813,9 @@ version update path is stable.
 `lfw publish` creates a Cargo publish plan by default. It checks the target
 manifest for basic crates.io blockers such as `publish = false`, non-SemVer
 versions, git dependencies, and path dependencies without a version. Workflow
-crate publish checks also parse `src/lib.rs` and block unresolved generated
+crate checks also reject internal path dependencies whose package is not
+publishable or is excluded from the project workspace catalog. They also parse
+`src/lib.rs` and block unresolved generated
 `TODO` placeholders in workflow, input, or output descriptions.
 Dependency checks cover normal, build, dev, and target-specific dependency
 sections, including `workspace = true` entries inherited from
@@ -801,6 +830,9 @@ lfw publish --workflows --require-publishable
 lfw publish --workflows --project lightflow-std
 lfw publish lightflow.text_prompt --apply
 lfw publish --workflows --apply --allow-dirty
+lfw release projects 0.2.0
+lfw release projects 0.2.0 --apply
+lfw release projects 0.2.0 --apply --publish
 ```
 
 `--apply` first runs `cargo publish --manifest-path ... --dry-run`; only after
@@ -822,6 +854,38 @@ With `--apply`, workflow targets first run the `lfw loop changes` review gate,
 then run the dry-run publish commands, then run the real publish commands.
 `--allow-dirty` forwards Cargo's explicit dirty-worktree override to both
 preflight and upload commands.
+
+`lfw release projects <version>` coordinates one SemVer release train across
+the root `lightflow` crate and the expected plus present optional workspaces in
+`projects/lightflow-projects.toml`. Its default JSON plan reports selected and
+skipped projects, exact manifest and dependency edits, and dependency-ordered
+publish commands without writing files or contacting a registry. `--apply`
+updates package versions and only release-train dependency constraints
+(`lightflow`, publishable workspace support packages, and the discovered
+`lightflow-*` workflow packages) in normal,
+dev, build, target, and workspace dependency tables; third-party dependencies
+are left unchanged. Add `--publish` to include publishing in the plan. Real
+publishing requires both `--apply` and `--publish`, publishes the root first,
+then each project's publishable support packages and workflow crates in
+dependency order, and forwards
+`--allow-dirty` only to Cargo publish commands. It never commits, tags, or
+pushes Git state. Registry uploads cannot be rolled back, so all local project,
+manifest, and publishability checks run before the first upload. Cargo's
+networked checks then run in dependency order as interleaved
+`dry-run → publish` pairs: root first, followed by each workflow crate. This
+allows a newly uploaded release-train dependency to become available before a
+dependent crate is checked. Each non-root dry-run has at most three attempts,
+with a two-second delay between attempts, to tolerate registry index
+propagation; the final Cargo error is returned if all attempts fail. Because
+the existing Cargo runner streams stderr, this retry is fixed and bounded
+rather than error-selective and never masks the final failure.
+
+The read-only release plan performs structural publishability checks; it does
+not ask Cargo to resolve the proposed, not-yet-uploaded version. During a real
+release, Cargo dry-runs are intentionally delayed until each preceding
+dependency has been uploaded, so a new root or support-package version can
+resolve before dependent crates are preflighted.
+
 HTTP and MCP clients can inspect non-mutating publish preflights through
 `GET /publish`, `lightflow.workflow.publish_list`, and `lightflow://publish`
 for every local workflow crate in dependency order, including package name,
@@ -1167,7 +1231,8 @@ Each JSONL line is one job:
 
 Batch state is written under `.lightflow/runs/<run_id>/` as `manifest.json`,
 `input.jsonl`, `jobs.jsonl`, and `events.jsonl`. If a run is interrupted, resume
-only pending or retryable failed jobs:
+only pending or retryable failed jobs. Generated batch run ids use the same
+`run-*` form as other local runs:
 
 ```bash
 lfw batch resume <run_id> --max-gpu-jobs 1

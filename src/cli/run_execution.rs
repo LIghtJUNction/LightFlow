@@ -105,8 +105,23 @@ fn execute_run_options(
     for (index, mut stage) in options.stages.into_iter().enumerate() {
         if index > 0 {
             let explicit_inputs = std::mem::take(&mut stage.execution.inputs);
-            stage.execution.inputs = previous_outputs.clone();
+            stage.execution.inputs =
+                declared_stage_inputs(service, &stage.workflow_id, &previous_outputs);
             stage.execution.inputs.extend(explicit_inputs);
+        }
+        if let Err(error) =
+            service.validate_workflow_execution_options(&stage.workflow_id, &stage.execution)
+        {
+            return Err(Box::new(RunOptionsExecutionError {
+                error: error.into(),
+                stages: effective_stages,
+                partial_output: partial_run_output(
+                    stage_count,
+                    executions,
+                    previous_outputs,
+                    artifacts,
+                ),
+            }));
         }
         effective_stages.push(RunStageRecord {
             workflow_id: stage.workflow_id.clone(),
@@ -155,6 +170,29 @@ fn execute_run_options(
         }),
         stages: effective_stages,
     })
+}
+
+/// Chains only the outputs the next stage declares as inputs, so strict
+/// input validation accepts piped stages. Unknown workflows pass everything
+/// through and fail with the catalog error during validation instead.
+fn declared_stage_inputs(
+    service: &ApiService,
+    workflow_id: &str,
+    previous_outputs: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let Ok(workflow) = service.get_workflow(workflow_id) else {
+        return previous_outputs.clone();
+    };
+    let declared = workflow
+        .inputs
+        .iter()
+        .map(|port| port.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    previous_outputs
+        .iter()
+        .filter(|(name, _)| declared.contains(name.as_str()))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
 }
 
 fn partial_run_output(

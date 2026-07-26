@@ -47,6 +47,11 @@ fn router(service: ApiService) -> Router {
         .route("/executors", get(catalog::list_executors))
         .route("/models", get(catalog::list_models))
         .route("/runs", get(run::list_runs))
+        // Static action path before `{run_id}` so it is never captured as an id.
+        .route(
+            "/runs/prune",
+            post(run::prune_runs).options(response::cors_options),
+        )
         .route(
             "/runs/{run_id}",
             get(run::get_run)
@@ -77,6 +82,11 @@ fn router(service: ApiService) -> Router {
                 .post(workflow::save_workflow)
                 .options(response::cors_options),
         )
+        // Static action path before `{workflow_id}` so it is never captured as an id.
+        .route(
+            "/workflows/validate",
+            post(workflow::validate_workflow).options(response::cors_options),
+        )
         .route("/workflows/{workflow_id}", get(workflow::get_workflow))
         .route(
             "/workflows/{workflow_id}/dependencies",
@@ -97,10 +107,6 @@ fn router(service: ApiService) -> Router {
         .route(
             "/workflows/{workflow_id}/run",
             post(workflow::run_workflow).options(response::cors_options),
-        )
-        .route(
-            "/workflows/validate",
-            post(workflow::validate_workflow).options(response::cors_options),
         )
         .route(
             "/mcp",

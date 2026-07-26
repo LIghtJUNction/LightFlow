@@ -2,6 +2,8 @@ use super::leaf::execute_leaf_workflow;
 use super::media::{collect_node_inputs, collect_workflow_outputs};
 use super::types::{ChildExecution, ChildWorkflowRun, LeafExecution};
 use crate::api::model_manager::ModelManager;
+use crate::api::port_values;
+use crate::api::source::WorkflowOrigin;
 use crate::api::validation;
 use crate::api::{ApiError, ApiResult};
 use crate::workflow::{
@@ -16,16 +18,25 @@ pub(super) fn execute_workflow_spec(
     root: &Path,
     workflow: &WorkflowSpec,
     workflows: &BTreeMap<String, WorkflowSpec>,
+    origins: &BTreeMap<String, WorkflowOrigin>,
     options: WorkflowExecutionOptions,
 ) -> ApiResult<WorkflowExecution> {
     let mut model_manager = ModelManager::new(root);
-    execute_workflow_spec_with_models(root, workflow, workflows, options, &mut model_manager)
+    execute_workflow_spec_with_models(
+        root,
+        workflow,
+        workflows,
+        origins,
+        options,
+        &mut model_manager,
+    )
 }
 
 fn execute_workflow_spec_with_models(
     root: &Path,
     workflow: &WorkflowSpec,
     workflows: &BTreeMap<String, WorkflowSpec>,
+    origins: &BTreeMap<String, WorkflowOrigin>,
     options: WorkflowExecutionOptions,
     model_manager: &mut ModelManager,
 ) -> ApiResult<WorkflowExecution> {
@@ -35,7 +46,14 @@ fn execute_workflow_spec_with_models(
     }
 
     if workflow.nodes.is_empty() {
-        let leaf = execute_leaf_workflow(root, workflow, &options.inputs, model_manager)?;
+        let leaf = execute_leaf_workflow(
+            root,
+            workflow,
+            origins.get(&workflow.id),
+            &options.inputs,
+            model_manager,
+        )?;
+        validate_values(&workflow.outputs, &leaf.outputs, "output", workflow)?;
         return Ok(WorkflowExecution {
             workflow_id: workflow.id.clone(),
             version: workflow.version.clone(),
@@ -107,11 +125,13 @@ fn execute_workflow_spec_with_models(
                     node.id, selected_workflow_id
                 ))
             })?;
+        let child_inputs = declared_child_inputs(child, &node_inputs);
         let child_run = execute_child_workflow_with_patch(
             root,
             child,
             workflows,
-            &node_inputs,
+            origins,
+            &child_inputs,
             model_manager,
             node_patch,
         )?;
@@ -140,7 +160,8 @@ fn execute_workflow_spec_with_models(
         });
     }
 
-    let outputs = collect_workflow_outputs(workflow, &options.inputs, &node_outputs);
+    let outputs = collect_workflow_outputs(workflow, &options.inputs, &node_outputs)?;
+    validate_values(&workflow.outputs, &outputs, "output", workflow)?;
     Ok(WorkflowExecution {
         workflow_id: workflow.id.clone(),
         version: workflow.version.clone(),
@@ -156,12 +177,22 @@ fn execute_child_workflow(
     root: &Path,
     workflow: &WorkflowSpec,
     workflows: &BTreeMap<String, WorkflowSpec>,
+    origins: &BTreeMap<String, WorkflowOrigin>,
     inputs: &serde_json::Map<String, serde_json::Value>,
     model_manager: &mut ModelManager,
 ) -> ApiResult<ChildExecution> {
+    validate_values(&workflow.inputs, inputs, "input", workflow)?;
     if workflow.nodes.is_empty() {
+        let leaf = execute_leaf_workflow(
+            root,
+            workflow,
+            origins.get(&workflow.id),
+            inputs,
+            model_manager,
+        )?;
+        validate_values(&workflow.outputs, &leaf.outputs, "output", workflow)?;
         return Ok(ChildExecution {
-            leaf: execute_leaf_workflow(root, workflow, inputs, model_manager)?,
+            leaf,
             nodes: Vec::new(),
         });
     }
@@ -170,6 +201,7 @@ fn execute_child_workflow(
         root,
         workflow,
         workflows,
+        origins,
         WorkflowExecutionOptions {
             inputs: inputs.clone(),
             disabled_nodes: Vec::new(),
@@ -188,10 +220,48 @@ fn execute_child_workflow(
     })
 }
 
+/// Keeps only the inputs a selected child workflow declares. If-node inputs
+/// include the condition port and the union of both branch ports, so the
+/// selected branch must not receive ports it never declared.
+fn declared_child_inputs(
+    child: &WorkflowSpec,
+    node_inputs: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let declared = child
+        .inputs
+        .iter()
+        .map(|port| port.name.as_str())
+        .collect::<BTreeSet<_>>();
+    node_inputs
+        .iter()
+        .filter(|(name, _)| declared.contains(name.as_str()))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+fn validate_values(
+    ports: &[crate::workflow::PortSpec],
+    values: &serde_json::Map<String, serde_json::Value>,
+    subject: &str,
+    workflow: &WorkflowSpec,
+) -> ApiResult<()> {
+    let issues = port_values::validate_port_map(ports, values, subject);
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(ApiError::InvalidRequest(format!(
+            "workflow {} has invalid {subject}s: {}",
+            workflow.id,
+            issues.join("; ")
+        )))
+    }
+}
+
 fn execute_child_workflow_with_patch(
     root: &Path,
     workflow: &WorkflowSpec,
     workflows: &BTreeMap<String, WorkflowSpec>,
+    origins: &BTreeMap<String, WorkflowOrigin>,
     inputs: &serde_json::Map<String, serde_json::Value>,
     model_manager: &mut ModelManager,
     patch: Option<&WorkflowNodePatch>,
@@ -202,7 +272,7 @@ fn execute_child_workflow_with_patch(
 
     for attempt in 1..=attempts {
         let started_at = Instant::now();
-        match execute_child_workflow(root, workflow, workflows, inputs, model_manager) {
+        match execute_child_workflow(root, workflow, workflows, origins, inputs, model_manager) {
             Ok(output) => {
                 if let Some(timeout_ms) = timeout_ms
                     && started_at.elapsed().as_millis() > timeout_ms

@@ -1,6 +1,7 @@
 use super::{
     ApiResult, ApiService, ArtifactCatalog, ArtifactListOptions, RecordedRun, RemovedRun,
-    RunCatalog, RunEvents, RunListOptions, RunStageRecord, RunTrace, history,
+    RunCatalog, RunEvents, RunListOptions, RunPruneOptions, RunPruneReport, RunStageRecord,
+    RunTrace, history,
 };
 use crate::workflow::WorkflowExecutionOptions;
 
@@ -30,6 +31,12 @@ impl ApiService {
     /// Remove a recorded run by id, or `last`.
     pub fn remove_run(&self, selector: &str) -> ApiResult<RemovedRun> {
         history::remove_run(&self.repo_root, selector)
+    }
+
+    /// Prune old recorded runs, keeping the most recent ones. Dry-run unless
+    /// `apply` is set.
+    pub fn prune_runs(&self, options: &RunPruneOptions) -> ApiResult<RunPruneReport> {
+        history::prune_runs(&self.repo_root, options)
     }
 
     /// List artifacts produced by recorded runs.

@@ -6,13 +6,23 @@ use support::*;
 
 #[test]
 fn lfw_runs_text_to_image_through_invert_pipeline() -> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_root();
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let temp_suffix = unique_temp_root()
+        .file_name()
+        .expect("temporary root has a file name")
+        .to_owned();
+    let relative_root = Path::new(".lightflow")
+        .join("test-artifacts")
+        .join(temp_suffix);
+    let root = repo_root.join(&relative_root);
     fs::create_dir_all(&root)?;
-    let generated_path = root.join("out/cat.png");
-    let inverted_path = root.join("out/cat-inverted.png");
+    let relative_generated = relative_root.join("cat.png");
+    let relative_inverted = relative_root.join("cat-inverted.png");
+    let generated_path = repo_root.join(&relative_generated);
+    let inverted_path = repo_root.join(&relative_inverted);
 
     let execution = lfw(
-        Path::new(env!("CARGO_MANIFEST_DIR")),
+        repo_root,
         [
             "run",
             "lightflow.text_to_image",
@@ -23,22 +33,22 @@ fn lfw_runs_text_to_image_through_invert_pipeline() -> Result<(), Box<dyn std::e
             "--input",
             "height=64",
             "--output",
-            generated_path.to_str().unwrap(),
+            relative_generated.to_str().unwrap(),
             "|",
             "lightflow.image_invert",
             "--output",
-            inverted_path.to_str().unwrap(),
+            relative_inverted.to_str().unwrap(),
         ],
     )?;
 
     assert_eq!(execution["pipeline"], true);
     assert_eq!(
         execution["outputs"]["image_path"],
-        inverted_path.to_str().unwrap()
+        relative_inverted.to_str().unwrap()
     );
     assert_eq!(
-        execution["stages"][1]["artifacts"][0]["metadata"]["capability"],
-        "lightflow.image.invert"
+        execution["stages"][1]["runtime"]["executor_id"],
+        "runner.v1"
     );
     let generated = fs::read(&generated_path)?;
     let inverted = fs::read(&inverted_path)?;

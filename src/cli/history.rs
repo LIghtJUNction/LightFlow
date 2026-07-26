@@ -1,5 +1,5 @@
 use super::{CliError, CliResult};
-use crate::api::{ApiService, RunListOptions};
+use crate::api::{ApiService, RunListOptions, RunPruneOptions};
 
 pub(super) fn trace_run(service: &ApiService, args: &[String]) -> CliResult<serde_json::Value> {
     let selector = optional_run_selector(args.first().map(String::as_str))?;
@@ -44,6 +44,10 @@ pub(super) fn manage_runs(service: &ApiService, args: &[String]) -> CliResult<se
             }
             ensure_no_history_extra_args(args, 2, "runs rm")?;
             Ok(serde_json::to_value(service.remove_run(run_id)?)?)
+        }
+        "prune" => {
+            let options = parse_run_prune_options(args)?;
+            Ok(serde_json::to_value(service.prune_runs(&options)?)?)
         }
         "-h" | "--help" | "help" => Err(CliError::Usage(runs_usage())),
         _ => Err(CliError::Usage(runs_usage())),
@@ -133,6 +137,41 @@ fn required_runs_list_flag_value(args: &[String], index: usize) -> CliResult<&st
     Ok(value)
 }
 
+fn parse_run_prune_options(args: &[String]) -> CliResult<RunPruneOptions> {
+    let mut options = RunPruneOptions::default();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--keep" => {
+                let value = required_runs_list_flag_value(args, index)?;
+                options.keep = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::Usage(runs_usage()))?;
+                index += 2;
+            }
+            "--workflow" | "--workflow-id" => {
+                options.workflow_id = Some(required_runs_list_flag_value(args, index)?.to_owned());
+                index += 2;
+            }
+            "--status" => {
+                options.status = Some(required_runs_list_flag_value(args, index)?.to_owned());
+                index += 2;
+            }
+            "--apply" => {
+                options.apply = true;
+                index += 1;
+            }
+            "-h" | "--help" => return Err(CliError::Usage(runs_usage())),
+            extra => {
+                return Err(CliError::Usage(format!(
+                    "unexpected argument for runs prune: {extra}"
+                )));
+            }
+        }
+    }
+    Ok(options)
+}
+
 fn runs_usage() -> String {
     [
         "usage:",
@@ -140,12 +179,15 @@ fn runs_usage() -> String {
         "  lfw runs get [last|run_id]",
         "  lfw runs replay [last|run_id]",
         "  lfw runs rm <last|run_id>",
+        "  lfw runs prune [--keep <n>] [--workflow <workflow_id>] [--status <status>] [--apply]",
         "  lfw trace [last|run_id]",
         "  lfw replay [last|run_id]",
         "",
         "Inspects and replays recorded workflow runs under .lightflow/runs/.",
         "Use trace to read the stored manifest, execution, artifacts, and events.",
         "Use replay to rerun the stored stage definitions; both default to last.",
+        "prune keeps the newest runs (default --keep 20) and reports what would be",
+        "removed; nothing is deleted without --apply.",
     ]
     .join("\n")
 }

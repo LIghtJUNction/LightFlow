@@ -18,13 +18,11 @@ async-trait = "0.1.89"
 axum = "0.8.9"
 candle-core = { version = "0.10.2", optional = true, default-features = false }
 candle-transformers = { version = "0.10.2", optional = true, default-features = false }
-diffusion-rs = { version = "0.1.20", optional = true, default-features = false }
-diffusion-rs-sys = { version = "0.1.20", optional = true }
+glob = "0.3.3"
 libc = "0.2.186"
 petgraph = "0.8.3"
 png = "0.18.1"
 regex = "1.12.2"
-rig-core = { version = "0.38.2", optional = true }
 semver = "1.0.27"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
@@ -39,19 +37,16 @@ url = "2.5.8"
 [features]
 default = ["flux", "gguf"]
 flux = []
-flux-native = ["flux", "dep:diffusion-rs", "dep:diffusion-rs-sys"]
-flux-native-cuda = ["flux-native", "diffusion-rs/cuda"]
-flux-native-vulkan = ["flux-native", "diffusion-rs/vulkan"]
+flux-native = ["flux"]
+flux-native-cuda = ["flux-native"]
+flux-native-vulkan = ["flux-native"]
 gguf = ["dep:candle-core", "dep:candle-transformers"]
 gguf-cuda = ["gguf", "candle-core/cuda", "candle-transformers/cuda"]
 gguf-metal = ["gguf", "candle-core/metal", "candle-transformers/metal"]
 gguf-mkl = ["gguf", "candle-core/mkl", "candle-transformers/mkl"]
 flux-cuda = ["flux", "gguf-cuda"]
 flux-metal = ["flux", "gguf-metal"]
-rig = ["dep:rig-core"]
+rig = []
 
 [dev-dependencies]
 tower = "0.5.3"
-
-[patch.crates-io]
-diffusion-rs-sys = { path = "vendor/diffusion-rs-sys" }

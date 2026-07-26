@@ -4,7 +4,7 @@ use crate::api::{ApiError, ApiResult};
 use crate::workflow::{WorkflowArtifact, WorkflowSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -31,6 +31,8 @@ struct CommandRequest<'a> {
     protocol: &'static str,
     workflow: WorkflowIdentity<'a>,
     inputs: &'a Map<String, Value>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    models: &'a BTreeMap<String, crate::runner::ModelBinding>,
 }
 
 #[derive(Serialize)]
@@ -53,6 +55,24 @@ struct ProcessOutput {
     stderr: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RunnerProtocol {
+    pub(super) id: &'static str,
+    pub(super) engine: &'static str,
+    pub(super) response_policy: ResponsePolicy,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum ResponsePolicy {
+    LegacyCommand,
+    Runner,
+}
+
+pub(super) struct RunnerRequest<'a> {
+    pub(super) inputs: &'a Map<String, Value>,
+    pub(super) models: &'a BTreeMap<String, crate::runner::ModelBinding>,
+}
+
 pub(super) fn execute(
     root: &Path,
     workflow: &WorkflowSpec,
@@ -71,43 +91,94 @@ fn execute_with_runner(
     runner: &Path,
     timeout: Duration,
 ) -> ApiResult<CommandExecution> {
+    let mut command = Command::new(runner);
+    execute_with_command(
+        root,
+        workflow,
+        inputs,
+        &mut command,
+        &format!("external command runner {}", runner.display()),
+        RunnerProtocol {
+            id: PROTOCOL,
+            engine: COMMAND_ENGINE,
+            response_policy: ResponsePolicy::LegacyCommand,
+        },
+        timeout,
+    )
+}
+
+pub(super) fn execute_with_command(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    inputs: &Map<String, Value>,
+    command: &mut Command,
+    label: &str,
+    protocol: RunnerProtocol,
+    timeout: Duration,
+) -> ApiResult<CommandExecution> {
+    execute_with_command_and_models(
+        root,
+        workflow,
+        RunnerRequest {
+            inputs,
+            models: &BTreeMap::new(),
+        },
+        command,
+        label,
+        protocol,
+        timeout,
+    )
+}
+
+pub(super) fn execute_with_command_and_models(
+    root: &Path,
+    workflow: &WorkflowSpec,
+    request: RunnerRequest<'_>,
+    command: &mut Command,
+    label: &str,
+    protocol: RunnerProtocol,
+    timeout: Duration,
+) -> ApiResult<CommandExecution> {
     let request = serde_json::to_vec(&CommandRequest {
-        protocol: PROTOCOL,
+        protocol: protocol.id,
         workflow: WorkflowIdentity {
             id: &workflow.id,
             version: &workflow.version,
         },
-        inputs,
+        inputs: request.inputs,
+        models: request.models,
     })
     .map_err(|error| {
         ApiError::InvalidRequest(format!("serialize external command request: {error}"))
     })?;
-    let output = run_process(root, runner, &request, timeout)?;
+    let output = run_process(root, command, label, &request, timeout)?;
     if !output.status.success() {
         return Err(ApiError::InvalidRequest(format!(
-            "external command runner {} failed with {}: {}",
-            runner.display(),
+            "{label} failed with {}: {}",
             display_status(output.status),
             display_stderr(&output.stderr)
         )));
     }
 
     let response: CommandResponse = serde_json::from_slice(&output.stdout).map_err(|error| {
-        ApiError::InvalidRequest(format!(
-            "external command runner {} returned invalid JSON: {error}",
-            runner.display()
-        ))
+        ApiError::InvalidRequest(format!("{label} returned invalid JSON: {error}"))
     })?;
-    validate_response(root, workflow, response)
+    validate_response(
+        root,
+        workflow,
+        response,
+        protocol.engine,
+        protocol.response_policy,
+    )
 }
 
 fn run_process(
     root: &Path,
-    runner: &Path,
+    command: &mut Command,
+    label: &str,
     request: &[u8],
     timeout: Duration,
 ) -> ApiResult<ProcessOutput> {
-    let mut command = Command::new(runner);
     command
         .current_dir(root)
         .stdin(Stdio::piped())
@@ -119,12 +190,9 @@ fn run_process(
 
         command.process_group(0);
     }
-    let mut child = command.spawn().map_err(|error| {
-        ApiError::InvalidRequest(format!(
-            "failed to start external command runner {}: {error}",
-            runner.display()
-        ))
-    })?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| ApiError::InvalidRequest(format!("failed to start {label}: {error}")))?;
 
     let stdout = child.stdout.take().ok_or_else(|| {
         ApiError::InvalidRequest("external command runner stdout is unavailable".to_owned())
@@ -148,9 +216,9 @@ fn run_process(
                 ))
             })
         });
-    let status = wait_for_child(&mut child, timeout);
-    let stdout = join_reader(stdout_reader, "stdout")?;
-    let stderr = join_reader(stderr_reader, "stderr")?;
+    let status = wait_for_child(&mut child, timeout, label);
+    let stdout = join_reader(stdout_reader, label, "stdout")?;
+    let stderr = join_reader(stderr_reader, label, "stderr")?;
     let status = status?;
     if status.success() {
         write_result?;
@@ -163,7 +231,7 @@ fn run_process(
     })
 }
 
-fn wait_for_child(child: &mut Child, timeout: Duration) -> ApiResult<ExitStatus> {
+fn wait_for_child(child: &mut Child, timeout: Duration, label: &str) -> ApiResult<ExitStatus> {
     let started = Instant::now();
     loop {
         if let Some(status) = child.try_wait().map_err(ApiError::Io)? {
@@ -172,7 +240,7 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> ApiResult<ExitStatus>
         if started.elapsed() >= timeout {
             terminate_child(child);
             return Err(ApiError::InvalidRequest(format!(
-                "external command runner timed out after {} ms",
+                "{label} timed out after {} ms",
                 timeout.as_millis()
             )));
         }
@@ -203,6 +271,9 @@ fn read_capped(mut reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> 
         .take((limit + 1) as u64)
         .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
+        // Keep draining so the child never blocks on a full pipe and can
+        // exit on its own; the oversized output still fails the run.
+        let _ = std::io::copy(&mut reader, &mut std::io::sink());
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("process output exceeds {limit} bytes"),
@@ -213,17 +284,14 @@ fn read_capped(mut reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> 
 
 fn join_reader(
     reader: thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    label: &str,
     stream: &str,
 ) -> ApiResult<Vec<u8>> {
     reader
         .join()
-        .map_err(|_| {
-            ApiError::InvalidRequest(format!("external command runner {stream} reader panicked"))
-        })?
+        .map_err(|_| ApiError::InvalidRequest(format!("{label} {stream} reader panicked")))?
         .map_err(|error| {
-            ApiError::InvalidRequest(format!(
-                "failed to read external command runner {stream}: {error}"
-            ))
+            ApiError::InvalidRequest(format!("failed to read {label} {stream}: {error}"))
         })
 }
 
@@ -231,6 +299,8 @@ fn validate_response(
     root: &Path,
     workflow: &WorkflowSpec,
     response: CommandResponse,
+    engine: &str,
+    response_policy: ResponsePolicy,
 ) -> ApiResult<CommandExecution> {
     let declared = workflow
         .outputs
@@ -268,19 +338,36 @@ fn validate_response(
             "external command replay_fingerprint must be a JSON object".to_owned(),
         ));
     }
+    if response_policy == ResponsePolicy::Runner
+        && !response
+            .replay_fingerprint
+            .get("implementation")
+            .and_then(Value::as_str)
+            .is_some_and(|identity| !identity.trim().is_empty())
+    {
+        return Err(ApiError::InvalidRequest(
+            "package command replay_fingerprint requires a non-empty implementation identity"
+                .to_owned(),
+        ));
+    }
 
-    validate_artifacts(root, &response.artifacts)?;
+    validate_artifacts(root, &response.artifacts, response_policy)?;
     Ok(CommandExecution {
         outputs: response.outputs,
         artifacts: response.artifacts,
         replay_fingerprint: Some(json!({
-            "engine": COMMAND_ENGINE,
+            "engine": engine,
             "runner": response.replay_fingerprint,
         })),
     })
 }
 
 fn output_value_matches_type(value: &Value, ty: &str) -> bool {
+    // Null is a declared output without a value; required outputs are
+    // enforced by workflow-level port validation.
+    if value.is_null() {
+        return true;
+    }
     match ty {
         "text" | "path" => value.is_string(),
         "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
@@ -304,7 +391,11 @@ fn json_type_name(value: &Value) -> &'static str {
     }
 }
 
-fn validate_artifacts(root: &Path, artifacts: &[WorkflowArtifact]) -> ApiResult<()> {
+fn validate_artifacts(
+    root: &Path,
+    artifacts: &[WorkflowArtifact],
+    response_policy: ResponsePolicy,
+) -> ApiResult<()> {
     let mut ids = BTreeSet::new();
     for artifact in artifacts {
         if artifact.id.trim().is_empty()
@@ -323,27 +414,54 @@ fn validate_artifacts(root: &Path, artifacts: &[WorkflowArtifact]) -> ApiResult<
                 artifact.id
             )));
         }
-        let path = artifact_path(root, &artifact.path);
+        let path = artifact_path(root, &artifact.path, response_policy)?;
         if !path.is_file() {
             return Err(ApiError::InvalidRequest(format!(
                 "external command artifact does not name an existing file: {}",
                 path.display()
             )));
         }
+        if response_policy == ResponsePolicy::Runner {
+            let canonical_root = root.canonicalize().map_err(ApiError::from)?;
+            let canonical_path = path.canonicalize().map_err(ApiError::from)?;
+            if !canonical_path.starts_with(&canonical_root) {
+                return Err(ApiError::InvalidRequest(format!(
+                    "package command artifact escapes project root: {}",
+                    artifact.path
+                )));
+            }
+        }
     }
     Ok(())
 }
 
-fn artifact_path(root: &Path, value: &str) -> PathBuf {
+fn artifact_path(root: &Path, value: &str, response_policy: ResponsePolicy) -> ApiResult<PathBuf> {
     let path = Path::new(value);
-    if path.is_absolute() {
+    if response_policy == ResponsePolicy::Runner {
+        if path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            })
+        {
+            return Err(ApiError::InvalidRequest(format!(
+                "package command artifact path must be relative and cannot contain `..`: {value}"
+            )));
+        }
+        return Ok(root.join(path));
+    }
+    Ok(if path.is_absolute() {
         path.to_owned()
     } else {
         root.join(path)
-    }
+    })
 }
 
-fn command_timeout(value: Option<&str>) -> Result<Duration, String> {
+pub(super) fn command_timeout(value: Option<&str>) -> Result<Duration, String> {
     let Some(value) = value else {
         return Ok(Duration::from_millis(DEFAULT_TIMEOUT_MS));
     };

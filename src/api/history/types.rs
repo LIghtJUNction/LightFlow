@@ -22,6 +22,40 @@ pub struct RunListOptions {
     pub status: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunPruneOptions {
+    /// Keep this many most-recent runs among the prune candidates.
+    pub keep: usize,
+    /// Prune only runs with this status.
+    pub status: Option<String>,
+    /// Prune only runs that executed this workflow.
+    pub workflow_id: Option<String>,
+    /// Delete matched run directories instead of reporting them.
+    pub apply: bool,
+}
+
+impl Default for RunPruneOptions {
+    fn default() -> Self {
+        Self {
+            keep: 20,
+            status: None,
+            workflow_id: None,
+            apply: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RunPruneReport {
+    pub dry_run: bool,
+    pub total: usize,
+    pub kept: usize,
+    pub pruned: usize,
+    pub freed_bytes: u64,
+    pub pruned_run_ids: Vec<String>,
+    pub issues: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ArtifactListOptions {
     pub limit: Option<usize>,

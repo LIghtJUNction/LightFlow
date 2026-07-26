@@ -179,6 +179,12 @@ pub(super) fn workflow_publish_plan(
     let package = package_field(&document, "name")?;
     let version = package_field(&document, "version")?;
     let mut issues = publish_issues(&document, workspace_document);
+    issues.extend(crate::api::path_dependency_release_issues(
+        manifest_path,
+        &document,
+        workspace_document,
+        workspace_root,
+    ));
     issues.extend(workflow_publish_metadata_issues(manifest_path));
     Ok(WorkflowPublishPlan {
         manifest_path: manifest_path.to_path_buf(),

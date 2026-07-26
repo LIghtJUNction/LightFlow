@@ -96,6 +96,11 @@ pub(super) fn tools() -> Value {
             id_schema("run_id")
         ),
         tool(
+            "lightflow.run.prune",
+            "Prune old recorded LightFlow runs, keeping the newest; dry-run unless apply is true.",
+            run_prune_schema()
+        ),
+        tool(
             "lightflow.artifact.list",
             "List artifacts found in recorded LightFlow runs with optional filters and run, stage, node, and workflow context.",
             artifact_list_schema()

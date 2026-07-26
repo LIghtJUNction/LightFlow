@@ -1,6 +1,30 @@
 use super::{CliError, CliResult};
 use crate::api::{ApiService, CheckProfile, ReleaseCheckOptions};
 
+mod projects;
+
+pub(super) fn manage_release(
+    service: &ApiService,
+    args: &[String],
+) -> CliResult<serde_json::Value> {
+    match args.first().map(String::as_str) {
+        Some("projects") => projects::release_projects(service, &args[1..]),
+        Some("check") => {
+            let options = parse_release_options(args)?;
+            release_check(service, &options)
+        }
+        Some("-h" | "--help" | "help") | None => Err(CliError::Usage(release_usage())),
+        Some(value) if value.starts_with('-') => {
+            let options = parse_release_options(args)?;
+            release_check(service, &options)
+        }
+        Some(value) => Err(CliError::Usage(format!(
+            "release action must be check or projects, got: {value}\n{}",
+            release_usage()
+        ))),
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct ReleaseOptions {
     pub(super) apply: bool,
@@ -81,14 +105,20 @@ pub(super) fn release_check(
     Ok(value)
 }
 
-fn release_usage() -> String {
+pub(super) fn release_usage() -> String {
     [
         "usage:",
         "  lfw release check [--apply] [--workflow <workflow_id>] [--project <name>]",
+        "  lfw release projects <version> [--apply] [--publish] [--allow-dirty]",
         "",
-        "Without --apply, commands are reported but not executed.",
+        "Without --apply, commands and manifest changes are reported but not executed.",
         "The selected workflow gate defaults to lightflow.text_plan.",
         "--project accepts full names, paths, labels, or lightflow-* short aliases such as std, flux, rig, or custom-tools.",
+        "`release projects` updates the root crate plus configured project workflow crates as one SemVer release train.",
+        "--publish plans publishing in dry-run mode; publishing occurs only with both --apply and --publish.",
+        "Publishing interleaves dry-run and upload: root lightflow first, then each project's dependency order.",
+        "Non-root Cargo dry-runs retry at most three times for registry index propagation.",
+        "Cargo registry uploads cannot be rolled back; the command does not commit, tag, or push Git state.",
     ]
     .join("\n")
 }
