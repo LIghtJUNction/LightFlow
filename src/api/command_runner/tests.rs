@@ -224,6 +224,38 @@ fn capped_reader_rejects_oversized_output() {
 }
 
 #[cfg(unix)]
+#[test]
+fn oversized_output_fails_fast_instead_of_stalling_until_timeout() {
+    let root = tempfile::tempdir().expect("tempdir");
+    // Write far past the stderr cap plus pipe capacity; without draining,
+    // the child blocks on the full pipe until the timeout kill.
+    let runner = executable_script(
+        root.path(),
+        r#"cat >/dev/null
+head -c 524288 /dev/zero | tr '\0' 'e' >&2
+printf '%s\n' '{"outputs":{"result":"ok"},"artifacts":[],"replay_fingerprint":{"runner":"fixture","version":1}}'"#,
+    );
+    let started = Instant::now();
+    let error = execute_with_runner(
+        root.path(),
+        &workflow(),
+        &Map::new(),
+        &runner,
+        Duration::from_secs(5),
+    )
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains("exceeds"),
+        "expected output-limit error, got: {error}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "oversized output must fail before the timeout"
+    );
+}
+
+#[cfg(unix)]
 fn executable_script(root: &Path, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 

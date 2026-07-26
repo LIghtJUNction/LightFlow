@@ -271,6 +271,9 @@ fn read_capped(mut reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> 
         .take((limit + 1) as u64)
         .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
+        // Keep draining so the child never blocks on a full pipe and can
+        // exit on its own; the oversized output still fails the run.
+        let _ = std::io::copy(&mut reader, &mut std::io::sink());
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("process output exceeds {limit} bytes"),

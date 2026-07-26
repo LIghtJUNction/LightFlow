@@ -58,6 +58,9 @@
 - Chain only the declared inputs of the next stage in `lfw run a | b`
   pipelines so strict input validation accepts piped stages; explicit
   `--input` values still pass through unchanged.
+- Drain runner output beyond the stdout/stderr caps so an over-limit child
+  process exits and fails fast with the limit error instead of blocking on a
+  full pipe until the execution timeout kills it.
 
 ### Quality
 

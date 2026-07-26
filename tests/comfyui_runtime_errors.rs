@@ -244,11 +244,13 @@ fn history_poll_respects_total_timeout() -> Result<(), Box<dyn std::error::Error
     responses.extend((0..100).map(|_| MockResponse::json(json!({}))));
     let server = MockComfyUi::start(responses)?;
     let mut inputs = base_inputs(&server.url);
-    inputs["timeout_ms"] = 15.into();
-    inputs["poll_interval_ms"] = 1.into();
+    // Give prepare/queue enough budget under load so the total timeout
+    // reliably fires during history polling, which this test asserts.
+    inputs["timeout_ms"] = 150.into();
+    inputs["poll_interval_ms"] = 2.into();
     let error = run_failure(&root, "timeout.json", &inputs, None)?;
     assert!(error.contains("history"), "{error}");
-    assert!(error.contains("exceeded total timeout of 15ms"), "{error}");
+    assert!(error.contains("exceeded total timeout of 150ms"), "{error}");
     assert!(server.finish().len() >= 2);
     fs::remove_dir_all(root)?;
     Ok(())
