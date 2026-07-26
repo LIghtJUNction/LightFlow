@@ -47,6 +47,11 @@ fn router(service: ApiService) -> Router {
         .route("/executors", get(catalog::list_executors))
         .route("/models", get(catalog::list_models))
         .route("/runs", get(run::list_runs))
+        // Static action path before `{run_id}` so it is never captured as an id.
+        .route(
+            "/runs/prune",
+            post(run::prune_runs).options(response::cors_options),
+        )
         .route(
             "/runs/{run_id}",
             get(run::get_run)

@@ -88,6 +88,34 @@ pub(super) fn run_list_schema() -> Value {
     })
 }
 
+pub(super) fn run_prune_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "keep": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 20,
+                "description": "Keep this many newest runs among the matched candidates."
+            },
+            "workflow_id": {
+                "type": "string",
+                "description": "Prune only runs whose recorded stages include this workflow id."
+            },
+            "status": {
+                "type": "string",
+                "enum": ["completed", "failed", "unknown"],
+                "description": "Prune only runs with this summary status."
+            },
+            "apply": {
+                "type": "boolean",
+                "default": false,
+                "description": "Delete the matched run directories instead of only reporting them."
+            }
+        }
+    })
+}
+
 pub(super) fn artifact_list_schema() -> Value {
     json!({
         "type": "object",

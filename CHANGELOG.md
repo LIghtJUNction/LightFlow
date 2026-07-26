@@ -30,6 +30,13 @@
   a shell, with bounded output, strict output/artifact validation, descendant
   termination on timeout, and structured replay fingerprints.
 
+### CLI
+
+- Add `lfw runs prune` to trim local run history: keeps the newest runs
+  (default `--keep 20`, filterable by `--workflow` and `--status`) and reports
+  the run ids and reclaimed bytes as a dry run; `--apply` deletes them. Also
+  exposed as `POST /runs/prune` and the MCP tool `lightflow.run.prune`.
+
 ### Workflows
 
 - Make `projects/lightflow-auto-editing` executable end to end: deterministic

@@ -128,10 +128,14 @@ lfw artifacts
 lfw artifacts --run last --workflow lightflow.text_plan --kind image --limit 20
 lfw runs replay last
 lfw runs rm run-1781797000000
+lfw runs prune --keep 50
+lfw runs prune --keep 50 --status failed --apply
 lfw replay
 curl 'http://127.0.0.1:5174/runs?limit=20&workflow_id=lightflow.text_plan&status=completed'
 curl -X POST http://127.0.0.1:5174/runs/last/replay
 curl -X DELETE http://127.0.0.1:5174/runs/last
+curl -X POST http://127.0.0.1:5174/runs/prune \
+  -H 'content-type: application/json' -d '{"keep": 50, "apply": true}'
 ```
 
 `lfw runs list` returns compact manifest summaries sorted by newest completion
@@ -147,7 +151,11 @@ namespaced run history form of `lfw replay`. `lfw artifacts` accepts `--run`,
 without a server; HTTP `/artifacts`, MCP `lightflow.artifact.list`, and
 `lightflow://artifacts?run_id=<run>&workflow_id=<id>&kind=<kind>&limit=<n>`
 accept matching filters. Removing a run deletes only that run directory and
-clears `last` if it pointed at the removed run.
+clears `last` if it pointed at the removed run. `lfw runs prune` (HTTP
+`POST /runs/prune`, MCP `lightflow.run.prune`) trims large histories in one
+step: it keeps the newest runs (`--keep`, default 20, after optional
+`--workflow` / `--status` filtering) and reports the pruned run ids and total
+bytes as a dry run; directories are only deleted with `--apply`.
 
 Trace snapshots follow the same zero-copy boundary as workflow execution:
 large files are represented as artifact handles and paths, not embedded file

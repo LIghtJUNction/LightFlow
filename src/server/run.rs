@@ -1,8 +1,9 @@
-use crate::api::{ArtifactListOptions, RunListOptions};
+use crate::api::{ArtifactListOptions, RunListOptions, RunPruneOptions};
 use crate::server::{
     blocking, response,
-    types::{AppState, ArtifactListQuery, RunListQuery},
+    types::{AppState, ArtifactListQuery, RunListQuery, RunPruneRequest},
 };
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
 
@@ -24,6 +25,20 @@ pub(crate) async fn remove_run(
     Path(run_id): Path<String>,
 ) -> Response {
     response::api_json(state.service.remove_run(&run_id))
+}
+
+pub(crate) async fn prune_runs(
+    State(state): State<AppState>,
+    body: Option<Json<RunPruneRequest>>,
+) -> Response {
+    let request = body.map(|Json(request)| request).unwrap_or_default();
+    let defaults = RunPruneOptions::default();
+    response::api_json(state.service.prune_runs(&RunPruneOptions {
+        keep: request.keep.unwrap_or(defaults.keep),
+        workflow_id: request.workflow_id,
+        status: request.status,
+        apply: request.apply,
+    }))
 }
 
 pub(crate) async fn get_run_events(

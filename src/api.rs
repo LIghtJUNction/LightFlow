@@ -71,7 +71,7 @@ pub use executors::{ExecutorCatalog, ExecutorInfo, executor_registry};
 pub(crate) use history::write_history_fixture;
 pub use history::{
     ArtifactCatalog, ArtifactListOptions, RecordedRun, RemovedRun, RunArtifact, RunCatalog,
-    RunEvents, RunListOptions, RunStageRecord, RunTrace,
+    RunEvents, RunListOptions, RunPruneOptions, RunPruneReport, RunStageRecord, RunTrace,
 };
 pub use loop_check::{
     LocalLoopCheck, LocalLoopReport, LocalLoopStatus, LoopChangeStatus, LoopChangesReport,

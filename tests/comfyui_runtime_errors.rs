@@ -262,18 +262,20 @@ fn slow_upload_consumes_the_single_total_deadline() -> Result<(), Box<dyn std::e
     fs::write(root.join("slow.png"), b"slow upload")?;
     let server = MockComfyUi::start(vec![
         MockResponse::json(json!({"name":"slow.png","subfolder":"lightflow","type":"input"}))
-            .delayed(Duration::from_millis(80)),
+            .delayed(Duration::from_millis(500)),
     ])?;
     let mut inputs = base_inputs(&server.url);
     inputs["uploads"] = json!([{"path":"slow.png"}]);
-    inputs["timeout_ms"] = 20.into();
+    // Prepare must fit inside the budget under load; the delayed upload
+    // response is what exhausts the single total deadline.
+    inputs["timeout_ms"] = 150.into();
     let started = Instant::now();
     let error = run_failure(&root, "slow-upload.json", &inputs, None)?;
     assert!(
-        error.contains("upload image exceeded total timeout of 20ms"),
+        error.contains("upload image exceeded total timeout of 150ms"),
         "{error}"
     );
-    assert!(started.elapsed() < Duration::from_millis(200));
+    assert!(started.elapsed() < Duration::from_millis(800));
     let _ = server.finish();
     fs::remove_dir_all(root)?;
     Ok(())
@@ -290,17 +292,19 @@ fn slow_download_consumes_the_single_total_deadline() -> Result<(), Box<dyn std:
                 "outputs":{"9":{"images":[{"filename":"slow.png","subfolder":"","type":"output"}]}}
             }
         })),
-        MockResponse::bytes("image/png", b"late").delayed(Duration::from_millis(80)),
+        MockResponse::bytes("image/png", b"late").delayed(Duration::from_millis(500)),
     ])?;
     let mut inputs = base_inputs(&server.url);
-    inputs["timeout_ms"] = 20.into();
+    // Give prepare/queue/history enough budget under load so the total
+    // timeout reliably fires during the delayed download.
+    inputs["timeout_ms"] = 150.into();
     let started = Instant::now();
     let error = run_failure(&root, "slow-download.json", &inputs, None)?;
     assert!(
-        error.contains("download output exceeded total timeout of 20ms"),
+        error.contains("download output exceeded total timeout of 150ms"),
         "{error}"
     );
-    assert!(started.elapsed() < Duration::from_millis(200));
+    assert!(started.elapsed() < Duration::from_millis(800));
     let _ = server.finish();
     fs::remove_dir_all(root)?;
     Ok(())

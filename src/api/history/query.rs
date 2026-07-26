@@ -5,7 +5,8 @@ use std::path::Path;
 
 use super::storage;
 use super::types::{
-    RemovedRun, ReplayStages, RunCatalog, RunEvents, RunListOptions, RunSummary, RunTrace,
+    RemovedRun, ReplayStages, RunCatalog, RunEvents, RunListOptions, RunPruneOptions,
+    RunPruneReport, RunSummary, RunTrace,
 };
 use crate::api::{ApiError, ApiResult};
 
@@ -131,6 +132,74 @@ fn apply_run_filters(runs: &mut Vec<RunSummary>, options: &RunListOptions) {
     if let Some(limit) = options.limit {
         runs.truncate(limit);
     }
+}
+
+pub(super) fn prune_runs(root: &Path, options: &RunPruneOptions) -> ApiResult<RunPruneReport> {
+    if let Some(status) = options.status.as_deref()
+        && !matches!(status, "completed" | "failed" | "unknown")
+    {
+        return Err(ApiError::InvalidRequest(format!(
+            "unsupported run status {status}; expected completed, failed, or unknown"
+        )));
+    }
+    let catalog = list_runs_with_options(
+        root,
+        &RunListOptions {
+            limit: None,
+            workflow_id: options.workflow_id.clone(),
+            status: options.status.clone(),
+        },
+    )?;
+    let total = catalog.runs.len();
+    // Runs are already sorted newest-first; everything past `keep` is pruned.
+    let prune: Vec<&RunSummary> = catalog.runs.iter().skip(options.keep).collect();
+    let mut pruned_run_ids = Vec::new();
+    let mut freed_bytes = 0_u64;
+    let mut issues = catalog.issues;
+    for run in &prune {
+        freed_bytes += directory_size(&run.run_dir);
+        if options.apply
+            && let Err(error) = fs::remove_dir_all(&run.run_dir)
+        {
+            issues.push(format!("{}: could not remove: {error}", run.run_id));
+            continue;
+        }
+        pruned_run_ids.push(run.run_id.clone());
+    }
+    if options.apply {
+        let last_path = storage::runs_root(root).join("last");
+        if let Ok(last) = fs::read_to_string(&last_path)
+            && pruned_run_ids.iter().any(|id| id == last.trim())
+        {
+            let _ = fs::remove_file(&last_path);
+        }
+    }
+    Ok(RunPruneReport {
+        dry_run: !options.apply,
+        total,
+        kept: total - pruned_run_ids.len(),
+        pruned: pruned_run_ids.len(),
+        freed_bytes,
+        pruned_run_ids,
+        issues,
+    })
+}
+
+fn directory_size(dir: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                directory_size(&path)
+            } else {
+                entry.metadata().map(|meta| meta.len()).unwrap_or(0)
+            }
+        })
+        .sum()
 }
 
 pub(super) fn get_run(root: &Path, selector: &str) -> ApiResult<RunTrace> {

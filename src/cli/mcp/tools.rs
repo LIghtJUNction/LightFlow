@@ -1,6 +1,6 @@
 use super::arguments::{
     artifact_list_options_arg, model_list_options_arg, patch_arg, recorded_workflow_run,
-    required_str, run_list_options_arg, workflow_arg,
+    required_str, run_list_options_arg, run_prune_options_arg, workflow_arg,
 };
 use super::error::McpError;
 use crate::api::{ApiService, ProjectWorkspaceOptions};
@@ -66,6 +66,9 @@ pub(super) fn call_tool(service: &ApiService, params: &Value) -> Result<Value, M
         }
         "lightflow.run.rm" => {
             serde_json::to_value(service.remove_run(required_str(&arguments, "run_id")?)?)?
+        }
+        "lightflow.run.prune" => {
+            serde_json::to_value(service.prune_runs(&run_prune_options_arg(&arguments)?)?)?
         }
         "lightflow.artifact.list" => serde_json::to_value(
             service.list_artifacts_with_options(&artifact_list_options_arg(&arguments)?)?,

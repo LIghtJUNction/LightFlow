@@ -434,9 +434,17 @@ lfw artifacts
 lfw artifacts --run last --kind image --limit 20
 lfw runs replay last
 lfw runs rm run-1781797000000
+lfw runs prune --keep 50
+lfw runs prune --keep 50 --status failed --apply
 lfw replay
 lfw replay run-1781797000000
 ```
+
+`lfw runs prune` keeps the newest runs (default `--keep 20`, optionally
+filtered by `--workflow` or `--status`) and reports the run ids and bytes it
+would remove; nothing is deleted without `--apply`. The same operation is
+available over HTTP as `POST /runs/prune` and through the MCP tool
+`lightflow.run.prune`.
 
 Replay responses include `replay.runtime_changed` and
 `replay.model_lock_changed` flags with original/replayed runtime and model-lock

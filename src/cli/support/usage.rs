@@ -42,7 +42,7 @@ pub(crate) fn usage() -> String {
         "  lfw batch run <jobs.jsonl> [--workflow <workflow_id>] [--run-id <id>] [--max-gpu-jobs <n|auto>] [--max-cpu-jobs <n|auto>] [--batch-size <n|auto>] [--retries <n>] [--reserve-mem <size>] [--reserve-vram <size>] [--max-load <n>]",
         "  lfw batch resume <run_id> [--max-gpu-jobs <n|auto>]",
         "  lfw trace [last|run_id]",
-        "  lfw runs list|get|replay|rm ...",
+        "  lfw runs list|get|replay|rm|prune ...",
         "  lfw artifacts [--run <last|run_id>] [--workflow <workflow_id>] [--kind <kind>] [--limit <n>]",
         "  lfw patch list|get|save|validate|rm ...",
         "  lfw replay [last|run_id]",

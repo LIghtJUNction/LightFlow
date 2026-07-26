@@ -247,6 +247,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunCatalog"
+  /runs/prune:
+    post:
+      summary: Prune old recorded runs
+      description: >
+        Static action path (not a run id). Keeps the newest runs among the
+        matched candidates and reports the rest. Nothing is deleted unless
+        `apply` is true.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunPruneRequest"
+      responses:
+        "200":
+          description: Prune report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunPruneReport"
   /runs/{run_id}:
     get:
       summary: Read a recorded run
@@ -1160,6 +1180,48 @@ components:
           type: string
         run_dir:
           type: string
+    RunPruneRequest:
+      type: object
+      properties:
+        keep:
+          type: integer
+          minimum: 0
+          default: 20
+          description: Keep this many newest runs among the matched candidates.
+        workflow_id:
+          type: string
+          description: Prune only runs whose recorded stages include this workflow id.
+        status:
+          type: string
+          enum: [completed, failed, unknown]
+          description: Prune only runs with this summary status.
+        apply:
+          type: boolean
+          default: false
+          description: Delete the matched run directories instead of only reporting them.
+    RunPruneReport:
+      type: object
+      required: [dry_run, total, kept, pruned, freed_bytes, pruned_run_ids, issues]
+      properties:
+        dry_run:
+          type: boolean
+        total:
+          type: integer
+        kept:
+          type: integer
+        pruned:
+          type: integer
+        freed_bytes:
+          type: integer
+          description: Total size of the pruned run directories in bytes.
+        pruned_run_ids:
+          type: array
+          items:
+            type: string
+        issues:
+          type: array
+          items:
+            type: string
     RunEvents:
       type: object
       required: [run_id, events]

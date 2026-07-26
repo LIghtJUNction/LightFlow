@@ -21,7 +21,8 @@ use crate::workflow::WorkflowExecutionOptions;
 
 pub use types::{
     ArtifactCatalog, ArtifactListOptions, RecordedRun, RemovedRun, ReplayStages, RunArtifact,
-    RunCatalog, RunEvents, RunListOptions, RunStageRecord, RunSummary, RunTrace,
+    RunCatalog, RunEvents, RunListOptions, RunPruneOptions, RunPruneReport, RunStageRecord,
+    RunSummary, RunTrace,
 };
 
 pub(super) fn list_artifacts(root: &Path) -> ApiResult<ArtifactCatalog> {
@@ -56,6 +57,10 @@ pub(super) fn list_runs_with_options(
 
 pub(super) fn remove_run(root: &Path, selector: &str) -> ApiResult<RemovedRun> {
     query::remove_run(root, selector)
+}
+
+pub(super) fn prune_runs(root: &Path, options: &RunPruneOptions) -> ApiResult<RunPruneReport> {
+    query::prune_runs(root, options)
 }
 
 pub(super) fn replay_stages(root: &Path, selector: &str) -> ApiResult<ReplayStages> {

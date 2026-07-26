@@ -1,6 +1,7 @@
 use super::error::McpError;
 use crate::api::{
     ApiService, ArtifactListOptions, ModelListOptions, ModelStatusFilter, RunListOptions,
+    RunPruneOptions,
 };
 use crate::workflow::{WorkflowExecutionOptions, WorkflowPatch, WorkflowSpec};
 use serde_json::{Value, json};
@@ -51,6 +52,26 @@ pub(super) fn run_list_options_arg(arguments: &Value) -> Result<RunListOptions, 
             .get("status")
             .and_then(Value::as_str)
             .map(str::to_owned),
+    })
+}
+
+pub(super) fn run_prune_options_arg(arguments: &Value) -> Result<RunPruneOptions, McpError> {
+    let defaults = RunPruneOptions::default();
+    Ok(RunPruneOptions {
+        keep: optional_usize_arg(arguments, "keep", "lightflow.run.prune")?
+            .unwrap_or(defaults.keep),
+        workflow_id: arguments
+            .get("workflow_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        status: arguments
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        apply: arguments
+            .get("apply")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 

@@ -61,6 +61,15 @@ pub(crate) struct RunListQuery {
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub(crate) struct RunPruneRequest {
+    pub(crate) keep: Option<usize>,
+    pub(crate) workflow_id: Option<String>,
+    pub(crate) status: Option<String>,
+    #[serde(default)]
+    pub(crate) apply: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub(crate) struct ArtifactListQuery {
     pub(crate) limit: Option<usize>,
     pub(crate) run_id: Option<String>,
@@ -89,6 +98,7 @@ pub(crate) const HTTP_PATHS: &[&str] = &[
     "/executors",
     "/models",
     "/runs",
+    "/runs/prune",
     "/runs/{run_id}",
     "/runs/{run_id}/replay",
     "/runs/{run_id}/events",
