@@ -226,8 +226,14 @@ pub fn define() -> WorkflowSpec {
 }
 "#,
     )?;
-    let project_wins = lfw_with_env(&root, ["list"], [("LFW_PATH", custom_workflows.as_path())])?;
-    assert_eq!(project_wins["workflows"][0]["name"], "Project Override");
+    let duplicate = lfw_command(&root)
+        .args(["list"])
+        .env("LFW_PATH", &custom_workflows)
+        .output()?;
+    assert!(!duplicate.status.success());
+    assert!(
+        String::from_utf8_lossy(&duplicate.stderr).contains("duplicate workflow id `lightflow.rc`")
+    );
 
     let _ = fs::remove_dir_all(root);
     Ok(())

@@ -1,7 +1,7 @@
 use super::media;
 use crate::api::plan;
 use crate::workflow::{WorkflowArtifact, WorkflowSpec};
-use serde_json::{Map, Value};
+use serde_json::Map;
 
 pub(super) struct PreviewTransformArtifact<'a> {
     pub(super) workflow: &'a WorkflowSpec,
@@ -90,85 +90,6 @@ pub(super) fn image_artifact(
         id: "image".to_owned(),
         kind: "image".to_owned(),
         path: path.display().to_string(),
-        mime_type: "image/png".to_owned(),
-        metadata,
-    }
-}
-
-pub(super) fn image_transform_artifact(
-    input_path: &std::path::Path,
-    output_path: &std::path::Path,
-    engine: &str,
-    capability: &str,
-    dimensions: Option<(u32, u32)>,
-) -> WorkflowArtifact {
-    let mut metadata = Map::new();
-    metadata.insert("engine".to_owned(), engine.into());
-    metadata.insert("capability".to_owned(), capability.into());
-    metadata.insert(
-        "source_image_path".to_owned(),
-        input_path.display().to_string().into(),
-    );
-
-    if let Some((width, height)) = dimensions {
-        metadata.insert("width".to_owned(), width.into());
-        metadata.insert("height".to_owned(), height.into());
-    }
-
-    WorkflowArtifact {
-        id: "image".to_owned(),
-        kind: "image".to_owned(),
-        path: output_path.display().to_string(),
-        mime_type: "image/png".to_owned(),
-        metadata,
-    }
-}
-
-pub(super) fn image_file_artifact(
-    input_path: &std::path::Path,
-    output_path: &std::path::Path,
-    engine: &str,
-    capability: &str,
-    dimensions: Option<(u32, u32)>,
-) -> WorkflowArtifact {
-    image_transform_artifact(input_path, output_path, engine, capability, dimensions)
-}
-
-pub(super) fn mask_artifact(
-    mask_a_path: &std::path::Path,
-    mask_b_path: &std::path::Path,
-    output_path: &std::path::Path,
-    mode: &str,
-    dimensions: Option<(u32, u32)>,
-) -> WorkflowArtifact {
-    let mut metadata = Map::new();
-    metadata.insert(
-        "engine".to_owned(),
-        Value::String("builtin.mask.compose.v1".to_owned()),
-    );
-    metadata.insert(
-        "capability".to_owned(),
-        plan::MASK_COMPOSE_CAPABILITY.into(),
-    );
-    metadata.insert("mode".to_owned(), mode.to_owned().into());
-    metadata.insert(
-        "mask_a_path".to_owned(),
-        mask_a_path.display().to_string().into(),
-    );
-    metadata.insert(
-        "mask_b_path".to_owned(),
-        mask_b_path.display().to_string().into(),
-    );
-
-    if let Some((width, height)) = dimensions {
-        metadata.insert("width".to_owned(), width.into());
-        metadata.insert("height".to_owned(), height.into());
-    }
-
-    WorkflowArtifact {
-        id: "mask".to_owned(),
-        kind: "mask".to_owned(),
-        path: output_path.display().to_string(),
         mime_type: "image/png".to_owned(),
         metadata,
     }

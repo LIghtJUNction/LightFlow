@@ -208,7 +208,9 @@ fn runtime_status(
             let capability_matches = executor
                 .capabilities
                 .iter()
-                .any(|capability| capability == &runtime.capability);
+                .any(|capability| capability == &runtime.capability)
+                || (executor.id == super::plan::RUNNER_ENGINE
+                    && runtime.engine.as_deref() == Some(super::plan::RUNNER_ENGINE));
             let engine_matches = runtime
                 .engine
                 .as_deref()

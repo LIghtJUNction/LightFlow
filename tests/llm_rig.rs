@@ -1,75 +1,24 @@
 mod support;
 
 use std::fs;
-#[cfg(feature = "rig")]
+use std::io;
 use std::io::{Read, Write};
-#[cfg(feature = "rig")]
 use std::net::TcpListener;
-#[cfg(not(feature = "rig"))]
-use std::process::Command;
-#[cfg(feature = "rig")]
+use std::path::Path;
 use std::thread;
-#[cfg(feature = "rig")]
-use support::{lfw, lfw_command};
-use support::{unique_temp_root, write_workflow_crate};
+use support::{lfw_command, lfw_with_env_values, unique_temp_root};
 
-#[cfg(feature = "rig")]
-fn write_rig_workflow(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    fs::write(
-        root.join("Cargo.toml"),
-        format!(
-            r#"[workspace]
-resolver = "3"
-members = ["workflows/*"]
-
-[workspace.dependencies]
-lightflow = {{ path = {:?}, features = ["rig"] }}
-"#,
-            env!("CARGO_MANIFEST_DIR")
-        ),
-    )?;
-    write_workflow_crate(
-        root,
-        "lightflow.test_rig_llm",
-        r#"use lightflow::preload::*;
-
-pub fn define() -> WorkflowSpec {
-    workflow!()
-        .name("Test RIG LLM")
-        .description("Generate text through the LightFlow RIG LLM runtime.")
-        .input("prompt", "text")
-        .input("system", "text")
-        .input("provider", "text")
-        .input("model", "text")
-        .input("api_key", "text")
-        .input("base_url", "text")
-        .input("temperature", "number")
-        .input("max_tokens", "integer")
-        .input("additional_params", "json")
-        .output("text", "text")
-        .output("response", "text")
-        .output("provider", "text")
-        .output("model", "text")
-        .runtime("rig_runtime", "lightflow.llm.generate")
-        .build()
-}
-"#,
-    )?;
-    Ok(())
-}
+type TestServer = (String, thread::JoinHandle<Result<String, String>>);
 
 #[test]
-#[cfg(feature = "rig")]
-fn rig_llm_runtime_runs_mock_provider() -> Result<(), Box<dyn std::error::Error>> {
+fn rig_package_runner_runs_mock_provider() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
-    write_rig_workflow(&root)?;
-
-    let execution = lfw(
+    let execution = run_rig(
         &root,
         [
             "run",
-            "lightflow.test_rig_llm",
+            "lightflow.rig_llm",
             "-i",
             "provider=\"mock\"",
             "-i",
@@ -78,52 +27,138 @@ fn rig_llm_runtime_runs_mock_provider() -> Result<(), Box<dyn std::error::Error>
             "prompt=\"hello\"",
         ],
     )?;
+
     assert_eq!(execution["outputs"]["text"], "mock:fake-llm:hello");
     assert_eq!(execution["outputs"]["response"], "mock:fake-llm:hello");
     assert_eq!(execution["outputs"]["provider"], "mock");
     assert_eq!(execution["outputs"]["model"], "fake-llm");
+    assert_eq!(execution["runtime"]["executor_id"], "runner.v1");
+    assert!(
+        execution["runtime"]["replay_fingerprint"]["runner"]["implementation"]
+            .as_str()
+            .is_some_and(|identity| !identity.is_empty())
+    );
 
     let _ = fs::remove_dir_all(root);
     Ok(())
 }
 
 #[test]
-#[cfg(feature = "rig")]
-fn rig_llm_runtime_runs_openai_compatible_provider() -> Result<(), Box<dyn std::error::Error>> {
+fn rig_rejects_api_key_input_without_persisting_secret() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_root();
     fs::create_dir_all(&root)?;
-    write_rig_workflow(&root)?;
-    let (base_url, server) = start_openai_compatible_server()?;
-    let base_url_input = format!("base_url=\"{base_url}/v1\"");
-
+    let rig_project = Path::new(env!("CARGO_MANIFEST_DIR")).join("projects/lightflow-rig");
+    let secret = "history-secret-must-not-appear";
+    let secret_input = format!("api_key=\"{secret}\"");
     let output = lfw_command(&root)
         .args([
             "run",
-            "lightflow.test_rig_llm",
+            "lightflow.rig_llm",
+            "-i",
+            "provider=\"mock\"",
+            "-i",
+            "model=\"fake-llm\"",
+            "-i",
+            "prompt=\"hello\"",
+            "-i",
+            &secret_input,
+        ])
+        .env("LFW_PATH", rig_project)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown input"));
+    let history_root = root.join(".lightflow/runs");
+    if history_root.exists() {
+        assert_history_omits(&history_root, secret)?;
+    }
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn rig_rejects_user_endpoint_without_sending_official_key() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let malicious_url = format!("base_url=\"http://{}\"", listener.local_addr()?);
+    let official_secret = "official-key-must-not-leave";
+    let rig_project = Path::new(env!("CARGO_MANIFEST_DIR")).join("projects/lightflow-rig");
+    let output = lfw_command(&root)
+        .args([
+            "run",
+            "lightflow.rig_llm",
+            "-i",
+            "provider=\"openai\"",
+            "-i",
+            "model=\"fake-llm\"",
+            "-i",
+            "prompt=\"hello\"",
+            "-i",
+            &malicious_url,
+        ])
+        .env("LFW_PATH", rig_project)
+        .env("OPENAI_API_KEY", official_secret)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown input"));
+    assert!(matches!(
+        listener.accept(),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock
+    ));
+    let history_root = root.join(".lightflow/runs");
+    if history_root.exists() {
+        assert_history_omits(&history_root, official_secret)?;
+    }
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn rig_package_runner_runs_openai_compatible_provider() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_root();
+    fs::create_dir_all(&root)?;
+    let (base_url, server) = match start_openai_compatible_server() {
+        Ok(server) => server,
+        Err(error)
+            if error
+                .downcast_ref::<io::Error>()
+                .is_some_and(|error| error.kind() == io::ErrorKind::PermissionDenied) =>
+        {
+            eprintln!("skipping local OpenAI-compatible socket: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    let rig_project = Path::new(env!("CARGO_MANIFEST_DIR")).join("projects/lightflow-rig");
+    let compatible_base_url = format!("{base_url}/v1");
+    let execution = lfw_with_env_values(
+        &root,
+        [
+            "run",
+            "lightflow.rig_llm",
             "-i",
             "provider=\"openai-compatible\"",
             "-i",
             "model=\"fake-llm\"",
             "-i",
             "prompt=\"hello\"",
-            "-i",
-            "api_key=\"test-key\"",
-            "-i",
-            &base_url_input,
-        ])
-        .output()?;
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let execution: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        ],
+        [
+            ("LFW_PATH", rig_project.to_str().unwrap()),
+            ("OPENAI_COMPATIBLE_API_KEY", "test-key"),
+            ("OPENAI_COMPATIBLE_BASE_URL", compatible_base_url.as_str()),
+        ],
+    )?;
+
     assert_eq!(execution["outputs"]["text"], "external:hello");
     assert_eq!(execution["outputs"]["response"], "external:hello");
     assert_eq!(execution["outputs"]["provider"], "openai-compatible");
     assert_eq!(execution["outputs"]["model"], "fake-llm");
-
+    assert_eq!(execution["runtime"]["executor_id"], "runner.v1");
     let request_line = server
         .join()
         .map_err(|_| "OpenAI-compatible test server panicked")??;
@@ -133,74 +168,42 @@ fn rig_llm_runtime_runs_openai_compatible_provider() -> Result<(), Box<dyn std::
     Ok(())
 }
 
-#[test]
-#[cfg(not(feature = "rig"))]
-fn rig_llm_runtime_requires_rig_feature() -> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_root();
-    fs::create_dir_all(&root)?;
-    fs::write(
-        root.join("Cargo.toml"),
-        format!(
-            r#"[workspace]
-resolver = "3"
-members = ["workflows/*"]
-
-[workspace.dependencies]
-lightflow = {{ path = {:?} }}
-"#,
-            env!("CARGO_MANIFEST_DIR")
-        ),
-    )?;
-    write_workflow_crate(
-        &root,
-        "lightflow.test_rig_llm",
-        r#"use lightflow::preload::*;
-
-pub fn define() -> WorkflowSpec {
-    workflow!()
-        .name("Test RIG LLM")
-        .input("prompt", "text")
-        .input("provider", "text")
-        .input("model", "text")
-        .output("text", "text")
-        .runtime("rig_runtime", "lightflow.llm.generate")
-        .build()
+fn run_rig<const N: usize>(
+    root: &Path,
+    args: [&str; N],
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let rig_project = Path::new(env!("CARGO_MANIFEST_DIR")).join("projects/lightflow-rig");
+    lfw_with_env_values(root, args, [("LFW_PATH", rig_project.to_str().unwrap())])
 }
-"#,
-    )?;
 
-    let output = Command::new(env!("CARGO_BIN_EXE_lfw"))
-        .args([
-            "run",
-            "lightflow.test_rig_llm",
-            "-i",
-            "provider=\"mock\"",
-            "-i",
-            "model=\"fake-llm\"",
-            "-i",
-            "prompt=\"hello\"",
-        ])
-        .current_dir(&root)
-        .env("HOME", &root)
-        .env("SHELL", "/bin/zsh")
-        .env("XDG_CONFIG_HOME", root.join(".test-xdg/config"))
-        .env("XDG_DATA_HOME", root.join(".test-xdg/data"))
-        .env_remove("LFW_PATH")
-        .output()?;
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("--features rig"),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let _ = fs::remove_dir_all(root);
+fn assert_history_omits(path: &Path, secret: &str) -> Result<(), Box<dyn std::error::Error>> {
+    for entry in fs::read_dir(path)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            assert_history_omits(&path, secret)?;
+        } else {
+            let contents = fs::read_to_string(&path)?;
+            assert!(
+                !contents.contains(secret),
+                "secret leaked to {}",
+                path.display()
+            );
+            assert!(
+                !contents.contains("\"api_key\""),
+                "secret field leaked to {}",
+                path.display()
+            );
+            assert!(
+                !contents.contains("\"base_url\""),
+                "endpoint field leaked to {}",
+                path.display()
+            );
+        }
+    }
     Ok(())
 }
 
-#[cfg(feature = "rig")]
-fn start_openai_compatible_server()
--> Result<(String, thread::JoinHandle<Result<String, String>>), Box<dyn std::error::Error>> {
+fn start_openai_compatible_server() -> Result<TestServer, Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     let handle = thread::spawn(move || -> Result<String, String> {

@@ -1,11 +1,11 @@
 use super::{
-    CommandRequest, CommandResponse, MAX_COMMAND_REQUEST_BYTES, parse_typed_input,
-    read_command_request, write_command_response,
+    ModelBinding, PROTOCOL, Request, Response, WorkflowIdentity, parse_typed_input, read_request,
+    write_response,
 };
 use crate::workflow::{ContextWorkflow, Runnable, WorkflowState};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
-use std::io::Cursor;
+use serde_json::{Map, json};
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize, Eq, PartialEq)]
 struct Input {
@@ -90,58 +90,6 @@ fn typed_input_accepts_json_argument() {
     );
 }
 
-#[test]
-fn command_request_requires_the_live_protocol_and_exact_package_identity() {
-    let outbound = CommandRequest::new(
-        "lightflow.example",
-        "0.1.0",
-        Map::from_iter([("value".to_owned(), Value::String("ok".to_owned()))]),
-    );
-    let mut reader = Cursor::new(serde_json::to_vec(&outbound).expect("request encoding"));
-    let request = read_command_request(&mut reader).expect("valid command request");
-    assert_eq!(request.workflow_identity(), ("lightflow.example", "0.1.0"));
-    request
-        .validate_for("lightflow.example", "0.1.0")
-        .expect("matching identity");
-    assert!(request.validate_for("lightflow.other", "0.1.0").is_err());
-
-    let mut wrong_protocol = Cursor::new(
-        br#"{"protocol":"lightflow.runner.v1","workflow":{"id":"lightflow.example","version":"0.1.0"},"inputs":{}}"#,
-    );
-    assert!(read_command_request(&mut wrong_protocol).is_err());
-
-    let mut unknown_field = Cursor::new(
-        br#"{"protocol":"lightflow.command.v1","workflow":{"id":"lightflow.example","version":"0.1.0"},"inputs":{},"unexpected":true}"#,
-    );
-    assert!(read_command_request(&mut unknown_field).is_err());
-
-    let mut duplicate_field = Cursor::new(
-        br#"{"protocol":"lightflow.command.v1","protocol":"lightflow.command.v1","workflow":{"id":"lightflow.example","version":"0.1.0"},"inputs":{}}"#,
-    );
-    assert!(read_command_request(&mut duplicate_field).is_err());
-}
-
-#[test]
-fn command_request_is_bounded_before_json_decode() {
-    let mut reader = Cursor::new(vec![b'x'; MAX_COMMAND_REQUEST_BYTES + 1]);
-    let error = read_command_request(&mut reader).expect_err("oversize request must fail");
-    assert!(error.to_string().contains("exceeds its protocol limit"));
-}
-
-#[test]
-fn command_response_writer_emits_one_json_document_to_its_given_stream() {
-    let response = CommandResponse {
-        outputs: Map::from_iter([("result".to_owned(), Value::String("ok".to_owned()))]),
-        artifacts: Vec::new(),
-        replay_fingerprint: Map::from_iter([("runner".to_owned(), json!("test"))]),
-    };
-    let mut bytes = Vec::new();
-    write_command_response(&mut bytes, &response).expect("response encoding");
-    assert!(bytes.ends_with(b"\n"));
-    let decoded: Value = serde_json::from_slice(&bytes).expect("single JSON response");
-    assert_eq!(decoded["outputs"]["result"], "ok");
-}
-
 #[tokio::test]
 async fn typed_workflow_runs_through_unified_entrypoint() {
     let output = ExampleWorkflow
@@ -157,4 +105,78 @@ async fn typed_workflow_runs_through_unified_entrypoint() {
             answer: "回答：hello".to_owned()
         }
     );
+}
+
+#[test]
+fn protocol_roundtrip_preserves_request_and_response() {
+    let models = std::collections::BTreeMap::from([(
+        "image_model".to_owned(),
+        ModelBinding {
+            requirement_id: "image_model".to_owned(),
+            variant_id: "tiny".to_owned(),
+            path: PathBuf::from("models/tiny.gguf"),
+            sha256: Some("abc".to_owned()),
+            size_bytes: Some(3),
+            snapshot_revision: Some("revision".to_owned()),
+        },
+    )]);
+    let request = Request {
+        protocol: PROTOCOL.to_owned(),
+        workflow: WorkflowIdentity {
+            id: "lightflow.example".to_owned(),
+            version: "0.1.0".to_owned(),
+        },
+        inputs: Map::from_iter([("value".to_owned(), json!("hello"))]),
+        models,
+    };
+    let bytes = serde_json::to_vec(&request).expect("serialize request");
+    assert_eq!(
+        read_request(bytes.as_slice()).expect("read request"),
+        request
+    );
+
+    let response = Response {
+        outputs: Map::from_iter([("value".to_owned(), json!("hello"))]),
+        artifacts: Vec::new(),
+        replay_fingerprint: Map::from_iter([("algorithm".to_owned(), json!("example.v1"))]),
+    };
+    let mut encoded = Vec::new();
+    write_response(&mut encoded, &response).expect("write response");
+    assert_eq!(
+        serde_json::from_slice::<Response>(&encoded).expect("decode response"),
+        response
+    );
+}
+
+#[test]
+fn request_rejects_unknown_protocol() {
+    let error = read_request(
+        br#"{"protocol":"other","workflow":{"id":"x","version":"1"},"inputs":{}}"#.as_slice(),
+    )
+    .expect_err("unknown protocol");
+    assert!(error.to_string().contains(PROTOCOL));
+}
+
+#[test]
+fn request_rejects_forged_workflow_id_and_version() {
+    let mut request = Request {
+        protocol: PROTOCOL.to_owned(),
+        workflow: WorkflowIdentity {
+            id: "lightflow.forged".to_owned(),
+            version: "0.1.0".to_owned(),
+        },
+        inputs: Map::new(),
+        models: Default::default(),
+    };
+    let error = request
+        .validate_for("lightflow.expected", "0.1.0")
+        .expect_err("forged id");
+    assert!(error.to_string().contains("expected workflow id"));
+
+    request.workflow.id = "lightflow.expected".to_owned();
+    request.workflow.version = "9.9.9".to_owned();
+    let error = request
+        .validate_for("lightflow.expected", "0.1.0")
+        .expect_err("forged version");
+    assert!(error.to_string().contains("expected workflow version"));
 }

@@ -143,6 +143,188 @@ workspace-local = { path = "../workspace-local" }
 }
 
 #[test]
+fn path_dependency_release_issues_require_publishable_catalog_member() {
+    let root = TestDir::new("release-path-dependency");
+    let runtime = root.path().join("runtime");
+    let workflow = root.path().join("workflows/demo");
+    fs::create_dir_all(&runtime).unwrap();
+    fs::create_dir_all(&workflow).unwrap();
+    let workspace_source = r#"
+[workspace]
+members = ["runtime", "workflows/*"]
+
+[workspace.dependencies]
+support = { path = "runtime", version = "0.1.0" }
+"#;
+    fs::write(root.path().join("Cargo.toml"), workspace_source).unwrap();
+    fs::write(
+        runtime.join("Cargo.toml"),
+        r#"[package]
+name = "support"
+version = "0.1.0"
+publish = false
+"#,
+    )
+    .unwrap();
+    let manifest = workflow.join("Cargo.toml");
+    fs::write(
+        &manifest,
+        r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+support = { workspace = true }
+"#,
+    )
+    .unwrap();
+    let document = read_cargo_manifest(&manifest).unwrap();
+    let workspace = read_cargo_manifest(&root.path().join("Cargo.toml")).unwrap();
+    assert_eq!(
+        path_dependency_release_issues(&manifest, &document, Some(&workspace), root.path()),
+        vec!["dependency support path target has package.publish = false"]
+    );
+
+    fs::write(
+        runtime.join("Cargo.toml"),
+        r#"[package]
+name = "support"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    assert!(
+        path_dependency_release_issues(&manifest, &document, Some(&workspace), root.path())
+            .is_empty()
+    );
+
+    let excluded = workspace_source.replace(
+        "members = [\"runtime\", \"workflows/*\"]",
+        "members = [\"runtime\", \"workflows/*\"]\nexclude = [\"runtime\"]",
+    );
+    fs::write(root.path().join("Cargo.toml"), &excluded).unwrap();
+    let excluded_workspace = excluded.parse::<DocumentMut>().unwrap();
+    assert_eq!(
+        path_dependency_release_issues(
+            &manifest,
+            &document,
+            Some(&excluded_workspace),
+            root.path()
+        ),
+        vec!["dependency support path target is excluded from the workspace release catalog"]
+    );
+
+    let external = root.path().join("../external");
+    fs::create_dir_all(&external).unwrap();
+    fs::write(
+        external.join("Cargo.toml"),
+        "[package]\nname = \"external\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let external_document = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+external = { path = "../../../external", version = "0.1.0" }
+"#
+    .parse::<DocumentMut>()
+    .unwrap();
+    assert!(
+        path_dependency_release_issues(
+            &manifest,
+            &external_document,
+            Some(&excluded_workspace),
+            root.path()
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn nested_workspace_member_glob_includes_path_dependency() {
+    let root = TestDir::new("nested-member-glob");
+    let support = root.path().join("crates/support/runtime");
+    let workflow = root.path().join("crates/workflows/demo");
+    fs::create_dir_all(&support).unwrap();
+    fs::create_dir_all(&workflow).unwrap();
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/*/*\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        support.join("Cargo.toml"),
+        "[package]\nname = \"support\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let manifest = workflow.join("Cargo.toml");
+    fs::write(
+        &manifest,
+        r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+support = { path = "../../support/runtime", version = "0.1.0" }
+"#,
+    )
+    .unwrap();
+    let document = read_cargo_manifest(&manifest).unwrap();
+    let workspace = read_cargo_manifest(&root.path().join("Cargo.toml")).unwrap();
+
+    assert!(
+        path_dependency_release_issues(&manifest, &document, Some(&workspace), root.path())
+            .is_empty()
+    );
+}
+
+#[test]
+fn path_dependency_members_use_the_callers_workspace_root() {
+    let root = TestDir::new("nested-workspace-members");
+    let nested = root.path().join(".lightflow");
+    let support = nested.join("workflows/support");
+    let workflow = nested.join("workflows/demo");
+    fs::create_dir_all(&support).unwrap();
+    fs::create_dir_all(&workflow).unwrap();
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\".lightflow/workflows/*\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        nested.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"workflows/*\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        support.join("Cargo.toml"),
+        "[package]\nname = \"support\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let manifest = workflow.join("Cargo.toml");
+    fs::write(
+        &manifest,
+        r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+support = { path = "../support", version = "0.1.0" }
+"#,
+    )
+    .unwrap();
+    let document = read_cargo_manifest(&manifest).unwrap();
+    let workspace = read_cargo_manifest(&root.path().join("Cargo.toml")).unwrap();
+
+    assert!(
+        path_dependency_release_issues(&manifest, &document, Some(&workspace), root.path())
+            .is_empty()
+    );
+}
+
+#[test]
 fn package_field_value_reads_string_package_fields() {
     let document = r#"
 [package]

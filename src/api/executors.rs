@@ -1,6 +1,5 @@
 use super::plan::{
-    DataPolicy, ExecutionRecipe, LLM_MOCK_ENGINE, PREVIEW_EDIT_ENGINE, PREVIEW_ENGINE,
-    PREVIEW_INPAINT_ENGINE,
+    DataPolicy, ExecutionRecipe, PREVIEW_EDIT_ENGINE, PREVIEW_ENGINE, PREVIEW_INPAINT_ENGINE,
 };
 use crate::workflow::WorkflowSpec;
 
@@ -11,7 +10,6 @@ use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub(super) const FLUX_RUNNER_ENV: &str = "LIGHTFLOW_FLUX_RUNNER";
 pub(super) const COMMAND_RUNNER_ENV: &str = "LIGHTFLOW_COMMAND_RUNNER";
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,7 +71,6 @@ impl ExecutorDefinition {
     fn status(&self) -> &'static str {
         match self.id {
             PREVIEW_ENGINE | PREVIEW_EDIT_ENGINE | PREVIEW_INPAINT_ENGINE => "preview",
-            LLM_MOCK_ENGINE => "mock",
             _ => self.kind,
         }
     }
@@ -84,9 +81,7 @@ enum ExecutorAvailability {
     Always,
     EndpointCheckedAtRun,
     Unavailable,
-    FluxRunner,
     CommandRunner,
-    Feature(bool),
 }
 
 impl ExecutorAvailability {
@@ -94,39 +89,22 @@ impl ExecutorAvailability {
         match self {
             Self::Always | Self::EndpointCheckedAtRun => true,
             Self::Unavailable => false,
-            Self::FluxRunner => validated_flux_runner_path().is_ok(),
             Self::CommandRunner => validated_command_runner_path().is_ok(),
-            Self::Feature(enabled) => enabled,
         }
     }
 
-    fn reason(self, features: &[&'static str]) -> String {
+    fn reason(self, _features: &[&'static str]) -> String {
         match self {
             Self::Always => "available in this build".to_owned(),
             Self::EndpointCheckedAtRun => "executor available; endpoint checked at run".to_owned(),
             Self::Unavailable => {
                 "reserved executor contract; not runnable in this build".to_owned()
             }
-            Self::FluxRunner => validated_flux_runner_path()
-                .map(|path| runner_available_reason(FLUX_RUNNER_ENV, &path))
-                .unwrap_or_else(|reason| reason),
             Self::CommandRunner => validated_command_runner_path()
                 .map(|path| runner_available_reason(COMMAND_RUNNER_ENV, &path))
                 .unwrap_or_else(|reason| reason),
-            Self::Feature(true) => {
-                let feature = features.first().copied().unwrap_or("required");
-                format!("feature {feature} is enabled")
-            }
-            Self::Feature(false) => {
-                let feature = features.first().copied().unwrap_or("required");
-                format!("build with --features {feature} to enable this executor")
-            }
         }
     }
-}
-
-pub(super) fn validated_flux_runner_path() -> Result<PathBuf, String> {
-    validate_executable_path(FLUX_RUNNER_ENV, env::var_os(FLUX_RUNNER_ENV))
 }
 
 pub(super) fn validated_command_runner_path() -> Result<PathBuf, String> {
@@ -203,8 +181,44 @@ pub(super) fn executor_by_id(id: &str) -> Option<&'static ExecutorDefinition> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_executable_path;
+    use super::{executor_registry, validate_executable_path};
     use std::ffi::OsString;
+
+    #[test]
+    fn removed_builtin_std_engines_remain_reserved_and_unavailable() {
+        let expected = [
+            "builtin.image.invert.v1",
+            "builtin.image.load.v1",
+            "builtin.image.save.v1",
+            "builtin.image.resize.v1",
+            "builtin.image.crop.v1",
+            "builtin.image.upscale.v1",
+            "builtin.mask.compose.v1",
+            "builtin.json.extract.v1",
+            "builtin.control.if.v1",
+            "builtin.control.switch.v1",
+            "builtin.control.merge.v1",
+            "builtin.control.split.v1",
+            "builtin.model.select.v1",
+            "builtin.model.lock.check.v1",
+            "builtin.llm.classify.v1",
+            "builtin.llm.structured_output.v1",
+            "builtin.llm.mock.v1",
+            "builtin.text.concat.v1",
+            "builtin.text.template.v1",
+            "builtin.text.regex.v1",
+        ];
+        let registry = executor_registry();
+
+        for id in expected {
+            let executor = registry
+                .iter()
+                .find(|executor| executor.id == id)
+                .unwrap_or_else(|| panic!("missing compatibility executor {id}"));
+            assert_eq!(executor.kind, "reserved", "{id}");
+            assert!(!executor.available, "{id}");
+        }
+    }
 
     #[test]
     fn executable_path_reports_missing_and_non_file_values() {

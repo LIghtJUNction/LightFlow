@@ -3,7 +3,9 @@ use std::fs;
 use super::{fixtures, temp_root, write_history_fixture};
 use serde_json::json;
 
-use super::super::{RunListOptions, get_run, list_runs, list_runs_with_options};
+use super::super::{
+    RunListOptions, RunPruneOptions, get_run, list_runs, list_runs_with_options, prune_runs,
+};
 
 #[test]
 fn get_run_rejects_path_traversal_selectors() -> Result<(), Box<dyn std::error::Error>> {
@@ -179,6 +181,89 @@ fn list_runs_infers_legacy_status_from_terminal_events() -> Result<(), Box<dyn s
             .expect("legacy failed")
             .status,
         "failed"
+    );
+
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn prune_runs_keeps_newest_and_deletes_only_with_apply() -> Result<(), Box<dyn std::error::Error>> {
+    let root = temp_root();
+    write_history_fixture(&root)?;
+    for (run_id, completed_at) in [("run-old", 4_u64), ("run-mid", 6), ("run-new", 8)] {
+        let dir = super::super::storage::run_dir(&root, run_id);
+        fs::create_dir_all(&dir)?;
+        fs::write(
+            dir.join("manifest.json"),
+            fixtures::json_bytes(&json!({
+                "kind": "workflow_run",
+                "run_id": run_id,
+                "status": "completed",
+                "started_at_ms": completed_at - 1,
+                "completed_at_ms": completed_at,
+                "stages": [{"workflow_id": "lightflow.other"}]
+            }))?,
+        )?;
+        fs::write(dir.join("execution.json"), "{}")?;
+        fs::write(dir.join("events.jsonl"), "")?;
+    }
+
+    // Dry run: reports the oldest runs beyond keep without deleting anything.
+    let report = prune_runs(
+        &root,
+        &RunPruneOptions {
+            keep: 2,
+            ..RunPruneOptions::default()
+        },
+    )?;
+    assert!(report.dry_run);
+    assert_eq!(report.total, 4);
+    assert_eq!(report.kept, 2);
+    assert_eq!(report.pruned, 2);
+    assert_eq!(report.pruned_run_ids, vec!["run-old", "run-test"]);
+    assert!(report.freed_bytes > 0);
+    assert!(super::super::storage::run_dir(&root, "run-old").exists());
+
+    // Status filter narrows the candidates before keep applies.
+    let filtered = prune_runs(
+        &root,
+        &RunPruneOptions {
+            keep: 0,
+            workflow_id: Some("lightflow.fixture".to_owned()),
+            ..RunPruneOptions::default()
+        },
+    )?;
+    assert_eq!(filtered.pruned_run_ids, vec!["run-test"]);
+
+    let invalid = prune_runs(
+        &root,
+        &RunPruneOptions {
+            status: Some("offline".to_owned()),
+            ..RunPruneOptions::default()
+        },
+    )
+    .expect_err("invalid status must be rejected");
+    assert!(invalid.to_string().contains("unsupported run status"));
+
+    // Apply: deletes the pruned directories and clears a dangling last pointer.
+    let applied = prune_runs(
+        &root,
+        &RunPruneOptions {
+            keep: 1,
+            apply: true,
+            ..RunPruneOptions::default()
+        },
+    )?;
+    assert!(!applied.dry_run);
+    assert_eq!(applied.pruned, 3);
+    assert!(super::super::storage::run_dir(&root, "run-new").exists());
+    assert!(!super::super::storage::run_dir(&root, "run-old").exists());
+    assert!(!super::super::storage::run_dir(&root, "run-test").exists());
+    assert!(
+        !super::super::storage::runs_root(&root)
+            .join("last")
+            .exists()
     );
 
     let _ = fs::remove_dir_all(root);

@@ -2,14 +2,13 @@ use super::normalize_existing_path;
 use crate::api::dsl::read_optional_workflow_source;
 use crate::api::util::validate_id_segment;
 use crate::api::{ApiError, ApiResult, WORKFLOW_DIR};
-use crate::workflow::WorkflowSpec;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item};
 
 pub(super) fn read_path_dependency_workflows(
-    workflows: &mut Vec<WorkflowSpec>,
+    workflows: &mut Vec<super::DiscoveredWorkflow>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
 ) -> ApiResult<()> {
@@ -37,7 +36,12 @@ pub(super) fn read_path_dependency_workflows(
                 workflow.category.get_or_insert_with(|| {
                     dependency_category(&dependency_dir).unwrap_or_else(|| "extensions".to_owned())
                 });
-                workflows.push(workflow);
+                let origin = super::read_workflow_origin(&manifest)?;
+                super::apply_runner_runtime(&mut workflow, &origin);
+                workflows.push(super::DiscoveredWorkflow {
+                    spec: workflow,
+                    origin,
+                });
             }
         }
     }

@@ -1,82 +1,102 @@
-//! Helpers for executable workflow crates.
+//! Helpers and the stable JSON-over-stdio contract for executable workflow crates.
 
 use crate::api::ApiService;
 use crate::workflow::{Runnable, WorkflowArtifact, WorkflowExecutionOptions, WorkflowSpec};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use std::env;
-use std::error::Error;
+use std::error::Error as StdError;
+use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-/// Stable wire value for package-owned command runners.
-pub const COMMAND_PROTOCOL: &str = "lightflow.command.v1";
+/// Result type used by executable workflow entrypoints.
+pub type RunnerResult<T> = Result<T, Box<dyn StdError>>;
 
-/// Bounded request size accepted from a package-owned command runner.
-pub const MAX_COMMAND_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+/// Protocol identifier exchanged by LightFlow and workflow runners.
+pub const PROTOCOL: &str = "lightflow.runner.v1";
 
-/// Validated request sent by the command executor to one package runner.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CommandRequest {
-    protocol: String,
-    workflow: CommandWorkflowIdentity,
+/// Identity of the workflow selected for one runner invocation.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowIdentity {
+    pub id: String,
+    pub version: String,
+}
+
+/// Request sent to a workflow runner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    pub protocol: String,
+    pub workflow: WorkflowIdentity,
     pub inputs: Map<String, Value>,
+    #[serde(default)]
+    pub models: BTreeMap<String, ModelBinding>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CommandWorkflowIdentity {
-    id: String,
-    version: String,
+/// One model requirement resolved from the project's lockfile by the host.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelBinding {
+    pub requirement_id: String,
+    pub variant_id: String,
+    pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_revision: Option<String>,
 }
 
-impl CommandRequest {
-    #[must_use]
-    pub fn new(
-        workflow_id: impl Into<String>,
-        workflow_version: impl Into<String>,
-        inputs: Map<String, Value>,
-    ) -> Self {
-        Self {
-            protocol: COMMAND_PROTOCOL.to_owned(),
-            workflow: CommandWorkflowIdentity {
-                id: workflow_id.into(),
-                version: workflow_version.into(),
-            },
-            inputs,
+impl Request {
+    /// Reject a request produced for another protocol revision.
+    pub fn validate_protocol(&self) -> Result<(), Error> {
+        if self.protocol == PROTOCOL {
+            Ok(())
+        } else {
+            Err(Error::Protocol(format!(
+                "expected {PROTOCOL}, got {}",
+                self.protocol
+            )))
         }
     }
 
-    /// Return the immutable workflow identity used by a generic dispatcher.
-    #[must_use]
-    pub fn workflow_identity(&self) -> (&str, &str) {
-        (&self.workflow.id, &self.workflow.version)
-    }
-
-    /// Check the protocol and exact workflow identity before package execution.
-    pub fn validate_for(&self, workflow_id: &str, workflow_version: &str) -> RunnerResult<()> {
-        self.validate_protocol()?;
-        if self.workflow.id != workflow_id || self.workflow.version != workflow_version {
-            return Err("LightFlow command request workflow identity mismatch".into());
+    /// Require the request to target the runner's own workflow identity.
+    pub fn validate_workflow(
+        &self,
+        expected_id: &str,
+        expected_version: &str,
+    ) -> Result<(), Error> {
+        if self.workflow.id != expected_id {
+            return Err(Error::Protocol(format!(
+                "expected workflow id {expected_id}, got {}",
+                self.workflow.id
+            )));
+        }
+        if self.workflow.version != expected_version {
+            return Err(Error::Protocol(format!(
+                "expected workflow version {expected_version}, got {}",
+                self.workflow.version
+            )));
         }
         Ok(())
     }
 
-    fn validate_protocol(&self) -> RunnerResult<()> {
-        if self.protocol == COMMAND_PROTOCOL {
-            Ok(())
-        } else {
-            Err("unsupported LightFlow command protocol".into())
-        }
+    /// Validate both the protocol revision and workflow identity.
+    pub fn validate_for(&self, expected_id: &str, expected_version: &str) -> Result<(), Error> {
+        self.validate_protocol()?;
+        self.validate_workflow(expected_id, expected_version)
     }
 }
 
-/// Response emitted by a package-owned command runner.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Successful response returned by a workflow runner.
+///
+/// `replay_fingerprint` must contain deterministic implementation identity
+/// such as an algorithm and crate version. Artifact paths are validated by the
+/// LightFlow host after the runner exits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Response {
     pub outputs: Map<String, Value>,
     #[serde(default)]
@@ -84,50 +104,71 @@ pub struct Response {
     pub replay_fingerprint: Map<String, Value>,
 }
 
-/// Explicit name for the command-runner response envelope.
-pub type CommandResponse = Response;
+/// Error produced while exchanging the runner protocol.
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+    Json(serde_json::Error),
+    Protocol(String),
+}
 
-/// Read and validate one bounded command request from any input stream.
-pub fn read_command_request(reader: &mut impl Read) -> RunnerResult<CommandRequest> {
-    let mut bytes = Vec::new();
-    reader
-        .take((MAX_COMMAND_REQUEST_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_COMMAND_REQUEST_BYTES {
-        return Err("LightFlow command request exceeds its protocol limit".into());
+impl fmt::Display for Error {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(formatter, "runner I/O failed: {error}"),
+            Self::Json(error) => write!(formatter, "runner JSON failed: {error}"),
+            Self::Protocol(message) => write!(formatter, "invalid runner request: {message}"),
+        }
     }
-    let request: CommandRequest = serde_json::from_slice(&bytes)?;
+}
+
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Json(error) => Some(error),
+            Self::Protocol(_) => None,
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
+/// Read and validate one execution request from stdin.
+pub fn read_request_from_stdin() -> Result<Request, Error> {
+    read_request(io::stdin().lock())
+}
+
+/// Read and validate one execution request from a reader.
+pub fn read_request(mut reader: impl Read) -> Result<Request, Error> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    let request: Request = serde_json::from_slice(&bytes)?;
     request.validate_protocol()?;
     Ok(request)
 }
 
-/// Serialize exactly one command response to any output stream.
-pub fn write_command_response(
-    writer: &mut impl Write,
-    response: &CommandResponse,
-) -> RunnerResult<()> {
-    serde_json::to_writer(&mut *writer, response)?;
+/// Write one execution response to stdout.
+pub fn write_response_to_stdout(response: &Response) -> Result<(), Error> {
+    write_response(io::stdout().lock(), response)
+}
+
+/// Write one execution response to a writer.
+pub fn write_response(mut writer: impl Write, response: &Response) -> Result<(), Error> {
+    serde_json::to_writer(&mut writer, response)?;
     writer.write_all(b"\n")?;
-    writer.flush()?;
     Ok(())
 }
-
-/// Read one package-owned command request from standard input.
-pub fn read_request_from_stdin() -> RunnerResult<CommandRequest> {
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    read_command_request(&mut input)
-}
-
-/// Write one package-owned command response to standard output.
-pub fn write_response_to_stdout(response: &CommandResponse) -> RunnerResult<()> {
-    let stdout = io::stdout();
-    let mut output = stdout.lock();
-    write_command_response(&mut output, response)
-}
-
-/// Result type used by executable workflow entrypoints.
-pub type RunnerResult<T> = Result<T, Box<dyn Error>>;
 
 /// Run one workflow spec from process arguments and print JSON execution output.
 ///

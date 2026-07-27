@@ -13,10 +13,7 @@ fn repository_text_to_image_declares_runtime_and_gguf_model()
 
     assert!(workflow.category.is_none());
     assert_eq!(workflow.runtimes[0].capability, "lightflow.image.generate");
-    assert_eq!(
-        workflow.runtimes[0].engine.as_deref(),
-        Some("builtin.preview.v1")
-    );
+    assert_eq!(workflow.runtimes[0].engine.as_deref(), Some("runner.v1"));
     assert_eq!(workflow.models[0].capability, "text-to-image");
     assert_eq!(workflow.models[0].variants[0].format, "gguf");
     let prompt = workflow

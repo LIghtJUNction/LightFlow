@@ -2,21 +2,70 @@ use super::dsl::{read_optional_workflow_source, read_workflow_source};
 use super::project_config::default_project_workflow_sources;
 use super::{ApiError, ApiResult, LEGACY_LIGHTFLOW_DIR, PROJECT_LIGHTFLOW_DIR, WORKFLOW_DIR};
 use crate::workflow::WorkflowSpec;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 mod cargo_dependencies;
+mod origin;
 mod path_dependencies;
 mod template_workspace;
 
+pub(super) use origin::{apply_runner_runtime, read_workflow_origin};
 pub(super) use template_workspace::ensure_workflow_save_workspace;
+
+#[derive(Debug, Clone)]
+pub(super) struct WorkflowOrigin {
+    pub(super) manifest_path: PathBuf,
+    pub(super) package_name: String,
+    pub(super) runner_bin: Option<String>,
+    pub(super) runner_features: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct DiscoveredWorkflow {
+    pub(super) spec: WorkflowSpec,
+    pub(super) origin: WorkflowOrigin,
+}
+
+#[derive(Default)]
+pub(super) struct WorkflowCatalog {
+    pub(super) specs: BTreeMap<String, WorkflowSpec>,
+    pub(super) origins: BTreeMap<String, WorkflowOrigin>,
+}
+
+pub(super) fn read_workflow_catalog(
+    root: &Path,
+    workflow_paths: &[PathBuf],
+) -> ApiResult<WorkflowCatalog> {
+    let mut catalog = WorkflowCatalog::default();
+    for discovered in read_workflow_sources(root, workflow_paths)? {
+        super::validation::validate_workflow_shape(&discovered.spec)?;
+        if let Some(existing) = catalog.origins.get(&discovered.spec.id) {
+            return Err(ApiError::InvalidRequest(format!(
+                "duplicate workflow id `{}` discovered from {} ({}) and {} ({})",
+                discovered.spec.id,
+                existing.manifest_path.display(),
+                existing.package_name,
+                discovered.origin.manifest_path.display(),
+                discovered.origin.package_name
+            )));
+        }
+        catalog
+            .origins
+            .insert(discovered.spec.id.clone(), discovered.origin);
+        catalog
+            .specs
+            .insert(discovered.spec.id.clone(), discovered.spec);
+    }
+    Ok(catalog)
+}
 
 pub(super) fn read_workflow_sources(
     root: &Path,
     workflow_paths: &[PathBuf],
-) -> ApiResult<Vec<WorkflowSpec>> {
+) -> ApiResult<Vec<DiscoveredWorkflow>> {
     let mut workflows = Vec::new();
     let mut manifests = BTreeSet::new();
     let mut visited_libs = BTreeSet::new();
@@ -72,7 +121,7 @@ pub(super) fn read_workflow_sources(
 
 fn read_project_workflow_collections(
     root: &Path,
-    workflows: &mut Vec<WorkflowSpec>,
+    workflows: &mut Vec<DiscoveredWorkflow>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
 ) -> ApiResult<()> {
@@ -120,7 +169,7 @@ fn read_project_workflow_collections(
 
 fn read_workflow_search_path(
     path: &Path,
-    workflows: &mut Vec<WorkflowSpec>,
+    workflows: &mut Vec<DiscoveredWorkflow>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
 ) -> ApiResult<()> {
@@ -167,7 +216,7 @@ fn project_workflow_collection(root: &Path) -> PathBuf {
 fn read_workflow_collection(
     collection: &Path,
     strict: bool,
-    workflows: &mut Vec<WorkflowSpec>,
+    workflows: &mut Vec<DiscoveredWorkflow>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
 ) -> ApiResult<()> {
@@ -207,7 +256,7 @@ fn read_one_workflow_crate(
     crate_dir: &Path,
     strict: bool,
     category: Option<&str>,
-    workflows: &mut Vec<WorkflowSpec>,
+    workflows: &mut Vec<DiscoveredWorkflow>,
     manifests: &mut BTreeSet<PathBuf>,
     visited_libs: &mut BTreeSet<PathBuf>,
 ) -> ApiResult<()> {
@@ -228,11 +277,22 @@ fn read_one_workflow_crate(
         if let Some(category) = category {
             workflow.category = Some(category.to_owned());
         }
-        workflows.push(workflow);
         let manifest = crate_dir.join("Cargo.toml");
-        if manifest.exists() {
-            manifests.insert(normalize_existing_path(&manifest)?);
+        if !manifest.exists() {
+            return Err(ApiError::InvalidRequest(format!(
+                "workflow {} has no Cargo manifest at {}",
+                workflow.id,
+                manifest.display()
+            )));
         }
+        let manifest = normalize_existing_path(&manifest)?;
+        let origin = read_workflow_origin(&manifest)?;
+        apply_runner_runtime(&mut workflow, &origin);
+        workflows.push(DiscoveredWorkflow {
+            spec: workflow,
+            origin,
+        });
+        manifests.insert(manifest);
     }
     Ok(())
 }

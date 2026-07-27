@@ -191,6 +191,29 @@ pub(super) fn validate_workflow_spec(
         }
     };
 
+    if !workflow.nodes.is_empty() {
+        for output in &workflow.outputs {
+            let producers = workflow
+                .nodes
+                .iter()
+                .filter(|node| {
+                    node_outputs(node, workflows)
+                        .iter()
+                        .any(|port| port.name == output.name)
+                })
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>();
+            if producers.len() > 1 {
+                issues.push(format!(
+                    "workflow {} output `{}` is produced by multiple nodes [{}]; each public output must have a unique producer port name",
+                    workflow.id,
+                    output.name,
+                    producers.join(", ")
+                ));
+            }
+        }
+    }
+
     WorkflowValidation {
         valid: issues.is_empty(),
         issues,

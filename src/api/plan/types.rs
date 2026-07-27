@@ -4,37 +4,18 @@ use serde::Serialize;
 pub(in crate::api) const IMAGE_GENERATE_CAPABILITY: &str = "lightflow.image.generate";
 pub(in crate::api) const IMAGE_EDIT_CAPABILITY: &str = "lightflow.image.edit";
 pub(in crate::api) const IMAGE_INPAINT_CAPABILITY: &str = "lightflow.image.inpaint";
-pub(in crate::api) const IMAGE_INVERT_CAPABILITY: &str = "lightflow.image.invert";
-pub(in crate::api) const IMAGE_LOAD_CAPABILITY: &str = "lightflow.image.load";
-pub(in crate::api) const IMAGE_SAVE_CAPABILITY: &str = "lightflow.image.save";
-pub(in crate::api) const IMAGE_RESIZE_CAPABILITY: &str = "lightflow.image.resize";
-pub(in crate::api) const IMAGE_CROP_CAPABILITY: &str = "lightflow.image.crop";
 pub(in crate::api) const LLM_GENERATE_CAPABILITY: &str = "lightflow.llm.generate";
-pub(in crate::api) const TEXT_CONCAT_CAPABILITY: &str = "lightflow.text.concat";
-pub(in crate::api) const TEXT_TEMPLATE_CAPABILITY: &str = "lightflow.text.template";
-pub(in crate::api) const TEXT_REGEX_CAPABILITY: &str = "lightflow.text.regex";
-pub(in crate::api) const JSON_EXTRACT_CAPABILITY: &str = "lightflow.json.extract";
-pub(in crate::api) const CONTROL_IF_CAPABILITY: &str = "lightflow.control.if";
-pub(in crate::api) const CONTROL_SWITCH_CAPABILITY: &str = "lightflow.control.switch";
-pub(in crate::api) const CONTROL_MERGE_CAPABILITY: &str = "lightflow.control.merge";
-pub(in crate::api) const CONTROL_SPLIT_CAPABILITY: &str = "lightflow.control.split";
-pub(in crate::api) const MODEL_SELECT_CAPABILITY: &str = "lightflow.model.select";
-pub(in crate::api) const MODEL_LOCK_CHECK_CAPABILITY: &str = "lightflow.model.lock.check";
-pub(in crate::api) const IMAGE_UPSCALE_CAPABILITY: &str = "lightflow.image.upscale";
-pub(in crate::api) const MASK_COMPOSE_CAPABILITY: &str = "lightflow.mask.compose";
-pub(in crate::api) const LLM_CLASSIFY_CAPABILITY: &str = "lightflow.llm.classify";
-pub(in crate::api) const LLM_STRUCTURED_OUTPUT_CAPABILITY: &str = "lightflow.llm.structured_output";
 pub(in crate::api) const COMFYUI_WORKFLOW_CAPABILITY: &str = "lightflow.comfyui.workflow";
 pub(in crate::api) const COMMAND_RUN_CAPABILITY: &str = "lightflow.command.run";
+pub(in crate::api) const RUNNER_CAPABILITY: &str = "lightflow.runner";
 pub(in crate::api) const PREVIEW_ENGINE: &str = "builtin.preview.v1";
 pub(in crate::api) const PREVIEW_EDIT_ENGINE: &str = "builtin.preview.edit.v1";
 pub(in crate::api) const PREVIEW_INPAINT_ENGINE: &str = "builtin.preview.inpaint.v1";
-pub(in crate::api) const INVERT_ENGINE: &str = "builtin.image.invert.v1";
-pub(in crate::api) const LLM_MOCK_ENGINE: &str = "builtin.llm.mock.v1";
 pub(in crate::api) const FLUX_NATIVE_ENGINE: &str = "diffusion-rs.native.v1";
 pub(in crate::api) const FLUX_EXTERNAL_ENGINE: &str = "flux2-klein.gguf.runner.v1";
 pub(in crate::api) const COMFYUI_API_ENGINE: &str = "comfyui.api.v1";
 pub(in crate::api) const COMMAND_ENGINE: &str = "process.command.v1";
+pub(in crate::api) const RUNNER_ENGINE: &str = "runner.v1";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(in crate::api) struct ExecutionPlan {
@@ -61,35 +42,13 @@ pub(in crate::api) struct ExecutionPlanNode {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(in crate::api) enum ExecutionRecipe {
     Passthrough,
+    Unavailable,
+    Runner,
     ExternalCommand,
     ComfyUiWorkflow,
     PreviewTextToImage,
-    FluxTextToImage,
-    FluxImageEdit,
-    FluxInpaint,
-    ImageInvert,
-    ImageLoad,
-    ImageSave,
-    ImageResize,
-    ImageCrop,
     PreviewImageEdit,
     PreviewInpaint,
-    RigLlmGenerate,
-    TextConcat,
-    TextTemplate,
-    TextRegex,
-    JsonExtract,
-    ControlIf,
-    ControlSwitch,
-    ControlMerge,
-    ControlSplit,
-    ModelSelect,
-    ModelLockCheck,
-    ImageUpscale,
-    MaskCompose,
-    BuiltinLlmGenerate,
-    LlmClassify,
-    LlmStructuredOutput,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

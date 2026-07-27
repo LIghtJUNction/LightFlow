@@ -26,8 +26,19 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
         }));
     }
 
-    let temp = unique_temp_root();
+    let temp_suffix = unique_temp_root()
+        .file_name()
+        .expect("temporary root has a file name")
+        .to_owned();
+    let relative_temp = Path::new(".lightflow")
+        .join("test-artifacts")
+        .join(temp_suffix);
+    let temp = root.join(&relative_temp);
     fs::create_dir_all(&temp)?;
+    let relative_source = relative_temp.join("source.png");
+    let relative_saved = relative_temp.join("saved.png");
+    let relative_resized = relative_temp.join("resized.png");
+    let relative_cropped = relative_temp.join("cropped.png");
     let source = temp.join("source.png");
     let saved = temp.join("saved.png");
     let resized = temp.join("resized.png");
@@ -43,9 +54,9 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
             "-i",
             "width=64",
             "-i",
-            "height=32",
+            "height=64",
             "--output",
-            source.to_str().unwrap(),
+            relative_source.to_str().unwrap(),
         ],
     )?;
     assert_eq!(png_dimensions(&source)?, (64, 64));
@@ -56,10 +67,13 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
             "run",
             "lightflow.image_load",
             "-i",
-            &format!("image_path={}", source.display()),
+            &format!("image_path={}", relative_source.display()),
         ],
     )?;
-    assert_eq!(loaded["outputs"]["image_path"], source.to_str().unwrap());
+    assert_eq!(
+        loaded["outputs"]["image_path"],
+        relative_source.to_str().unwrap()
+    );
     assert_eq!(loaded["artifacts"][0]["metadata"]["width"], 64);
 
     let save = lfw(
@@ -68,12 +82,15 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
             "run",
             "lightflow.image_save",
             "-i",
-            &format!("image_path={}", source.display()),
+            &format!("image_path={}", relative_source.display()),
             "-i",
-            &format!("output_path={}", saved.display()),
+            &format!("output_path={}", relative_saved.display()),
         ],
     )?;
-    assert_eq!(save["outputs"]["image_path"], saved.to_str().unwrap());
+    assert_eq!(
+        save["outputs"]["image_path"],
+        relative_saved.to_str().unwrap()
+    );
     assert_eq!(fs::read(&source)?, fs::read(&saved)?);
 
     let resize = lfw(
@@ -82,16 +99,19 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
             "run",
             "lightflow.image_resize",
             "-i",
-            &format!("image_path={}", source.display()),
+            &format!("image_path={}", relative_source.display()),
             "-i",
             "width=16",
             "-i",
             "height=8",
             "-i",
-            &format!("output_path={}", resized.display()),
+            &format!("output_path={}", relative_resized.display()),
         ],
     )?;
-    assert_eq!(resize["outputs"]["image_path"], resized.to_str().unwrap());
+    assert_eq!(
+        resize["outputs"]["image_path"],
+        relative_resized.to_str().unwrap()
+    );
     assert_eq!(png_dimensions(&resized)?, (16, 8));
 
     let crop = lfw(
@@ -100,7 +120,7 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
             "run",
             "lightflow.image_crop",
             "-i",
-            &format!("image_path={}", source.display()),
+            &format!("image_path={}", relative_source.display()),
             "-i",
             "x=4",
             "-i",
@@ -110,10 +130,13 @@ fn repository_standard_image_nodes_are_discoverable_and_runnable()
             "-i",
             "height=10",
             "-i",
-            &format!("output_path={}", cropped.display()),
+            &format!("output_path={}", relative_cropped.display()),
         ],
     )?;
-    assert_eq!(crop["outputs"]["image_path"], cropped.to_str().unwrap());
+    assert_eq!(
+        crop["outputs"]["image_path"],
+        relative_cropped.to_str().unwrap()
+    );
     assert_eq!(png_dimensions(&cropped)?, (20, 10));
 
     let _ = fs::remove_dir_all(temp);

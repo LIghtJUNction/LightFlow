@@ -50,7 +50,7 @@ use project::{
     parse_add_workflow_options, parse_init_options,
 };
 use publish::{parse_publish_options, publish_crate};
-use release::{parse_release_options, release_check};
+use release::manage_release;
 use run::{lfx_usage, parse_run_options, parse_run_options_for_command};
 use run_execution::execute_and_record_run_options;
 use runtime::{RuntimeConfig, ensure_lfw_shell_setup};
@@ -270,8 +270,7 @@ pub async fn run(args: Vec<String>) -> CliResult<()> {
             print_json(&publish_crate(Path::new("."), &options)?)?;
         }
         "release" => {
-            let options = parse_release_options(args)?;
-            print_json(&release_check(&service, &options)?)?;
+            print_json(&manage_release(&service, args)?)?;
         }
         "dev" | "development" => {
             print_json(&manage_development(&service, args)?)?;

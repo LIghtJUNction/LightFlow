@@ -57,6 +57,47 @@ async fn run_history_endpoints_return_runs_events_and_artifacts() {
 }
 
 #[tokio::test]
+async fn run_prune_endpoint_reports_then_deletes() {
+    let root = temp_root("prune");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("root");
+    crate::api::write_history_fixture(&root).expect("fixture");
+    let app = router(ApiService::new(&root));
+
+    let dry = request_json_post(&app, "/runs/prune", serde_json::json!({"keep": 0})).await;
+    assert_eq!(dry["status"], StatusCode::OK.as_u16());
+    assert_eq!(dry["body"]["dry_run"], true);
+    assert_eq!(
+        dry["body"]["pruned_run_ids"],
+        serde_json::json!(["run-test"])
+    );
+    let listed = request_json(&app, "/runs").await;
+    assert_eq!(listed["body"]["total"], 1);
+
+    let invalid = request_json_post(
+        &app,
+        "/runs/prune",
+        serde_json::json!({"status": "offline"}),
+    )
+    .await;
+    assert_eq!(invalid["status"], StatusCode::BAD_REQUEST.as_u16());
+
+    let applied = request_json_post(
+        &app,
+        "/runs/prune",
+        serde_json::json!({"keep": 0, "apply": true}),
+    )
+    .await;
+    assert_eq!(applied["status"], StatusCode::OK.as_u16());
+    assert_eq!(applied["body"]["dry_run"], false);
+    assert_eq!(applied["body"]["pruned"], 1);
+    let after = request_json(&app, "/runs").await;
+    assert_eq!(after["body"]["total"], 0);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
 async fn http_workflow_runs_are_recorded_in_history() {
     let root = temp_root("http-run-history");
     let _ = std::fs::remove_dir_all(&root);

@@ -1,10 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Machine-parsed git output must stay locale-independent, so every
+/// invocation pins the C locale before running.
+fn git_command(root: &Path) -> Command {
+    let mut command = Command::new("git");
+    command.env("LC_ALL", "C").args(["-C"]).arg(root);
+    command
+}
+
 pub(super) fn git_changed_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
-    let output = Command::new("git")
-        .args(["-C"])
-        .arg(root)
+    let output = git_command(root)
         .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
         .output()
         .map_err(|error| format!("git status failed: {error}"))?;
@@ -54,9 +60,7 @@ pub(super) fn git_full_head(root: &Path) -> Result<String, String> {
 }
 
 pub(super) fn parent_gitlink_full_head(root: &Path, path: &Path) -> Result<Option<String>, String> {
-    let output = Command::new("git")
-        .args(["-C"])
-        .arg(root)
+    let output = git_command(root)
         .args(["ls-files", "-s", "--"])
         .arg(path)
         .output()
@@ -84,9 +88,7 @@ pub(super) fn short_commit(commit: &str) -> String {
 }
 
 fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(["-C"])
-        .arg(root)
+    let output = git_command(root)
         .args(args)
         .output()
         .map_err(|error| format!("git command failed: {error}"))?;
