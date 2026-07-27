@@ -7,7 +7,7 @@ export default function HomePage() {
         <p className="language-kicker">LightFlow Docs</p>
         <h1>Choose your language</h1>
         <p>
-          LightFlow 0.1.4 builds source-controlled Rust workflows that Cargo can
+          LightFlow 0.2.0 builds source-controlled Rust workflows that Cargo can
           add, install, share, and publish.
         </p>
         <div className="language-actions">

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-27
+
 ### Workflow DSL
 
 - Expand `workflow!` so composite graphs can declare `name`, `description`,
@@ -44,6 +46,10 @@
   visual scene detection, bounded segment pacing, atomic output, source-media
   replay hashes, and colocated agent skills for planning, rendering, and
   one-shot automatic edits.
+- Add `lightflow.xry_privacy_redaction` as a pre-delivery workflow bound to
+  one frozen XRY task subject. Its canonical gateway returns a review-required
+  preview; `apply=true` requires the exact approved plan SHA-256 and an opaque
+  confirmation receipt.
 
 ### Fixed
 

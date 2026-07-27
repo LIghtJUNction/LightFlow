@@ -19,9 +19,9 @@ them. LightFlow provides the local loop around that source model: validate,
 run, inspect, patch, replay, and publish through shared CLI, HTTP, MCP, and
 editor-facing contracts.
 
-## LightFlow 0.1.4
+## LightFlow 0.2.0
 
-Version 0.1.4 uses flat workflow collections: `.lightflow/workflows/<crate>`
+Version 0.2.0 uses flat workflow collections: `.lightflow/workflows/<crate>`
 for project workflows, `workflows/<crate>` for workflow repositories, and
 `~/.lightflow/workflows/<crate>` for the default global home. Existing
 two-level collections can be converted safely with `lfw migrate [path]`.
