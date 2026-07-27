@@ -12,7 +12,10 @@ fn response(outputs: Map<String, Value>) -> CommandResponse {
     CommandResponse {
         outputs,
         artifacts: Vec::new(),
-        replay_fingerprint: json!({"runner": "test", "version": 1}),
+        replay_fingerprint: Map::from_iter([
+            ("runner".to_owned(), "test".into()),
+            ("version".to_owned(), 1.into()),
+        ]),
     }
 }
 
@@ -92,21 +95,12 @@ fn response_outputs_must_match_declared_types() {
 }
 
 #[test]
-fn response_requires_object_replay_fingerprint() {
-    let root = tempfile::tempdir().expect("tempdir");
-    let mut outputs = Map::new();
-    outputs.insert("result".to_owned(), "ok".into());
-    let response = CommandResponse {
-        outputs,
-        artifacts: Vec::new(),
-        replay_fingerprint: Value::Null,
-    };
-    let error = validate_response(root.path(), &workflow(), response).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("replay_fingerprint must be a JSON object")
-    );
+fn response_rejects_non_object_replay_fingerprint_during_decode() {
+    let error = serde_json::from_str::<CommandResponse>(
+        r#"{"outputs":{"result":"ok"},"artifacts":[],"replay_fingerprint":null}"#,
+    )
+    .expect_err("a replay fingerprint must be an object");
+    assert!(error.to_string().contains("invalid type"));
 }
 
 #[test]
@@ -120,8 +114,10 @@ fn executable_script(root: &Path, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let path = root.join("runner");
-    fs::write(&path, format!("#!/bin/sh\nset -eu\n{body}\n")).expect("write runner");
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).expect("chmod runner");
+    let staged = root.join(".runner.staged");
+    fs::write(&staged, format!("#!/bin/sh\nset -eu\n{body}\n")).expect("write staged runner");
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).expect("chmod staged runner");
+    fs::rename(&staged, &path).expect("publish runner atomically");
     path
 }
 

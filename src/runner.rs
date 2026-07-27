@@ -1,14 +1,130 @@
 //! Helpers for executable workflow crates.
 
 use crate::api::ApiService;
-use crate::workflow::{Runnable, WorkflowExecutionOptions, WorkflowSpec};
-use serde::Serialize;
+use crate::workflow::{Runnable, WorkflowArtifact, WorkflowExecutionOptions, WorkflowSpec};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::env;
 use std::error::Error;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+
+/// Stable wire value for package-owned command runners.
+pub const COMMAND_PROTOCOL: &str = "lightflow.command.v1";
+
+/// Bounded request size accepted from a package-owned command runner.
+pub const MAX_COMMAND_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+
+/// Validated request sent by the command executor to one package runner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandRequest {
+    protocol: String,
+    workflow: CommandWorkflowIdentity,
+    pub inputs: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommandWorkflowIdentity {
+    id: String,
+    version: String,
+}
+
+impl CommandRequest {
+    #[must_use]
+    pub fn new(
+        workflow_id: impl Into<String>,
+        workflow_version: impl Into<String>,
+        inputs: Map<String, Value>,
+    ) -> Self {
+        Self {
+            protocol: COMMAND_PROTOCOL.to_owned(),
+            workflow: CommandWorkflowIdentity {
+                id: workflow_id.into(),
+                version: workflow_version.into(),
+            },
+            inputs,
+        }
+    }
+
+    /// Return the immutable workflow identity used by a generic dispatcher.
+    #[must_use]
+    pub fn workflow_identity(&self) -> (&str, &str) {
+        (&self.workflow.id, &self.workflow.version)
+    }
+
+    /// Check the protocol and exact workflow identity before package execution.
+    pub fn validate_for(&self, workflow_id: &str, workflow_version: &str) -> RunnerResult<()> {
+        self.validate_protocol()?;
+        if self.workflow.id != workflow_id || self.workflow.version != workflow_version {
+            return Err("LightFlow command request workflow identity mismatch".into());
+        }
+        Ok(())
+    }
+
+    fn validate_protocol(&self) -> RunnerResult<()> {
+        if self.protocol == COMMAND_PROTOCOL {
+            Ok(())
+        } else {
+            Err("unsupported LightFlow command protocol".into())
+        }
+    }
+}
+
+/// Response emitted by a package-owned command runner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Response {
+    pub outputs: Map<String, Value>,
+    #[serde(default)]
+    pub artifacts: Vec<WorkflowArtifact>,
+    pub replay_fingerprint: Map<String, Value>,
+}
+
+/// Explicit name for the command-runner response envelope.
+pub type CommandResponse = Response;
+
+/// Read and validate one bounded command request from any input stream.
+pub fn read_command_request(reader: &mut impl Read) -> RunnerResult<CommandRequest> {
+    let mut bytes = Vec::new();
+    reader
+        .take((MAX_COMMAND_REQUEST_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_COMMAND_REQUEST_BYTES {
+        return Err("LightFlow command request exceeds its protocol limit".into());
+    }
+    let request: CommandRequest = serde_json::from_slice(&bytes)?;
+    request.validate_protocol()?;
+    Ok(request)
+}
+
+/// Serialize exactly one command response to any output stream.
+pub fn write_command_response(
+    writer: &mut impl Write,
+    response: &CommandResponse,
+) -> RunnerResult<()> {
+    serde_json::to_writer(&mut *writer, response)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Read one package-owned command request from standard input.
+pub fn read_request_from_stdin() -> RunnerResult<CommandRequest> {
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    read_command_request(&mut input)
+}
+
+/// Write one package-owned command response to standard output.
+pub fn write_response_to_stdout(response: &CommandResponse) -> RunnerResult<()> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    write_command_response(&mut output, response)
+}
 
 /// Result type used by executable workflow entrypoints.
 pub type RunnerResult<T> = Result<T, Box<dyn Error>>;

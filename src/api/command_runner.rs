@@ -1,8 +1,8 @@
 use crate::api::executors;
 use crate::api::plan::COMMAND_ENGINE;
 use crate::api::{ApiError, ApiResult};
+use crate::runner::{CommandRequest, CommandResponse};
 use crate::workflow::{WorkflowArtifact, WorkflowSpec};
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
@@ -11,7 +11,6 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const PROTOCOL: &str = "lightflow.command.v1";
 const TIMEOUT_ENV: &str = "LIGHTFLOW_COMMAND_TIMEOUT_MS";
 const DEFAULT_TIMEOUT_MS: u64 = 30 * 60 * 1_000;
 const MAX_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1_000;
@@ -24,27 +23,6 @@ pub(super) struct CommandExecution {
     pub(super) outputs: Map<String, Value>,
     pub(super) artifacts: Vec<WorkflowArtifact>,
     pub(super) replay_fingerprint: Option<Value>,
-}
-
-#[derive(Serialize)]
-struct CommandRequest<'a> {
-    protocol: &'static str,
-    workflow: WorkflowIdentity<'a>,
-    inputs: &'a Map<String, Value>,
-}
-
-#[derive(Serialize)]
-struct WorkflowIdentity<'a> {
-    id: &'a str,
-    version: &'a str,
-}
-
-#[derive(Deserialize)]
-struct CommandResponse {
-    outputs: Map<String, Value>,
-    #[serde(default)]
-    artifacts: Vec<WorkflowArtifact>,
-    replay_fingerprint: Value,
 }
 
 struct ProcessOutput {
@@ -71,14 +49,11 @@ fn execute_with_runner(
     runner: &Path,
     timeout: Duration,
 ) -> ApiResult<CommandExecution> {
-    let request = serde_json::to_vec(&CommandRequest {
-        protocol: PROTOCOL,
-        workflow: WorkflowIdentity {
-            id: &workflow.id,
-            version: &workflow.version,
-        },
-        inputs,
-    })
+    let request = serde_json::to_vec(&CommandRequest::new(
+        &workflow.id,
+        &workflow.version,
+        inputs.clone(),
+    ))
     .map_err(|error| {
         ApiError::InvalidRequest(format!("serialize external command request: {error}"))
     })?;
@@ -263,12 +238,6 @@ fn validate_response(
             )));
         }
     }
-    if !response.replay_fingerprint.is_object() {
-        return Err(ApiError::InvalidRequest(
-            "external command replay_fingerprint must be a JSON object".to_owned(),
-        ));
-    }
-
     validate_artifacts(root, &response.artifacts)?;
     Ok(CommandExecution {
         outputs: response.outputs,
