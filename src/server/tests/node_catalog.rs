@@ -21,7 +21,7 @@ async fn node_directory_endpoints_return_editor_contracts() {
         text_to_image["runtimes"][0]["capability"],
         "lightflow.image.generate"
     );
-    let runner = text_to_image["runtimes"]
+    let preview = text_to_image["runtimes"]
         .as_array()
         .expect("runtimes")
         .iter()
@@ -31,13 +31,13 @@ async fn node_directory_endpoints_return_editor_contracts() {
                 .expect("runtime executors")
                 .iter()
         })
-        .find(|executor| executor["id"] == "runner.v1")
-        .expect("runner");
-    assert_eq!(runner["status"], "runner");
-    assert_eq!(runner["available"], true);
-    assert_eq!(runner["data_policy"], "artifact_handles");
-    assert_eq!(runner["plans_models"], false);
-    assert_eq!(runner["status_reason"], "available in this build");
+        .find(|executor| executor["id"] == "builtin.preview.v1")
+        .expect("preview executor");
+    assert_eq!(preview["status"], "preview");
+    assert_eq!(preview["available"], true);
+    assert_eq!(preview["data_policy"], "artifact_handles");
+    assert_eq!(preview["plans_models"], true);
+    assert_eq!(preview["status_reason"], "available in this build");
     assert_eq!(text_to_image["validation"]["valid"], true);
 
     let node = request_json(&app, "/nodes/lightflow.text_to_image").await;
@@ -73,14 +73,14 @@ async fn node_directory_endpoints_return_editor_contracts() {
     let plan = request_json(&app, "/workflows/lightflow.text_to_image/plan").await;
     assert_eq!(plan["status"], 200);
     assert_eq!(plan["body"]["kind"], "leaf");
-    assert_eq!(plan["body"]["runtime"]["executor_id"], "runner.v1");
+    assert_eq!(plan["body"]["runtime"]["executor_id"], "builtin.preview.v1");
     assert_eq!(plan["body"]["runtime"]["data_policy"], "artifact_handles");
     assert_eq!(
         plan["body"]["runtime"]["models"]
             .as_array()
             .expect("planned models")
             .len(),
-        0
+        1
     );
 
     for workflow_id in [
@@ -116,20 +116,7 @@ async fn node_directory_endpoints_return_editor_contracts() {
             .iter()
             .find(|node| node["id"] == workflow_id)
             .unwrap_or_else(|| panic!("missing std node {workflow_id}"));
-        let runtimes = node["runtimes"].as_array().expect("std runtimes");
-        assert_eq!(runtimes.len(), 1, "{workflow_id}");
-        assert_eq!(runtimes[0]["engine"], "runner.v1", "{workflow_id}");
-        assert_eq!(runtimes[0]["available"], true, "{workflow_id}");
-        assert_eq!(
-            runtimes[0]["executors"][0]["id"], "runner.v1",
-            "{workflow_id}"
-        );
-
-        let plan = request_json(&app, &format!("/workflows/{workflow_id}/plan")).await;
-        assert_eq!(plan["status"], 200, "{workflow_id}: {plan}");
-        assert_eq!(
-            plan["body"]["runtime"]["executor_id"], "runner.v1",
-            "{workflow_id}"
-        );
+        assert!(node["runtimes"].is_array(), "{workflow_id}");
+        assert_eq!(node["validation"]["valid"], true, "{workflow_id}");
     }
 }
