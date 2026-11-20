@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout with workflow projects
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -51,7 +51,7 @@ jobs:
         working-directory: projects/lightflow-auto-editing
     steps:
       - name: Checkout with workflow projects
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -91,7 +91,7 @@ jobs:
       run:
         working-directory: projects/lightflow-rig
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
       - run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
@@ -107,7 +107,7 @@ jobs:
       run:
         working-directory: projects/lightflow-flux
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
       - run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
